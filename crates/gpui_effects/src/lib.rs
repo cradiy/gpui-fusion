@@ -52,6 +52,7 @@ mod particles;
 mod progressive_blur;
 mod ripple;
 mod sdf;
+mod spotlight;
 mod sticky;
 mod subtree_builtins;
 mod subtree_effect;
@@ -121,6 +122,7 @@ pub use particles::{
 pub use progressive_blur::{ProgressiveBlur, progressive_blur, progressive_blur_shader};
 pub use ripple::{MAX_RIPPLES, Ripple, RippleOptions, ripple_shader, subtree_ripples};
 pub use sdf::{MAX_SDF_SHAPES, SdfOptions, SdfScene, SdfShape, SdfTransform, sdf};
+pub use spotlight::{SpotlightOptions, spotlight, spotlight_shader};
 pub use sticky::{StickyShape, paint_sticky_shapes, sticky_shape_shader};
 pub use subtree_builtins::{
     SubtreeColorOptions, SubtreeWaveOptions, subtree_blur, subtree_blur_shader,

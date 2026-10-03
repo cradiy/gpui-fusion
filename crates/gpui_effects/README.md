@@ -6,6 +6,7 @@ pipeline and `gpui_effects` providing higher-level components and presets.
 
 ## Guides
 
+- [Spotlight](docs/spotlight.md): pointer-driven surface light and rounded-edge illumination.
 - [Frosted glass](docs/glass.md): strongly blurred panels and mergeable rounded surfaces.
 - [Timed text](docs/timed_text.md): arbitrary character/word timings, gradient
   reveal, grouped lift/scale emphasis, and playback-clock integration.
@@ -52,8 +53,6 @@ edges. The filter uses two spatially varying Gaussian passes and does not schedu
 animation. Animate the extent or radius with the application's animation clock
 when needed. Use `.into_effect().then(...)` to append other effects.
 
-Run `cargo run -p gpui_effects --example subtree_effect` for the comparison.
-
 ## Local deformation
 
 `subtree_deformation` applies a smooth local displacement to text, images and
@@ -68,143 +67,6 @@ and damping are configurable through `spring`.
 Use `EffectStage::deformation` to compose deformation with other subtree effects.
 Layout remains unchanged. Enable `.map_interaction(true)` to align child pointer
 targets with the deformation. Leave transparent space around the content for displaced edges.
-
-## Examples
-
-Run the frosted-glass example from the workspace root:
-
-```sh
-cargo run -p gpui_effects --example frosted_glass
-```
-
-Other examples in `examples/` demonstrate gradients, masked effects, motion
-layers, and page-flip effects.
-
-Run the timed-text example:
-
-```sh
-cargo run -p gpui_effects --example timed_text
-```
-
-Run the blurred-text example:
-
-```sh
-cargo run -p gpui_effects --example text_blur
-```
-
-Run the Bloom text and artwork comparison:
-
-```sh
-cargo run -p gpui_effects --example bloom
-```
-
-Run the two-content transition example:
-
-```sh
-cargo run -p gpui_effects --example subtree_transition
-```
-
-Run the history-feedback example:
-
-```sh
-cargo run -p gpui_effects --example feedback
-```
-
-Run the draggable motion-blur comparison:
-
-```sh
-cargo run -p gpui_effects --example motion_blur
-```
-
-Run the depth-map landscape example:
-
-```sh
-cargo run -p gpui_effects --example depth_parallax
-```
-
-Run the interactive water-ripple example:
-
-```sh
-cargo run -p gpui_effects --example ripple
-```
-
-Run the pointer-following lens example:
-
-```sh
-cargo run -p gpui_effects --example lens
-```
-
-Run the mapped button and slider example:
-
-```sh
-cargo run -p gpui_effects --example interaction_mapping
-```
-
-Run the interactive particle example:
-
-```sh
-cargo run -p gpui_effects --example particles
-```
-
-Run the text and artwork particle-emission example:
-
-```sh
-cargo run -p gpui_effects --example particle_mask
-```
-
-Run the reversible particle-transition example:
-
-```sh
-cargo run -p gpui_effects --example particle_transition
-```
-
-Run the displacement-map example:
-
-```sh
-cargo run -p gpui_effects --example displacement_map
-```
-
-Run the interactive fluid example:
-
-```sh
-cargo run -p gpui_effects --example fluid
-```
-
-Run the interactive shape-composition example:
-
-```sh
-cargo run -p gpui_effects --example sdf
-```
-
-Run the interactive foil-material example:
-
-```sh
-cargo run -p gpui_effects --example holographic
-```
-
-Run the draggable elastic-card example:
-
-```sh
-cargo run -p gpui_effects --example deformation
-```
-
-Run the text and icon contour-light comparison:
-
-```sh
-cargo run -p gpui_effects --example contour_glow
-```
-
-Run the pointer-lit relief comparison:
-
-```sh
-cargo run -p gpui_effects --example contour_relief
-```
-
-Run the pointer-lit contour-shadow example:
-
-```sh
-cargo run -p gpui_effects --example contour_shadow
-```
 
 ## License
 

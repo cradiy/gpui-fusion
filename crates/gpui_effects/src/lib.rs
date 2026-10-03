@@ -39,6 +39,7 @@ mod flip;
 mod fluid;
 mod glass;
 mod lens;
+mod light_sweep;
 mod liquid_glass;
 mod liquid_glass_content;
 mod masked_builtins;
@@ -96,6 +97,7 @@ pub use flip::{
 pub use fluid::{Fluid, FluidOptions, FluidSplat, fluid};
 pub use glass::{FrostedGlass, FrostedGlassAppearance, FrostedGlassShape};
 pub use lens::{LensOptions, lens_shader, subtree_lens};
+pub use light_sweep::{LightSweepOptions, light_sweep, light_sweep_shader};
 pub use liquid_glass::{
     LiquidGlass, LiquidGlassAppearance, LiquidGlassDeformation, liquid_glass_shader,
     paint_deformed_liquid_glass, paint_liquid_glass,

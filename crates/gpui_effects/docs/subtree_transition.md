@@ -31,6 +31,23 @@ Style each input separately to transition its background or decorations.
 - `WipeRight`, `WipeLeft`, `WipeDown` and `WipeUp` reveal the incoming input in the
   named direction. `edge_softness` controls the relative half-width of the soft
   edge, from 0.001 to 0.5; the default is 0.16.
+- `Dissolve` reveals the incoming input through a stable, smoothly varying noise
+  mask. `dissolve_scale` sets the largest noise cell size in logical pixels,
+  from 4 to 512; the default is 48. Smaller values create finer texture.
+  `edge_softness` controls the noise threshold's half-width. Lower values make
+  the textured boundary more distinct; higher values blend more gently.
+
+```rust,ignore
+let content = subtree_transition("dissolve", from, to)
+    .size_full()
+    .kind(TransitionKind::Dissolve)
+    .dissolve_scale(px(48.))
+    .edge_softness(0.06)
+    .progress(progress);
+```
+
+The dissolve pattern stays fixed in local pixel coordinates during playback.
+Reversing progress retraces the same mask without generating new noise.
 
 The compositor interpolates premultiplied colors and applies ancestor opacity
 once to the result. Transparent input regions remain transparent.
@@ -80,4 +97,5 @@ cargo run -p gpui_effects --example subtree_transition
 ```
 
 Switch presets, use Previous or Next to animate, pause playback, or scrub the
-progress bar to inspect intermediate frames.
+progress bar to inspect intermediate frames. In dissolve mode, choose Fine,
+Medium or Coarse to compare pattern sizes.

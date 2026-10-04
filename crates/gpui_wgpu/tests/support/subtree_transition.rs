@@ -57,6 +57,7 @@ pub(super) fn check(renderer: &mut WgpuOffscreenRenderer) -> anyhow::Result<()> 
             TransitionKind::CrossFade,
             TransitionKind::BlurFade,
             TransitionKind::WipeRight,
+            TransitionKind::Dissolve,
         ] {
             for (progress, color) in [(0., 0xff000080), (1., 0x0000ff40)] {
                 let mut expected = Scene::default();
@@ -166,6 +167,41 @@ pub(super) fn check(renderer: &mut WgpuOffscreenRenderer) -> anyhow::Result<()> 
         let right = pixel(48., 24.);
         assert_eq!(&wipe[left..left + 4], &to[left..left + 4]);
         assert_eq!(&wipe[right..right + 4], &from[right..right + 4]);
+
+        let dissolve = |progress, cell_size| {
+            let mut result = scene(TransitionKind::Dissolve, progress, 1.);
+            let uniforms = &mut result.subtree_layers[0].composite.uniforms;
+            uniforms.set_slot(0, [progress, 0., 0.03, 0.]);
+            uniforms.set_slot(2, [cell_size * scale, 0., 0., 0.]);
+            result
+        };
+        let middle = renderer.render_rgba(&dissolve(0.5, 12.))?;
+        let coarse = renderer.render_rgba(&dissolve(0.5, 24.))?;
+        assert_ne!(middle, coarse, "dissolve cell size must change the texture");
+        let later = renderer.render_rgba(&dissolve(0.8, 12.))?;
+        let earlier = renderer.render_rgba(&dissolve(0.2, 12.))?;
+        let repeated = renderer.render_rgba(&dissolve(0.5, 12.))?;
+        assert_eq!(
+            middle, repeated,
+            "reversing must reuse the same noise pattern"
+        );
+        let mut outgoing_pixels = 0;
+        let mut incoming_pixels = 0;
+        for y in 8..40 {
+            for x in 10..54 {
+                let p = pixel(x as f32, y as f32);
+                assert!(
+                    earlier[p + 2] <= middle[p + 2] + 1 && middle[p + 2] <= later[p + 2] + 1,
+                    "dissolve coverage must increase monotonically"
+                );
+                outgoing_pixels += usize::from(middle[p..p + 4] == from[p..p + 4]);
+                incoming_pixels += usize::from(middle[p..p + 4] == to[p..p + 4]);
+            }
+        }
+        assert!(
+            outgoing_pixels > 20 && incoming_pixels > 20,
+            "midpoint must contain both intact inputs, not a uniform crossfade"
+        );
     }
     Ok(())
 }

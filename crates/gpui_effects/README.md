@@ -16,7 +16,7 @@ pipeline and `gpui_effects` providing higher-level components and presets.
   reveal, grouped lift/scale emphasis, and playback-clock integration.
 - [Color flow](docs/color_flow.md): image-derived flowing light and brightness configuration.
 - [Subtree effects](docs/subtree_effect.md): blur, wave, color adjustment and Bloom for element subtrees.
-- [Subtree transitions](docs/subtree_transition.md): blur fades, crossfades and soft wipes between two UI subtrees.
+- [Subtree transitions](docs/subtree_transition.md): blur fades, crossfades, soft wipes and textured dissolves between two UI subtrees.
 - [History feedback](docs/feedback.md): persistent trails, time-based decay and playback controls.
 - [Motion blur](docs/motion_blur.md): velocity-driven directional blur for moving subtrees.
 - [Depth parallax](docs/depth_parallax.md): pointer-driven image depth with paired depth maps.

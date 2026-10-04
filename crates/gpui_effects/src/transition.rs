@@ -20,6 +20,8 @@ pub enum TransitionKind {
     WipeDown,
     /// Reveal incoming content from bottom to top through a soft edge.
     WipeUp,
+    /// Reveal incoming content through a stable, smoothly varying noise mask.
+    Dissolve,
 }
 
 /// Creates a transition between two independently laid-out element subtrees.
@@ -52,6 +54,7 @@ pub fn subtree_transition(
         kind: TransitionKind::default(),
         blur_radius: px(8.),
         edge_softness: 0.16,
+        dissolve_scale: px(48.),
         style: StyleRefinement::default(),
     }
 }
@@ -65,6 +68,7 @@ pub struct SubtreeTransition {
     kind: TransitionKind,
     blur_radius: Pixels,
     edge_softness: f32,
+    dissolve_scale: Pixels,
     style: StyleRefinement,
 }
 
@@ -97,12 +101,25 @@ impl SubtreeTransition {
     }
 
     /// Soft wipe edge width relative to the capture dimension, clamped to 0.001..=0.5.
+    /// For dissolve, this is the noise threshold's soft half-width.
     pub fn edge_softness(mut self, softness: f32) -> Self {
         self.edge_softness = if softness.is_finite() {
             softness.clamp(0.001, 0.5)
         } else {
             0.16
         };
+        self
+    }
+
+    /// Size of the dissolve pattern's largest cells in logical pixels, clamped to 4..=512.
+    /// Smaller cells create a finer texture. Non-finite values use the default of 48.
+    pub fn dissolve_scale(mut self, scale: Pixels) -> Self {
+        let scale = f32::from(scale);
+        self.dissolve_scale = px(if scale.is_finite() {
+            scale.clamp(4., 512.)
+        } else {
+            48.
+        });
         self
     }
 
@@ -120,11 +137,13 @@ impl SubtreeTransition {
 }
 
 /// Two-image transition shader. Slot 0: `[progress, blur_device_px, edge_softness, 0]`;
-/// slot 1: `[wipe_axis_x, wipe_axis_y, 0, 0]`.
+/// slot 1: `[wipe_axis_x, wipe_axis_y, 0, 0]`;
+/// slot 2: `[dissolve_cell_device_px, 0, 0, 0]`.
 pub fn transition_shader(kind: TransitionKind) -> EffectShader {
     let source = match kind {
         TransitionKind::BlurFade => include_str!("shaders/transition_blur.wgsl"),
         TransitionKind::CrossFade => include_str!("shaders/transition_crossfade.wgsl"),
+        TransitionKind::Dissolve => include_str!("shaders/transition_dissolve.wgsl"),
         _ => include_str!("shaders/transition_wipe.wgsl"),
     };
     EffectShader::wgsl_two_images(format!(
@@ -247,7 +266,16 @@ impl Element for TransitionContent {
                         0.,
                     ],
                 )
-                .with_slot(1, axis);
+                .with_slot(1, axis)
+                .with_slot(
+                    2,
+                    [
+                        f32::from(self.0.dissolve_scale) * window.raster_scale_factor(),
+                        0.,
+                        0.,
+                        0.,
+                    ],
+                );
             window.with_subtree_pair(
                 bounds,
                 transition_shader(self.0.kind),

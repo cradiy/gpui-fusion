@@ -12,6 +12,7 @@ struct Preview {
     playing: bool,
     last_frame: Instant,
     kind: TransitionKind,
+    dissolve_scale: Pixels,
     track: Rc<Cell<Bounds<Pixels>>>,
     dragging: bool,
     image: ImageSource,
@@ -24,13 +25,23 @@ impl Preview {
         label: &'static str,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let selected = match index {
+            3 => self.kind == TransitionKind::BlurFade,
+            4 => self.kind == TransitionKind::CrossFade,
+            5 => self.kind == TransitionKind::WipeRight,
+            6 => self.kind == TransitionKind::Dissolve,
+            7 => self.dissolve_scale == px(24.),
+            8 => self.dissolve_scale == px(48.),
+            9 => self.dissolve_scale == px(96.),
+            _ => false,
+        };
         div()
             .id(("control", index))
             .px_4()
             .py_2()
             .rounded_full()
             .cursor_pointer()
-            .bg(rgb(0x24364d))
+            .bg(rgb(if selected { 0x416480 } else { 0x24364d }))
             .hover(|s| s.bg(rgb(0x395776)))
             .child(label)
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -51,7 +62,12 @@ impl Preview {
                     }
                     3 => this.kind = TransitionKind::BlurFade,
                     4 => this.kind = TransitionKind::CrossFade,
-                    _ => this.kind = TransitionKind::WipeRight,
+                    5 => this.kind = TransitionKind::WipeRight,
+                    6 => this.kind = TransitionKind::Dissolve,
+                    7 => this.dissolve_scale = px(24.),
+                    8 => this.dissolve_scale = px(48.),
+                    9 => this.dissolve_scale = px(96.),
+                    _ => unreachable!(),
                 }
                 this.last_frame = Instant::now();
                 cx.notify();
@@ -142,7 +158,9 @@ impl Render for Preview {
         let progress = self.progress;
         let track = self.track.clone();
         div()
+            .id("preview")
             .size_full()
+            .overflow_y_scroll()
             .p_8()
             .bg(rgb(0x0c1422))
             .text_color(rgb(0xe9f2fc))
@@ -153,22 +171,27 @@ impl Render for Preview {
                 div()
                     .flex_shrink_0()
                     .flex()
+                    .flex_wrap()
+                    .gap_4()
                     .justify_between()
                     .items_center()
                     .child(div().text_size(px(28.)).child("Changing scenes"))
                     .child(
                         div()
                             .flex()
+                            .flex_wrap()
                             .gap_2()
                             .child(self.button(3, "Blur fade", cx))
                             .child(self.button(4, "Crossfade", cx))
-                            .child(self.button(5, "Soft wipe", cx)),
+                            .child(self.button(5, "Soft wipe", cx))
+                            .child(self.button(6, "Dissolve", cx)),
                     ),
             )
             .child(
                 div()
                     .flex_1()
-                    .min_h_0()
+                    .min_h(px(390.))
+                    .flex_shrink_0()
                     .flex()
                     .items_center()
                     .justify_center()
@@ -176,6 +199,8 @@ impl Render for Preview {
                         subtree_transition("scene", self.card(false), self.card(true))
                             .progress(progress)
                             .kind(self.kind)
+                            .dissolve_scale(self.dissolve_scale)
+                            .edge_softness(0.06)
                             .w_full()
                             .max_w(px(760.))
                             .h(px(390.)),
@@ -193,6 +218,8 @@ impl Render for Preview {
                     .child(
                         div()
                             .flex()
+                            .flex_wrap()
+                            .gap_2()
                             .items_center()
                             .justify_between()
                             .child(div().child(format!("Progress · {:.0}%", progress * 100.)))
@@ -209,6 +236,19 @@ impl Render for Preview {
                                     )),
                             ),
                     )
+                    .when(self.kind == TransitionKind::Dissolve, |controls| {
+                        controls.child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .items_center()
+                                .gap_2()
+                                .child(div().text_sm().text_color(rgb(0xa3b6c8)).child("Texture"))
+                                .child(self.button(7, "Fine", cx))
+                                .child(self.button(8, "Medium", cx))
+                                .child(self.button(9, "Coarse", cx)),
+                        )
+                    })
                     .child(
                         div()
                             .id("scrubber")
@@ -298,13 +338,15 @@ fn main() {
                 ))),
                 ..Default::default()
             },
-            |_, cx| {
+            |window, cx| {
+                window.set_window_title("Subtree transitions");
                 cx.new(|_| Preview {
                     progress: 0.,
                     target: 1.,
                     playing: false,
                     last_frame: Instant::now(),
-                    kind: TransitionKind::BlurFade,
+                    kind: TransitionKind::Dissolve,
+                    dissolve_scale: px(48.),
                     track: Rc::new(Cell::new(Bounds::default())),
                     dragging: false,
                     image: Arc::new(Image::from_bytes(

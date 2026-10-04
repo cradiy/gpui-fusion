@@ -163,6 +163,7 @@ mod tests {
             crate::transition_shader(crate::TransitionKind::BlurFade),
             crate::transition_shader(crate::TransitionKind::CrossFade),
             crate::transition_shader(crate::TransitionKind::WipeRight),
+            crate::transition_shader(crate::TransitionKind::Dissolve),
         ] {
             let source = gpui::compose_subtree_effect_wgsl(&shader);
             let module = naga::front::wgsl::parse_str(&source)

@@ -1,6 +1,7 @@
 use super::line_breaks::LineBreaks;
 use crate::{FontId, Pixels, SharedString, TextRun, TextSystem, px};
 use collections::HashMap;
+use itertools::Itertools as _;
 use std::{borrow::Cow, iter, sync::Arc};
 
 /// Determines whether to truncate text from the start or end.
@@ -38,172 +39,106 @@ impl LineWrapper {
     }
 
     /// Wrap a line of text to the given width with this wrapper's font and font size.
-    /// Pure-text fragments use Unicode line-break opportunities. Oversized words
+    /// Text fragments use Unicode line-break opportunities. Oversized words
     /// fall back to complete graphemes, including across adjacent text fragments.
+    /// Elements are indivisible and retain their supplied width and UTF-8 length.
     pub fn wrap_line<'a>(
         &'a mut self,
         fragments: &'a [LineFragment],
         wrap_width: Pixels,
     ) -> impl Iterator<Item = Boundary> + 'a {
-        if fragments
-            .iter()
-            .any(|fragment| matches!(fragment, LineFragment::Element { .. }))
-        {
-            return itertools::Either::Right(self.wrap_fragments(fragments, wrap_width));
-        }
+        let mut elements = Vec::new();
         let text = match fragments {
             [LineFragment::Text { text }] => Cow::Borrowed(*text),
-            _ => Cow::Owned(
-                fragments
-                    .iter()
-                    .filter_map(|fragment| match fragment {
-                        LineFragment::Text { text } => Some(*text),
-                        LineFragment::Element { .. } => None,
-                    })
-                    .collect::<String>(),
-            ),
+            _ => {
+                let mut text = String::new();
+                for fragment in fragments {
+                    match fragment {
+                        LineFragment::Text { text: fragment } => text.push_str(fragment),
+                        LineFragment::Element { width, len_utf8 } => {
+                            elements.push((text.len(), *width, *len_utf8));
+                            text.push('\u{fffc}');
+                        }
+                    }
+                }
+                Cow::Owned(text)
+            }
         };
-        let breaks = LineBreaks::new(&text);
+        let mut breaks = LineBreaks::new(&text);
+        if !elements.is_empty() {
+            // An object cannot join a neighboring combining mark or prepend character.
+            breaks.graphemes = breaks
+                .graphemes
+                .into_iter()
+                .merge(
+                    elements
+                        .iter()
+                        .flat_map(|(ix, _, _)| [*ix, ix + '\u{fffc}'.len_utf8()]),
+                )
+                .dedup()
+                .collect();
+        }
+        let mut element_ix = 0;
         let mut next = 0;
+        let mut source_ix = 0;
         let mut width = px(0.);
         let mut first_non_whitespace_ix = None;
         let mut indent = None;
         let mut candidate = None;
         let mut last_wrap_ix = 0;
-        itertools::Either::Left(iter::from_fn(move || {
+        iter::from_fn(move || {
             while next + 1 < breaks.graphemes.len() {
-                let ix = breaks.graphemes[next];
+                let text_ix = breaks.graphemes[next];
                 let end = breaks.graphemes[next + 1];
                 next += 1;
-                let grapheme = &text[ix..end];
+                let grapheme = &text[text_ix..end];
+                let ix = source_ix;
+                let next_element = element_ix;
+                let element = elements
+                    .get(element_ix)
+                    .copied()
+                    .filter(|(start, _, _)| *start == text_ix);
+                element_ix += usize::from(element.is_some());
+                source_ix += element.map_or(grapheme.len(), |(_, _, len)| len);
                 if grapheme.contains('\n') {
                     continue;
                 }
-                if breaks.can_wrap(ix) && first_non_whitespace_ix.is_some() {
-                    candidate = Some((ix, width));
+                if breaks.can_wrap(text_ix) && first_non_whitespace_ix.is_some() {
+                    candidate = Some((ix, width, next - 1, next_element));
                 }
                 if grapheme != " " && first_non_whitespace_ix.is_none() {
                     first_non_whitespace_ix = Some(ix);
                 }
-                let item_width: Pixels = grapheme.chars().map(|c| self.width_for_char(c)).sum();
+                let item_width: Pixels = element.map_or_else(
+                    || grapheme.chars().map(|c| self.width_for_char(c)).sum(),
+                    |(_, width, _)| width,
+                );
                 width += item_width;
                 if width > wrap_width && ix > last_wrap_ix {
                     if let (None, Some(first)) = (indent, first_non_whitespace_ix) {
                         indent = Some(Self::MAX_INDENT.min((first - last_wrap_ix) as u32));
                     }
-                    if let Some((candidate_ix, candidate_width)) =
-                        candidate.take().filter(|(ix, _)| *ix > last_wrap_ix)
+                    let indent_width = self.width_for_char(' ') * indent.unwrap_or(0) as f32;
+                    if let Some((candidate_ix, candidate_width, next_grapheme, next_element)) =
+                        candidate.take().filter(|(ix, ..)| *ix > last_wrap_ix)
                     {
                         last_wrap_ix = candidate_ix;
                         width -= candidate_width;
+                        if width + indent_width > wrap_width && candidate_ix < ix {
+                            // Revisit an oversized word from its new line's start.
+                            next = next_grapheme;
+                            element_ix = next_element;
+                            source_ix = candidate_ix;
+                            width = px(0.);
+                        }
                     } else {
                         last_wrap_ix = ix;
                         width = item_width;
                     }
-                    if let Some(indent) = indent {
-                        width += self.width_for_char(' ') * indent as f32;
-                    }
+                    width += indent_width;
                     return Some(Boundary::new(last_wrap_ix, indent.unwrap_or(0)));
                 }
             }
-            None
-        }))
-    }
-
-    fn wrap_fragments<'a>(
-        &'a mut self,
-        fragments: &'a [LineFragment],
-        wrap_width: Pixels,
-    ) -> impl Iterator<Item = Boundary> + 'a {
-        let mut width = px(0.);
-        let mut first_non_whitespace_ix = None;
-        let mut indent = None;
-        let mut last_candidate_ix = 0;
-        let mut last_candidate_width = px(0.);
-        let mut last_wrap_ix = 0;
-        let mut prev_c = '\0';
-        let mut index = 0;
-        let mut candidates = fragments
-            .iter()
-            .flat_map(move |fragment| fragment.wrap_boundary_candidates())
-            .peekable();
-        iter::from_fn(move || {
-            for candidate in candidates.by_ref() {
-                let ix = index;
-                index += candidate.len_utf8();
-                let mut new_prev_c = prev_c;
-                let item_width = match candidate {
-                    WrapBoundaryCandidate::Char { character: c } => {
-                        if c == '\n' {
-                            continue;
-                        }
-
-                        if Self::is_word_char(c) {
-                            if prev_c == ' ' && c != ' ' && first_non_whitespace_ix.is_some() {
-                                last_candidate_ix = ix;
-                                last_candidate_width = width;
-                            }
-                        } else {
-                            // CJK may not be space separated, e.g.: `Hello world你好世界`
-                            if c != ' ' && first_non_whitespace_ix.is_some() {
-                                last_candidate_ix = ix;
-                                last_candidate_width = width;
-                            }
-                        }
-
-                        if c != ' ' && first_non_whitespace_ix.is_none() {
-                            first_non_whitespace_ix = Some(ix);
-                        }
-
-                        new_prev_c = c;
-
-                        self.width_for_char(c)
-                    }
-                    WrapBoundaryCandidate::Element {
-                        width: element_width,
-                        ..
-                    } => {
-                        if prev_c == ' ' && first_non_whitespace_ix.is_some() {
-                            last_candidate_ix = ix;
-                            last_candidate_width = width;
-                        }
-
-                        if first_non_whitespace_ix.is_none() {
-                            first_non_whitespace_ix = Some(ix);
-                        }
-
-                        element_width
-                    }
-                };
-
-                width += item_width;
-                if width > wrap_width && ix > last_wrap_ix {
-                    if let (None, Some(first_non_whitespace_ix)) = (indent, first_non_whitespace_ix)
-                    {
-                        indent = Some(
-                            Self::MAX_INDENT.min((first_non_whitespace_ix - last_wrap_ix) as u32),
-                        );
-                    }
-
-                    if last_candidate_ix > 0 {
-                        last_wrap_ix = last_candidate_ix;
-                        width -= last_candidate_width;
-                        last_candidate_ix = 0;
-                    } else {
-                        last_wrap_ix = ix;
-                        width = item_width;
-                    }
-
-                    if let Some(indent) = indent {
-                        width += self.width_for_char(' ') * indent as f32;
-                    }
-
-                    return Some(Boundary::new(last_wrap_ix, indent.unwrap_or(0)));
-                }
-
-                prev_c = new_prev_c;
-            }
-
             None
         })
     }
@@ -512,44 +447,6 @@ impl LineWrapper {
         (text, Cow::Borrowed(runs))
     }
 
-    /// Any character in this list should be treated as a word character,
-    /// meaning it can be part of a word that should not be wrapped.
-    pub(crate) fn is_word_char(c: char) -> bool {
-        // ASCII alphanumeric characters, for English, numbers: `Hello123`, etc.
-        c.is_ascii_alphanumeric() ||
-        // Latin script in Unicode for French, German, Spanish, etc.
-        // Latin-1 Supplement
-        // https://en.wikipedia.org/wiki/Latin-1_Supplement
-        matches!(c, '\u{00C0}'..='\u{00FF}') ||
-        // Latin Extended-A
-        // https://en.wikipedia.org/wiki/Latin_Extended-A
-        matches!(c, '\u{0100}'..='\u{017F}') ||
-        // Latin Extended-B
-        // https://en.wikipedia.org/wiki/Latin_Extended-B
-        matches!(c, '\u{0180}'..='\u{024F}') ||
-        // Cyrillic for Russian, Ukrainian, etc.
-        // https://en.wikipedia.org/wiki/Cyrillic_script_in_Unicode
-        matches!(c, '\u{0400}'..='\u{04FF}') ||
-
-        // Vietnamese (https://vietunicode.sourceforge.net/charset/)
-        matches!(c, '\u{1E00}'..='\u{1EFF}') || // Latin Extended Additional
-        matches!(c, '\u{0300}'..='\u{036F}') || // Combining Diacritical Marks
-
-        // Bengali (https://en.wikipedia.org/wiki/Bengali_(Unicode_block))
-        matches!(c, '\u{0980}'..='\u{09FF}') ||
-
-        // Some other known special characters that should be treated as word characters,
-        // e.g. `a-b`, `var_name`, `I'm`/`won’t`, '@mention`, `#hashtag`, `100%`, `3.1415`,
-        // `2^3`, `a~b`, `a=1`, `Self::new`, etc. Trailing punctuation like `,`, `.`, `:`, `;`
-        // is included so it stays attached to the preceding word when wrapping.
-        matches!(c, '-' | '_' | '.' | '\'' | '’' | '‘' | '$' | '%' | '@' | '#' | '^' | '~' | ',' | '=' | ':' | ';') ||
-        // `⋯` character is special used in Zed, to keep this at the end of the line.
-        matches!(c, '⋯') ||
-
-        // Non-breaking glue characters
-        matches!(c, '\u{202F}' | '\u{00A0}' | '\u{2011}')
-    }
-
     #[inline(always)]
     fn width_for_char(&mut self, c: char) -> Pixels {
         if (c as u32) < 128 {
@@ -696,37 +593,6 @@ impl<'a> LineFragment<'a> {
     /// Creates a new non-text element with the given width and UTF-8 encoded length.
     pub fn element(width: Pixels, len_utf8: usize) -> Self {
         LineFragment::Element { width, len_utf8 }
-    }
-
-    fn wrap_boundary_candidates(&self) -> impl Iterator<Item = WrapBoundaryCandidate> {
-        let text = match self {
-            LineFragment::Text { text } => text,
-            LineFragment::Element { .. } => "\0",
-        };
-        text.chars().map(move |character| {
-            if let LineFragment::Element { width, len_utf8 } = self {
-                WrapBoundaryCandidate::Element {
-                    width: *width,
-                    len_utf8: *len_utf8,
-                }
-            } else {
-                WrapBoundaryCandidate::Char { character }
-            }
-        })
-    }
-}
-
-enum WrapBoundaryCandidate {
-    Char { character: char },
-    Element { width: Pixels, len_utf8: usize },
-}
-
-impl WrapBoundaryCandidate {
-    pub fn len_utf8(&self) -> usize {
-        match self {
-            WrapBoundaryCandidate::Char { character } => character.len_utf8(),
-            WrapBoundaryCandidate::Element { len_utf8: len, .. } => *len,
-        }
     }
 }
 
@@ -990,6 +856,60 @@ mod tests {
     }
 
     #[test]
+    fn inline_elements_preserve_unicode_boundaries_and_source_offsets() {
+        let mut wrapper = build_wrapper();
+        for (parts, fitting_prefix, expected) in [
+            (vec!["abcd的s"], "abcd的", vec![14]),
+            (vec!["abcd的ss"], "abcd的", vec![14]),
+            (vec!["你好，世界"], "你好", vec![10, 16]),
+            (vec!["a👩", "\u{200d}💻b"], "a", vec![8, 19]),
+            (vec!["ae", "\u{301}b"], "a", vec![7, 8, 11]),
+        ] {
+            let width: Pixels = fitting_prefix
+                .chars()
+                .map(|c| wrapper.width_for_char(c))
+                .sum();
+            let fragments: Vec<_> = [LineFragment::element(px(0.), 7)]
+                .into_iter()
+                .chain(parts.iter().map(|text| LineFragment::text(text)))
+                .collect();
+            let actual: Vec<_> = wrapper
+                .wrap_line(&fragments, width)
+                .map(|boundary| boundary.ix)
+                .collect();
+            assert_eq!(actual, expected, "{parts:?}");
+        }
+
+        let width = wrapper.width_for_char('a');
+        assert_eq!(
+            wrapper
+                .wrap_line(
+                    &[
+                        LineFragment::text("a"),
+                        LineFragment::element(width * 3., 17),
+                        LineFragment::text("b"),
+                        LineFragment::element(width, 5),
+                    ],
+                    width * 2.,
+                )
+                .collect::<Vec<_>>(),
+            vec![Boundary::new(1, 0), Boundary::new(18, 0)],
+        );
+        assert_eq!(
+            wrapper
+                .wrap_line(
+                    &[
+                        LineFragment::element(width * 2., 7),
+                        LineFragment::text("\u{301}bc"),
+                    ],
+                    width * 2.,
+                )
+                .collect::<Vec<_>>(),
+            vec![Boundary::new(7, 0), Boundary::new(9, 0)],
+        );
+    }
+
+    #[test]
     fn test_truncate_line_end() {
         let mut wrapper = build_wrapper();
 
@@ -1244,83 +1164,6 @@ mod tests {
         // Runs res: Run0 { string: abcd, len: 4, ... }, Run1 { string: efgh, len:
         // 4, ... }, Run2 { string: …, len: 3, ... }
         perform_test("abcdefgh…", &[4, 4, 4], &[4, 4, 3]);
-    }
-
-    #[test]
-    fn test_is_word_char() {
-        #[track_caller]
-        fn assert_word(word: &str) {
-            for c in word.chars() {
-                assert!(
-                    LineWrapper::is_word_char(c),
-                    "assertion failed for '{}' (unicode 0x{:x})",
-                    c,
-                    c as u32
-                );
-            }
-        }
-
-        #[track_caller]
-        fn assert_not_word(word: &str) {
-            let found = word.chars().any(|c| !LineWrapper::is_word_char(c));
-            assert!(found, "assertion failed for '{}'", word);
-        }
-
-        assert_word("Hello123");
-        assert_word("non-English");
-        assert_word("var_name");
-        assert_word("123456");
-        assert_word("3.1415");
-        assert_word("10^2");
-        assert_word("1~2");
-        assert_word("100%");
-        assert_word("@mention");
-        assert_word("#hashtag");
-        assert_word("$variable");
-        assert_word("a=1");
-        assert_word("Self::is_word_char");
-        assert_word("on;");
-        assert_word("more⋯");
-        assert_word("won’t");
-        assert_word("‘twas");
-
-        // Space
-        assert_not_word("foo bar");
-
-        // URL case
-        assert_word("github.com");
-        assert_not_word("zed-industries/zed");
-        assert_not_word("zed-industries\\zed");
-        assert_not_word("a=1&b=2");
-        assert_not_word("foo?b=2");
-
-        // Latin-1 Supplement
-        assert_word("ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏ");
-        // Latin Extended-A
-        assert_word("ĀāĂăĄąĆćĈĉĊċČčĎď");
-        // Latin Extended-B
-        assert_word("ƀƁƂƃƄƅƆƇƈƉƊƋƌƍƎƏ");
-        // Cyrillic
-        assert_word("АБВГДЕЖЗИЙКЛМНОП");
-        // Vietnamese (https://github.com/zed-industries/zed/issues/23245)
-        assert_word("ThậmchíđếnkhithuachạychúngcònnhẫntâmgiếtnốtsốđôngtùchínhtrịởYênBáivàCaoBằng");
-        // Bengali
-        assert_word("গিয়েছিলেন");
-        assert_word("ছেলে");
-        assert_word("হচ্ছিল");
-
-        // non-word characters
-        assert_not_word("你好");
-        assert_not_word("안녕하세요");
-        assert_not_word("こんにちは");
-        assert_not_word("😀😁😂");
-        assert_not_word("()[]{}<>");
-
-        // Non-breaking ("Glue") characters, see https://www.unicode.org/reports/tr14/
-        // (https://github.com/zed-industries/zed/issues/59664)
-        assert_word("\u{202F}"); // NNBSP " "
-        assert_word("\u{00A0}"); // NBSP " "
-        assert_word("\u{2011}"); // NBH "‑"
     }
 
     // For compatibility with the test macro

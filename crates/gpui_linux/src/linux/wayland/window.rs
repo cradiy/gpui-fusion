@@ -450,6 +450,7 @@ impl WaylandLayerSurfaceState {
         layer.set_anchor(super::layer_shell::wayland_anchor(options.anchor));
         layer.set_keyboard_interactivity(super::layer_shell::wayland_keyboard_interactivity(
             options.keyboard_interactivity,
+            layer.version(),
         ));
         if let Some((top, right, bottom, left)) = options.margin {
             layer.set_margin(
@@ -2395,6 +2396,24 @@ impl PlatformWindow for WaylandWindow {
                 state.client.get_serial(SerialKind::MousePress),
                 edge.to_xdg(),
             )
+        }
+    }
+
+    fn set_keyboard_interactivity(&self, mode: gpui::layer_shell::KeyboardInteractivity) {
+        let mut state = self.borrow_mut();
+        let mapped = state.mapped;
+        let WaylandSurfaceState::LayerShell(layer) = &mut state.surface_state else {
+            return;
+        };
+        layer.options.keyboard_interactivity = mode;
+        if mapped {
+            layer.layer_surface.set_keyboard_interactivity(
+                super::layer_shell::wayland_keyboard_interactivity(
+                    mode,
+                    layer.layer_surface.version(),
+                ),
+            );
+            state.surface.commit();
         }
     }
 

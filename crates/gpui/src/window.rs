@@ -1412,6 +1412,16 @@ impl Window {
         self.platform_window.set_input_region(region);
     }
 
+    /// Sets keyboard focus behavior for a Wayland layer-shell window.
+    ///
+    /// Applies immediately when mapped and persists across hiding and showing.
+    /// `OnDemand` requires layer-shell v4 and falls back to `None` on older
+    /// versions. The compositor determines actual focus. Other window kinds
+    /// and platforms ignore this request.
+    pub fn set_keyboard_interactivity(&self, mode: crate::layer_shell::KeyboardInteractivity) {
+        self.platform_window.set_keyboard_interactivity(mode);
+    }
+
     /// Return the `WindowBounds` to indicate that how a window should be opened
     /// after it has been closed
     pub fn window_bounds(&self) -> WindowBounds {

@@ -25,12 +25,17 @@ mod example {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use gpui::{
-        App, Bounds, Context, FontWeight, Size, Window, WindowBackgroundAppearance, WindowBounds,
-        WindowKind, WindowOptions, div, layer_shell::*, point, prelude::*, px, rems, rgba, white,
+        App, Bounds, Context, FocusHandle, FontWeight, Size, Window, WindowBackgroundAppearance,
+        WindowBounds, WindowKind, WindowOptions, div, layer_shell::*, point, prelude::*, px, rems,
+        rgba, white,
     };
     use gpui_platform::application;
 
-    struct LayerShellExample;
+    struct LayerShellExample {
+        mode: KeyboardInteractivity,
+        focus: FocusHandle,
+        keys: usize,
+    }
 
     impl LayerShellExample {
         fn new(cx: &mut Context<Self>) -> Self {
@@ -44,12 +49,16 @@ mod example {
             })
             .detach();
 
-            LayerShellExample
+            LayerShellExample {
+                mode: KeyboardInteractivity::None,
+                focus: cx.focus_handle(),
+                keys: 0,
+            }
         }
     }
 
     impl Render for LayerShellExample {
-        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -61,7 +70,14 @@ mod example {
 
             div()
                 .size_full()
+                .track_focus(&self.focus)
+                .on_key_down(cx.listener(|this, _, _, cx| {
+                    this.keys += 1;
+                    cx.notify();
+                }))
                 .flex()
+                .flex_col()
+                .gap_2()
                 .items_center()
                 .justify_center()
                 .text_size(rems(4.5))
@@ -70,6 +86,86 @@ mod example {
                 .bg(rgba(0x0000044))
                 .rounded_xl()
                 .child(format!("{:02}:{:02}:{:02}", hours, minutes, seconds))
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .text_size(px(14.))
+                        .children(
+                            [
+                                KeyboardInteractivity::None,
+                                KeyboardInteractivity::OnDemand,
+                                KeyboardInteractivity::Exclusive,
+                            ]
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, mode)| {
+                                div()
+                                    .id(("keyboard-mode", index))
+                                    .px_3()
+                                    .py_1()
+                                    .rounded_md()
+                                    .bg(rgba(if self.mode == mode {
+                                        0x3974aaff
+                                    } else {
+                                        0x263344ff
+                                    }))
+                                    .cursor_pointer()
+                                    .child(format!("{mode:?}"))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.mode = mode;
+                                        this.focus.focus(window, cx);
+                                        window.set_keyboard_interactivity(mode);
+                                        cx.notify();
+                                    }))
+                            }),
+                        )
+                        .child(
+                            div()
+                                .id("remap")
+                                .px_3()
+                                .py_1()
+                                .rounded_md()
+                                .bg(rgba(0x263344ff))
+                                .cursor_pointer()
+                                .child("Hide for 1s")
+                                .on_click(cx.listener(|_, _, window, cx| {
+                                    if let Err(error) = window.set_mapped(false) {
+                                        eprintln!("Cannot hide layer surface: {error}");
+                                        return;
+                                    }
+                                    cx.spawn_in(window, async move |_, cx| {
+                                        cx.background_executor()
+                                            .timer(Duration::from_secs(1))
+                                            .await;
+                                        if let Err(error) = cx
+                                            .update(|window, _| window.set_mapped(true))
+                                            .and_then(|result| result)
+                                        {
+                                            eprintln!("Cannot show layer surface: {error}");
+                                        }
+                                    })
+                                    .detach();
+                                })),
+                        )
+                        .child(
+                            div()
+                                .id("close")
+                                .px_3()
+                                .py_1()
+                                .rounded_md()
+                                .bg(rgba(0x263344ff))
+                                .cursor_pointer()
+                                .child("Close")
+                                .on_click(|_, window, _| window.remove_window()),
+                        ),
+                )
+                .child(div().text_size(px(14.)).child(format!(
+                    "Requested: {:?} · Focused: {} · Keys received: {}",
+                    self.mode,
+                    window.is_window_active(),
+                    self.keys
+                )))
         }
     }
 

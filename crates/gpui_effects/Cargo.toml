@@ -13,6 +13,7 @@ accesskit.workspace = true
 gpui.workspace = true
 image.workspace = true
 refineable.workspace = true
+scheduler.workspace = true
 uic_macros.workspace = true
 
 [lints]

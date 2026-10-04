@@ -6,6 +6,7 @@ pipeline and `gpui_effects` providing higher-level components and presets.
 
 ## Guides
 
+- [Layout transitions](docs/layout_transition.md): interruptible position and size changes with live child layout.
 - [Spotlight](docs/spotlight.md): pointer-driven surface light and rounded-edge illumination.
 - [Light sweep](docs/light_sweep.md): a soft animated highlight across a styled surface.
 - [Frosted glass](docs/glass.md): strongly blurred panels and mergeable rounded surfaces.

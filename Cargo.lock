@@ -2710,6 +2710,7 @@ dependencies = [
  "naga",
  "pollster 0.4.0",
  "refineable",
+ "scheduler",
  "smallvec",
  "uic-macros",
  "wgpu",

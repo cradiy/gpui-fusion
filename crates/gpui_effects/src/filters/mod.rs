@@ -2,6 +2,7 @@
 
 mod bloom;
 mod feedback;
+mod halftone;
 mod motion_blur;
 mod progressive_blur;
 mod subtree_builtins;
@@ -11,6 +12,7 @@ pub use bloom::{
     BloomOptions, bloom_blur_shader, bloom_composite_shader, bloom_extract_shader, subtree_bloom,
 };
 pub use feedback::{Feedback, FeedbackOptions, feedback_shader, subtree_feedback};
+pub use halftone::{HalftoneOptions, halftone_shader, subtree_halftone};
 pub use motion_blur::{MotionBlurOptions, motion_blur_shader, subtree_motion_blur};
 pub use progressive_blur::{ProgressiveBlur, progressive_blur, progressive_blur_shader};
 pub use subtree_builtins::{

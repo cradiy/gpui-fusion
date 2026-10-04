@@ -232,6 +232,21 @@ impl Window {
         result
     }
 
+    /// Paints a generated source inside an active subtree capture, using `bounds`
+    /// instead of ancestor clips. The composite still uses the original content mask.
+    /// Use for palettes or other source data that must remain complete when scrolled.
+    pub fn with_effect_source_bounds<R>(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        self.invalidator.debug_assert_paint();
+        let masks = std::mem::replace(&mut self.content_mask_stack, vec![ContentMask { bounds }]);
+        let result = f(self);
+        self.content_mask_stack = masks;
+        result
+    }
+
     /// Captures the primitives painted by `f` and composites them through an image shader.
     ///
     /// The shader samples straight-alpha colors with `sample_effect_image`.

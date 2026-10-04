@@ -24,6 +24,7 @@ pub mod timed_text_guide {}
 mod backdrop;
 mod bloom;
 mod border_glow;
+mod border_trail;
 mod builtins;
 mod color_flow;
 mod contour_glow;
@@ -69,6 +70,10 @@ pub use bloom::{
     BloomOptions, bloom_blur_shader, bloom_composite_shader, bloom_extract_shader, subtree_bloom,
 };
 pub use border_glow::{BorderGlowOptions, border_glow};
+pub use border_trail::{
+    BorderTrailMode, BorderTrailOptions, border_trail, border_trail_gradient_shader,
+    border_trail_shader,
+};
 pub use builtins::*;
 pub use color_flow::{
     ColorFlow, ColorFlowOptions, ColorFlowPalette, ColorFlowPaletteColor, color_flow,

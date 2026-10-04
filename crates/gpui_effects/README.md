@@ -6,6 +6,7 @@ pipeline and `gpui_effects` providing higher-level components and presets.
 
 ## Guides
 
+- [Surface grain](docs/grain.md): static monochrome or colored texture beneath surface content.
 - [Point gradient](docs/point_gradient.md): independently positioned colors with adjustable influence.
 - [Border trail](docs/border_trail.md): a traveling edge light with a fading tail.
 - [Layout transitions](docs/layout_transition.md): interruptible position and size changes with live child layout.

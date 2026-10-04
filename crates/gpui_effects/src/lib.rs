@@ -39,6 +39,7 @@ mod feedback;
 mod flip;
 mod fluid;
 mod glass;
+mod grain;
 mod layout_transition;
 mod lens;
 mod light_sweep;
@@ -103,6 +104,7 @@ pub use flip::{
 };
 pub use fluid::{Fluid, FluidOptions, FluidSplat, fluid};
 pub use glass::{FrostedGlass, FrostedGlassAppearance, FrostedGlassShape};
+pub use grain::{GrainOptions, grain_shader, surface_grain};
 pub use layout_transition::{LayoutTransition, layout_transition};
 pub use lens::{LensOptions, lens_shader, subtree_lens};
 pub use light_sweep::{LightSweepOptions, light_sweep, light_sweep_shader};

@@ -57,7 +57,7 @@ where
 pub struct SubtreeEffect<E: Element> {
     pointer_transform: Option<gpui::PointerTransform>,
     map_interaction: bool,
-    images: crate::effect_stage::StageImages,
+    images: super::effect_stage::StageImages,
     element: E,
     shader: EffectShader,
     uniforms: EffectUniforms,

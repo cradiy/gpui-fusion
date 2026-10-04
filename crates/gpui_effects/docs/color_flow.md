@@ -80,7 +80,7 @@ stops or continues the animation without resetting its phase.
 Looser / Tighter adjusts cohesion; `PreviewSettings::cohesion_step` configures
 the button increment (default `0.1`).
 
-The [`color_flow` component](../src/color_flow.rs) accepts named
+The [`color_flow` component](../src/surface/color_flow.rs) accepts named
 `ColorFlowOptions`. Individual builder methods preserve the other options:
 
 ```rust

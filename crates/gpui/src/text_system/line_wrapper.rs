@@ -1,3 +1,4 @@
+use super::line_breaks::LineBreaks;
 use crate::{FontId, Pixels, SharedString, TextRun, TextSystem, px};
 use collections::HashMap;
 use std::{borrow::Cow, iter, sync::Arc};
@@ -37,7 +38,79 @@ impl LineWrapper {
     }
 
     /// Wrap a line of text to the given width with this wrapper's font and font size.
+    /// Pure-text fragments use Unicode line-break opportunities. Oversized words
+    /// fall back to complete graphemes, including across adjacent text fragments.
     pub fn wrap_line<'a>(
+        &'a mut self,
+        fragments: &'a [LineFragment],
+        wrap_width: Pixels,
+    ) -> impl Iterator<Item = Boundary> + 'a {
+        if fragments
+            .iter()
+            .any(|fragment| matches!(fragment, LineFragment::Element { .. }))
+        {
+            return itertools::Either::Right(self.wrap_fragments(fragments, wrap_width));
+        }
+        let text = match fragments {
+            [LineFragment::Text { text }] => Cow::Borrowed(*text),
+            _ => Cow::Owned(
+                fragments
+                    .iter()
+                    .filter_map(|fragment| match fragment {
+                        LineFragment::Text { text } => Some(*text),
+                        LineFragment::Element { .. } => None,
+                    })
+                    .collect::<String>(),
+            ),
+        };
+        let breaks = LineBreaks::new(&text);
+        let mut next = 0;
+        let mut width = px(0.);
+        let mut first_non_whitespace_ix = None;
+        let mut indent = None;
+        let mut candidate = None;
+        let mut last_wrap_ix = 0;
+        itertools::Either::Left(iter::from_fn(move || {
+            while next + 1 < breaks.graphemes.len() {
+                let ix = breaks.graphemes[next];
+                let end = breaks.graphemes[next + 1];
+                next += 1;
+                let grapheme = &text[ix..end];
+                if grapheme.contains('\n') {
+                    continue;
+                }
+                if breaks.can_wrap(ix) && first_non_whitespace_ix.is_some() {
+                    candidate = Some((ix, width));
+                }
+                if grapheme != " " && first_non_whitespace_ix.is_none() {
+                    first_non_whitespace_ix = Some(ix);
+                }
+                let item_width: Pixels = grapheme.chars().map(|c| self.width_for_char(c)).sum();
+                width += item_width;
+                if width > wrap_width && ix > last_wrap_ix {
+                    if let (None, Some(first)) = (indent, first_non_whitespace_ix) {
+                        indent = Some(Self::MAX_INDENT.min((first - last_wrap_ix) as u32));
+                    }
+                    if let Some((candidate_ix, candidate_width)) =
+                        candidate.take().filter(|(ix, _)| *ix > last_wrap_ix)
+                    {
+                        last_wrap_ix = candidate_ix;
+                        width -= candidate_width;
+                    } else {
+                        last_wrap_ix = ix;
+                        width = item_width;
+                    }
+                    if let Some(indent) = indent {
+                        width += self.width_for_char(' ') * indent as f32;
+                    }
+                    return Some(Boundary::new(last_wrap_ix, indent.unwrap_or(0)));
+                }
+            }
+            None
+        }))
+    }
+
+    fn wrap_fragments<'a>(
         &'a mut self,
         fragments: &'a [LineFragment],
         wrap_width: Pixels,
@@ -340,13 +413,15 @@ impl LineWrapper {
         let mut last_candidate_ix = 0usize;
         let mut last_candidate_width = px(0.);
         let mut last_wrap_ix = 0usize;
-        let mut prev_c = '\0';
         let mut indent: Option<u32> = None;
         let mut truncate_ix = 0usize;
+        let breaks = LineBreaks::new(&text);
 
-        for (ix, c) in text.char_indices() {
-            if c == '\n' {
-                if line >= max_lines - 1 && !text[ix + 1..].trim().is_empty() {
+        for range in breaks.graphemes.windows(2) {
+            let [ix, end] = [range[0], range[1]];
+            let grapheme = &text[ix..end];
+            if grapheme.contains('\n') {
+                if line >= max_lines - 1 && !text[end..].trim().is_empty() {
                     // Newline on the last allowed line with real content
                     // below. Truncate here.
                     let truncated = text[..truncate_ix]
@@ -368,26 +443,20 @@ impl LineWrapper {
                 first_non_whitespace_ix = None;
                 last_candidate_ix = 0;
                 last_candidate_width = px(0.);
-                last_wrap_ix = ix + 1;
-                prev_c = '\0';
+                last_wrap_ix = end;
                 indent = None;
-                truncate_ix = ix + 1;
+                truncate_ix = end;
                 continue;
             }
 
-            let char_width = self.width_for_char(c);
+            let char_width: Pixels = grapheme.chars().map(|c| self.width_for_char(c)).sum();
 
-            if Self::is_word_char(c) {
-                if prev_c == ' ' && first_non_whitespace_ix.is_some() {
-                    last_candidate_ix = ix;
-                    last_candidate_width = width;
-                }
-            } else if c != ' ' && first_non_whitespace_ix.is_some() {
+            if breaks.can_wrap(ix) && first_non_whitespace_ix.is_some() {
                 last_candidate_ix = ix;
                 last_candidate_width = width;
             }
 
-            if c != ' ' && first_non_whitespace_ix.is_none() {
+            if grapheme != " " && first_non_whitespace_ix.is_none() {
                 first_non_whitespace_ix = Some(ix);
             }
 
@@ -420,7 +489,7 @@ impl LineWrapper {
                 // On the last line: track the furthest point where the affix
                 // still fits, and stop as soon as the line overflows.
                 if width + affix_width <= wrap_width {
-                    truncate_ix = ix + c.len_utf8();
+                    truncate_ix = end;
                 }
 
                 if width > wrap_width {
@@ -437,8 +506,6 @@ impl LineWrapper {
                     return (result, Cow::Owned(runs));
                 }
             }
-
-            prev_c = c;
         }
 
         // Text fits within max_lines without truncation.
@@ -855,6 +922,70 @@ mod tests {
                 )
                 .collect::<Vec<_>>(),
             &[Boundary::new(12, 0),], // special chars above take up 3, 2 and 3 bytes, so boundary ends up at 12
+        );
+    }
+
+    #[test]
+    fn mixed_script_wrap_boundaries_stay_stable_during_edits() {
+        let mut wrapper = build_wrapper();
+        let text_system = crate::WindowTextSystem::new(wrapper.text_system.clone());
+        let edits = ["abcd的", "abcd的s", "abcd的ss", "abcd的s", "abcd的"].map(|text| {
+            (
+                text,
+                "abcd的",
+                if text.ends_with('s') {
+                    vec!["abcd的".len()]
+                } else {
+                    vec![]
+                },
+            )
+        });
+        for (text, fitting_prefix, expected) in edits.into_iter().chain([
+            ("你好，世界", "你好", vec![3, 9]),
+            ("a👩‍💻b", "a", vec![1, "a👩‍💻".len()]),
+            ("ae\u{301}b", "a", vec![1, "ae\u{301}".len()]),
+            ("hello world", "hello ", vec![6]),
+        ]) {
+            let width: Pixels = fitting_prefix
+                .chars()
+                .map(|c| wrapper.width_for_char(c))
+                .sum();
+            let actual: Vec<_> = wrapper
+                .wrap_line(&[LineFragment::text(text)], width)
+                .map(|b| b.ix)
+                .collect();
+            assert_eq!(actual, expected, "character wrapper: {text}");
+            let lines = text_system
+                .shape_text(
+                    text.into(),
+                    px(16.),
+                    &[TextRun {
+                        len: text.len(),
+                        font: font(".ZedMono"),
+                        ..Default::default()
+                    }],
+                    Some(width),
+                    None,
+                )
+                .unwrap();
+            let layout = &lines[0].layout;
+            let actual: Vec<_> = layout
+                .wrap_boundaries
+                .iter()
+                .map(|b| layout.runs()[b.run_ix].glyphs[b.glyph_ix].index)
+                .collect();
+            assert_eq!(actual, expected, "shaped wrapper: {text}");
+        }
+        let width = wrapper.width_for_char('a');
+        assert_eq!(
+            wrapper
+                .wrap_line(
+                    &[LineFragment::text("ae"), LineFragment::text("\u{301}b")],
+                    width
+                )
+                .map(|b| b.ix)
+                .collect::<Vec<_>>(),
+            vec![1, 4],
         );
     }
 

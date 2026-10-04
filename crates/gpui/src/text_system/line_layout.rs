@@ -9,7 +9,7 @@ use std::{
     sync::Arc,
 };
 
-use super::LineWrapper;
+use super::line_breaks::LineBreaks;
 
 /// A laid out and styled line of text
 #[derive(Default, Debug)]
@@ -253,6 +253,10 @@ impl LineLayout {
         max_lines: Option<usize>,
     ) -> SmallVec<[WrapBoundary; 1]> {
         let mut boundaries = SmallVec::new();
+        if self.width <= wrap_width {
+            return boundaries;
+        }
+        let breaks = LineBreaks::new(text);
         let mut first_non_whitespace_ix = None;
         let mut last_candidate_ix = None;
         let mut last_candidate_x = px(0.);
@@ -261,7 +265,6 @@ impl LineLayout {
             glyph_ix: 0,
         };
         let mut last_boundary_x = px(0.);
-        let mut prev_ch = '\0';
         let mut previous_cluster = None;
         let mut glyphs = self
             .runs
@@ -270,43 +273,41 @@ impl LineLayout {
             .flat_map(move |(run_ix, run)| {
                 run.glyphs.iter().enumerate().map(move |(glyph_ix, glyph)| {
                     let character = text[glyph.index..].chars().next().unwrap();
+                    let logical_boundary = if glyph.is_rtl {
+                        glyph.cluster_end
+                    } else {
+                        glyph.index
+                    };
                     (
                         WrapBoundary { run_ix, glyph_ix },
                         character,
                         glyph.position.x,
+                        logical_boundary,
                     )
                 })
             })
-            .filter(|(boundary, _, _)| {
+            .filter(|(boundary, _, _, logical)| {
                 let index = self.runs[boundary.run_ix].glyphs[boundary.glyph_ix].index;
                 previous_cluster.replace(index) != Some(index)
+                    && breaks.is_grapheme_boundary(*logical)
             })
             .peekable();
 
-        while let Some((boundary, ch, x)) = glyphs.next() {
+        while let Some((boundary, ch, x, logical)) = glyphs.next() {
             if ch == '\n' {
                 continue;
             }
 
-            // Here is very similar to `LineWrapper::wrap_line` to determine text wrapping,
-            // but there are some differences, so we have to duplicate the code here.
-            if LineWrapper::is_word_char(ch) {
-                if prev_ch == ' ' && ch != ' ' && first_non_whitespace_ix.is_some() {
-                    last_candidate_ix = Some(boundary);
-                    last_candidate_x = x;
-                }
-            } else {
-                if ch != ' ' && first_non_whitespace_ix.is_some() {
-                    last_candidate_ix = Some(boundary);
-                    last_candidate_x = x;
-                }
+            if breaks.can_wrap(logical) && first_non_whitespace_ix.is_some() {
+                last_candidate_ix = Some(boundary);
+                last_candidate_x = x;
             }
 
             if ch != ' ' && first_non_whitespace_ix.is_none() {
                 first_non_whitespace_ix = Some(boundary);
             }
 
-            let next_x = glyphs.peek().map_or(self.width, |(_, _, x)| *x);
+            let next_x = glyphs.peek().map_or(self.width, |(_, _, x, _)| *x);
             let width = next_x - last_boundary_x;
 
             if width > wrap_width && boundary > last_boundary {
@@ -317,7 +318,10 @@ impl LineLayout {
                     break;
                 }
 
-                if let Some(last_candidate_ix) = last_candidate_ix.take() {
+                if let Some(last_candidate_ix) = last_candidate_ix
+                    .take()
+                    .filter(|candidate| *candidate > last_boundary)
+                {
                     last_boundary = last_candidate_ix;
                     last_boundary_x = last_candidate_x;
                 } else {
@@ -326,7 +330,6 @@ impl LineLayout {
                 }
                 boundaries.push(last_boundary);
             }
-            prev_ch = ch;
         }
 
         boundaries

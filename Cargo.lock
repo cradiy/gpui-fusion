@@ -2600,6 +2600,7 @@ dependencies = [
  "taffy",
  "thiserror 2.0.17",
  "ttf-parser",
+ "unicode-linebreak",
  "unicode-segmentation",
  "url",
  "usvg",

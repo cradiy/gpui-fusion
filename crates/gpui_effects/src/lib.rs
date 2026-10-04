@@ -52,6 +52,7 @@ mod motion;
 mod motion_blur;
 mod particle_transition;
 mod particles;
+mod point_gradient;
 mod progressive_blur;
 mod ripple;
 mod sdf;
@@ -127,6 +128,9 @@ pub use motion_blur::{MotionBlurOptions, motion_blur_shader, subtree_motion_blur
 pub use particle_transition::{ParticleTransitionOptions, subtree_particle_transition};
 pub use particles::{
     ParticleMask, ParticlePhysics, ParticleSpawn, Particles, particles, subtree_particles,
+};
+pub use point_gradient::{
+    GradientPoint, point_gradient, point_gradient_shader, point_gradient_uniforms,
 };
 pub use progressive_blur::{ProgressiveBlur, progressive_blur, progressive_blur_shader};
 pub use ripple::{MAX_RIPPLES, Ripple, RippleOptions, ripple_shader, subtree_ripples};

@@ -28,6 +28,8 @@ mod displacement_map;
 mod feedback;
 #[path = "support/fluid.rs"]
 mod fluid;
+#[path = "support/gradient_map.rs"]
+mod gradient_map;
 #[path = "support/holographic.rs"]
 mod holographic;
 #[path = "support/interaction_mapping.rs"]
@@ -167,6 +169,7 @@ fn subtree_gpu_compositing_preserves_pixels_and_reuses_targets() -> anyhow::Resu
     deformation::check(&mut renderer)?;
     interaction_mapping::check(&mut renderer)?;
     subtree_transition::check(&mut renderer)?;
+    gradient_map::check(&mut renderer)?;
     motion_blur::check(&mut renderer)?;
     displacement_map::check(&mut renderer)?;
     contour_glow::check(&mut renderer)?;

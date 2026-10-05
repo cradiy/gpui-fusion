@@ -8,6 +8,7 @@ pipeline and `gpui_effects` providing higher-level components and presets.
 
 - [Surface grain](docs/grain.md): static monochrome or colored texture beneath surface content.
 - [Halftone](docs/halftone.md): monochrome dot screening with adjustable ink, paper and source blending.
+- [Gradient map](docs/gradient_map.md): editable multi-stop color ramps driven by source luminance.
 - [Point gradient](docs/point_gradient.md): independently positioned colors with adjustable influence.
 - [Border trail](docs/border_trail.md): a traveling edge light with a fading tail.
 - [Layout transitions](docs/layout_transition.md): interruptible position and size changes with live child layout.

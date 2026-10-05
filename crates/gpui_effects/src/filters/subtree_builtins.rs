@@ -152,6 +152,7 @@ mod tests {
             crate::depth_fog_shader(),
             crate::hdr_tone_map_shader(),
             crate::halftone_shader(),
+            crate::gradient_map_shader(),
             crate::feedback_shader(),
             crate::ripple_shader(),
             crate::lens_shader(),

@@ -4,6 +4,7 @@ mod flip;
 mod layout_transition;
 mod motion;
 mod particle_transition;
+mod presence;
 mod transform_group;
 mod transition;
 
@@ -20,5 +21,6 @@ pub use motion::{
     MotionPath, MotionPolicy,
 };
 pub use particle_transition::{ParticleTransitionOptions, subtree_particle_transition};
+pub use presence::{AnimatedPresence, PresenceFrame, PresencePhase, animated_presence};
 pub use transform_group::{TransformGroup, transform_group, transform_group_shader};
 pub use transition::{SubtreeTransition, TransitionKind, subtree_transition, transition_shader};

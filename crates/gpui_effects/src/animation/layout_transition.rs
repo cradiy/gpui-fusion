@@ -57,7 +57,7 @@ impl LayoutTransition {
     }
 }
 
-struct LayoutState {
+pub(super) struct LayoutState {
     from: Bounds<Pixels>,
     target: Bounds<Pixels>,
     started: Instant,
@@ -65,6 +65,15 @@ struct LayoutState {
 }
 
 impl LayoutState {
+    pub(super) fn new(target: Bounds<Pixels>, duration: Duration, now: Instant) -> Self {
+        Self {
+            from: target,
+            target,
+            started: now,
+            duration,
+        }
+    }
+
     fn sample(&self, now: Instant) -> (Bounds<Pixels>, bool) {
         let elapsed = now.saturating_duration_since(self.started);
         if self.from == self.target || elapsed >= self.duration {
@@ -84,7 +93,7 @@ impl LayoutState {
         )
     }
 
-    fn update(
+    pub(super) fn update(
         &mut self,
         target: Bounds<Pixels>,
         duration: Duration,
@@ -162,12 +171,8 @@ impl Element for LayoutTransition {
         let now = cx.background_executor().now();
         let (bounds, moving) =
             window.with_element_state(id.unwrap(), |state: Option<LayoutState>, _| {
-                let mut state = state.unwrap_or(LayoutState {
-                    from: self.target,
-                    target: self.target,
-                    started: now,
-                    duration: self.duration,
-                });
+                let mut state =
+                    state.unwrap_or_else(|| LayoutState::new(self.target, self.duration, now));
                 let sampled = state.update(self.target, self.duration, self.enabled, now);
                 (sampled, state)
             });

@@ -10,6 +10,7 @@ pipeline and `gpui_effects` providing higher-level components and presets.
 - [Halftone](docs/halftone.md): monochrome dot screening with adjustable ink, paper and source blending.
 - [Gradient map](docs/gradient_map.md): editable multi-stop color ramps driven by source luminance.
 - [Chromatic aberration](docs/chromatic_aberration.md): radial or directional color separation for artwork.
+- [Pixelate](docs/pixelate.md): square-cell sampling with adjustable size and source blending.
 - [Point gradient](docs/point_gradient.md): independently positioned colors with adjustable influence.
 - [Border trail](docs/border_trail.md): a traveling edge light with a fading tail.
 - [Layout transitions](docs/layout_transition.md): interruptible position and size changes with live child layout.

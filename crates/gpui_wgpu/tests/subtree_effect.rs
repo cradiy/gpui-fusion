@@ -46,6 +46,8 @@ mod particles;
 mod path_morph;
 #[path = "support/path_motion.rs"]
 mod path_motion;
+#[path = "support/pixelate.rs"]
+mod pixelate;
 #[path = "support/sdf.rs"]
 mod sdf;
 #[path = "support/subtree_transition.rs"]
@@ -170,6 +172,7 @@ fn subtree_gpu_compositing_preserves_pixels_and_reuses_targets() -> anyhow::Resu
     interaction_mapping::check(&mut renderer)?;
     subtree_transition::check(&mut renderer)?;
     gradient_map::check(&mut renderer)?;
+    pixelate::check(&mut renderer)?;
     motion_blur::check(&mut renderer)?;
     displacement_map::check(&mut renderer)?;
     contour_glow::check(&mut renderer)?;

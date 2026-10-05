@@ -6,6 +6,7 @@ mod feedback;
 mod gradient_map;
 mod halftone;
 mod motion_blur;
+mod pixelate;
 mod progressive_blur;
 mod subtree_builtins;
 mod texture;
@@ -23,6 +24,7 @@ pub use gradient_map::{
 };
 pub use halftone::{HalftoneOptions, halftone_shader, subtree_halftone};
 pub use motion_blur::{MotionBlurOptions, motion_blur_shader, subtree_motion_blur};
+pub use pixelate::{PixelateOptions, pixelate_shader, subtree_pixelate};
 pub use progressive_blur::{ProgressiveBlur, progressive_blur, progressive_blur_shader};
 pub use subtree_builtins::{
     SubtreeColorOptions, SubtreeWaveOptions, subtree_blur, subtree_blur_shader,

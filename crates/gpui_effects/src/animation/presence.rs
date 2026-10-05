@@ -72,16 +72,40 @@ impl AnimatedPresence {
     }
 }
 
-struct PresenceState {
+pub(super) struct PresenceState {
     from: f32,
     target: f32,
     started: Instant,
     duration: Duration,
+    delay: Duration,
 }
 
 impl PresenceState {
-    fn sample(&self, now: Instant) -> (f32, bool) {
-        let elapsed = now.saturating_duration_since(self.started).as_secs_f64();
+    pub(super) fn transition(
+        from: f32,
+        target: f32,
+        duration: Duration,
+        delay: Duration,
+        now: Instant,
+    ) -> Self {
+        Self {
+            from,
+            target,
+            started: now,
+            duration,
+            delay,
+        }
+    }
+
+    pub(super) fn sample(&self, now: Instant) -> (f32, bool) {
+        if self.from == self.target || self.duration.is_zero() {
+            return (self.target, false);
+        }
+        let elapsed = now.saturating_duration_since(self.started);
+        if elapsed < self.delay {
+            return (self.from, true);
+        }
+        let elapsed = elapsed.saturating_sub(self.delay).as_secs_f64();
         let travel = self.duration.as_secs_f64() * f64::from((self.target - self.from).abs());
         if elapsed >= travel {
             return (self.target, false);
@@ -106,6 +130,7 @@ impl PresenceState {
             self.from = current;
             self.target = target;
             self.started = now;
+            self.delay = Duration::ZERO;
         }
         self.duration = duration;
         self.sample(now)
@@ -146,6 +171,7 @@ impl Element for AnimatedPresence {
                     target,
                     started: now,
                     duration: self.duration,
+                    delay: Duration::ZERO,
                 });
                 let result = state.update(target, self.duration, self.enabled, now);
                 (result, state)

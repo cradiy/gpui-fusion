@@ -153,6 +153,7 @@ mod tests {
             crate::hdr_tone_map_shader(),
             crate::halftone_shader(),
             crate::gradient_map_shader(),
+            crate::chromatic_aberration_shader(),
             crate::feedback_shader(),
             crate::ripple_shader(),
             crate::lens_shader(),

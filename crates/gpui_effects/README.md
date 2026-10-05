@@ -15,6 +15,7 @@ pipeline and `gpui_effects` providing higher-level components and presets.
 - [Border trail](docs/border_trail.md): a traveling edge light with a fading tail.
 - [Layout transitions](docs/layout_transition.md): interruptible position and size changes with live child layout.
 - [Animated presence](docs/presence.md): reversible entrance and exit lifecycles for caller-styled content.
+- [Animated collapse](docs/collapse.md): measured-height expansion with surrounding layout movement.
 - [Spotlight](docs/spotlight.md): pointer-driven surface light and rounded-edge illumination.
 - [Light sweep](docs/light_sweep.md): a soft animated highlight across a styled surface.
 - [Frosted glass](docs/glass.md): strongly blurred panels and mergeable rounded surfaces.

@@ -20,6 +20,7 @@ pipeline and `gpui_effects` providing higher-level components and presets.
 - [Animated numbers](docs/animated_number.md): interruptible numeric transitions with caller-defined formatting.
 - [Selection indicator](docs/selection_indicator.md): a measured highlight or underline that follows keyed items.
 - [Animated switch](docs/animated_switch.md): value-driven content replacement with managed playback and outgoing lifetimes.
+- [Animated styles](docs/animated_style.md): interruptible paint-property transitions on a normal styled container.
 - [Spotlight](docs/spotlight.md): pointer-driven surface light and rounded-edge illumination.
 - [Light sweep](docs/light_sweep.md): a soft animated highlight across a styled surface.
 - [Frosted glass](docs/glass.md): strongly blurred panels and mergeable rounded surfaces.

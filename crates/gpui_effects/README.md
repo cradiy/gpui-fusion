@@ -14,6 +14,7 @@ pipeline and `gpui_effects` providing higher-level components and presets.
 - [Spotlight](docs/spotlight.md): pointer-driven surface light and rounded-edge illumination.
 - [Light sweep](docs/light_sweep.md): a soft animated highlight across a styled surface.
 - [Frosted glass](docs/glass.md): strongly blurred panels and mergeable rounded surfaces.
+- [Fluted glass](docs/fluted_glass.md): repeating rib refraction with crisp foreground content.
 - [Timed text](docs/timed_text.md): arbitrary character/word timings, gradient
   reveal, grouped lift/scale emphasis, and playback-clock integration.
 - [Color flow](docs/color_flow.md): image-derived flowing light and brightness configuration.

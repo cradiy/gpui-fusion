@@ -3,6 +3,7 @@
 mod backdrop;
 mod builtins;
 mod color_flow;
+mod fluted_glass;
 mod glass;
 mod grain;
 mod liquid_glass;
@@ -16,6 +17,7 @@ pub use color_flow::{
     ColorFlow, ColorFlowOptions, ColorFlowPalette, ColorFlowPaletteColor, color_flow,
     color_flow_shader,
 };
+pub use fluted_glass::{FlutedGlassOptions, fluted_glass, fluted_glass_shader};
 pub use glass::{FrostedGlass, FrostedGlassAppearance, FrostedGlassShape};
 pub use grain::{GrainOptions, grain_shader, surface_grain};
 pub use liquid_glass::{

@@ -448,26 +448,28 @@ mod tests {
     }
 
     #[test]
-    fn liquid_glass_shader_is_valid_wgsl() {
-        let source = gpui::compose_backdrop_shader_wgsl(&liquid_glass_shader());
-        let module = naga::front::wgsl::parse_str(&source)
-            .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)));
-        let info = naga::valid::Validator::new(
-            naga::valid::ValidationFlags::all(),
-            naga::valid::Capabilities::all(),
-        )
-        .validate(&module)
-        .expect("liquid glass shader must validate");
-        let (_, translation) = naga::back::msl::write_string(
-            &module,
-            &info,
-            &naga::back::msl::Options {
-                lang_version: (2, 0),
-                ..Default::default()
-            },
-            &naga::back::msl::PipelineOptions::default(),
-        )
-        .expect("liquid glass shader must translate to MSL");
-        assert!(translation.entry_point_names.iter().all(Result::is_ok));
+    fn glass_shaders_are_valid_wgsl() {
+        for shader in [liquid_glass_shader(), crate::fluted_glass_shader()] {
+            let source = gpui::compose_backdrop_shader_wgsl(&shader);
+            let module = naga::front::wgsl::parse_str(&source)
+                .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)));
+            let info = naga::valid::Validator::new(
+                naga::valid::ValidationFlags::all(),
+                naga::valid::Capabilities::all(),
+            )
+            .validate(&module)
+            .expect("glass shader must validate");
+            let (_, translation) = naga::back::msl::write_string(
+                &module,
+                &info,
+                &naga::back::msl::Options {
+                    lang_version: (2, 0),
+                    ..Default::default()
+                },
+                &naga::back::msl::PipelineOptions::default(),
+            )
+            .expect("glass shader must translate to MSL");
+            assert!(translation.entry_point_names.iter().all(Result::is_ok));
+        }
     }
 }

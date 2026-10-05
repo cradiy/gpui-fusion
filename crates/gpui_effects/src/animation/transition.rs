@@ -32,18 +32,27 @@ pub fn subtree_transition(
     from: impl IntoElement,
     to: impl IntoElement,
 ) -> SubtreeTransition {
+    subtree_transition_with_ids(id, ["from".into(), "to".into()], from, to)
+}
+
+pub(super) fn subtree_transition_with_ids(
+    id: impl Into<ElementId>,
+    [from_id, to_id]: [ElementId; 2],
+    from: impl IntoElement,
+    to: impl IntoElement,
+) -> SubtreeTransition {
     SubtreeTransition {
         id: id.into(),
         inputs: [
             div()
-                .id("from")
+                .id(from_id)
                 .absolute()
                 .inset_0()
                 .size_full()
                 .child(from)
                 .into_any_element(),
             div()
-                .id("to")
+                .id(to_id)
                 .absolute()
                 .inset_0()
                 .size_full()

@@ -9,6 +9,7 @@ mod particle_transition;
 mod presence;
 mod selection_indicator;
 mod stagger;
+mod switch;
 mod transform_group;
 mod transition;
 
@@ -30,5 +31,6 @@ pub use particle_transition::{ParticleTransitionOptions, subtree_particle_transi
 pub use presence::{AnimatedPresence, PresenceFrame, PresencePhase, animated_presence};
 pub use selection_indicator::{SelectionIndicator, selection_indicator};
 pub use stagger::{StaggerOrder, StaggeredPresence, staggered_presence};
+pub use switch::{AnimatedSwitch, animated_switch};
 pub use transform_group::{TransformGroup, transform_group, transform_group_shader};
 pub use transition::{SubtreeTransition, TransitionKind, subtree_transition, transition_shader};

@@ -115,7 +115,7 @@ impl PresenceState {
         (self.from + (self.target - self.from) * eased, true)
     }
 
-    fn update(
+    pub(super) fn update(
         &mut self,
         target: f32,
         duration: Duration,

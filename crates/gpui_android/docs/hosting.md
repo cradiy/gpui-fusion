@@ -185,10 +185,32 @@ Surrounding text queries are bounded around the selection and composition.
 Handlers that withhold `surrounding_text` expose no text snapshot to the IME.
 `EntityInputHandler::text_input_mode` describes the field as `SingleLine`,
 `Multiline`, or `Password`; custom editors default to `Multiline`. UIC maps its
-existing input modes automatically. Single-line and password fields request
-a Done key; multiline fields request a newline key. Done dispatches Enter
-(UIC emits `InputEvent::Submit`) and hides the keyboard if focus has not changed.
-UIC's multiline Enter inserts a newline. Unrecognized editor actions are rejected.
+existing input modes automatically. By default, single-line and password fields
+request Done, which dispatches Enter (UIC emits `InputEvent::Submit`); multiline
+fields request a newline key. UIC's multiline Enter inserts a newline.
+
+`EntityInputHandler::text_input_action` can override this with `Done`, `Go`,
+`Search`, `Send`, `Next`, or `Previous`. Handle the action in
+`perform_text_input_action`, returning true when accepted. Composition completes
+before dispatch. Actions inconsistent with the current connection are rejected;
+unhandled Done falls back to Enter, while other actions require a handler.
+Done hides the keyboard if the original field still has focus. Other actions
+leave keyboard visibility and navigation to the application.
+
+UIC configures actions on its input state:
+
+```rust
+TextInput::new(cx).input_action(gpui::TextInputAction::Next)
+```
+
+Subscribe to `InputActionEvent` to receive the configured action and committed
+text. It is separate from `InputEvent::Submit`; physical Enter bindings are
+unchanged. A Next/Previous handler selects and focuses the destination field
+and can call `window.show_soft_keyboard()`. Use
+`set_input_action(Some(action), cx)` to update the action or `None` to restore
+the default. Changing the effective action restarts the connection. Explicit
+multiline actions replace the soft keyboard's newline key; physical Enter
+still inserts a newline.
 
 `EntityInputHandler::text_input_purpose` requests a single-line keyboard layout:
 `Text`, `Email`, `Url`, `Phone`, or `Number { decimal, signed }`. UIC configures
@@ -277,6 +299,10 @@ In Details, type in the keyboard-layout field and use Change keyboard to cycle
 through email, URL, phone, digits, signed decimal, and plain text. Check that the
 layout changes and the field keeps its value; pasting text must remain possible
 with a numeric layout.
+Use Change action to cycle the layout field's action. Pressing its IME Next
+key focuses Reply; Previous focuses Name. Search, Go, Send, and Done report
+their action without inserting a newline. Reply's Send reports its character
+count and clears the field. Physical Enter in Reply must still insert a newline.
 
 Open details, focus its text field, and press Back: the keyboard closes first,
 then another Back returns to the main page. At the main page, Back uses Android's

@@ -8,7 +8,9 @@ use gpui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::{InputAppearance, InputEvent, InputMode, actions::*, element::TextElement};
+use super::{
+    InputActionEvent, InputAppearance, InputEvent, InputMode, actions::*, element::TextElement,
+};
 use crate::components::scrollbar::ScrollbarState;
 
 pub(super) struct TextLayout {
@@ -379,6 +381,7 @@ pub struct TextInput {
     pub(super) disabled: bool,
     pub(super) mode: InputMode,
     input_purpose: gpui::TextInputPurpose,
+    input_action: Option<gpui::TextInputAction>,
     pub(super) appearance: InputAppearance,
     pub(super) preferred_x: Option<Pixels>,
     pub(super) scroll_handle: ScrollHandle,
@@ -388,6 +391,7 @@ pub struct TextInput {
 }
 
 impl gpui::EventEmitter<InputEvent> for TextInput {}
+impl gpui::EventEmitter<InputActionEvent> for TextInput {}
 
 impl TextInput {
     pub fn new(cx: &mut Context<Self>) -> Self {
@@ -412,6 +416,7 @@ impl TextInput {
             disabled: false,
             mode: InputMode::Text,
             input_purpose: gpui::TextInputPurpose::default(),
+            input_action: None,
             appearance: InputAppearance::default(),
             preferred_x: None,
             scroll_handle: ScrollHandle::new(),
@@ -446,6 +451,25 @@ impl TextInput {
     pub fn input_purpose(mut self, purpose: gpui::TextInputPurpose) -> Self {
         self.input_purpose = purpose;
         self
+    }
+
+    /// Configures the software keyboard action, emitted as [`InputActionEvent`].
+    /// Physical Enter still submits single-line fields or inserts multiline newlines.
+    pub fn input_action(mut self, action: gpui::TextInputAction) -> Self {
+        self.input_action = Some(action);
+        self
+    }
+
+    /// Changes the software keyboard action; `None` restores the mode's default.
+    pub fn set_input_action(
+        &mut self,
+        action: Option<gpui::TextInputAction>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.input_action != action {
+            self.input_action = action;
+            cx.notify();
+        }
     }
 
     /// Updates the keyboard hint while retaining the field's value and selection.
@@ -1121,6 +1145,30 @@ impl TextInput {
 }
 
 impl EntityInputHandler for TextInput {
+    fn text_input_action(
+        &self,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<gpui::TextInputAction> {
+        self.input_action
+    }
+
+    fn perform_text_input_action(
+        &mut self,
+        action: gpui::TextInputAction,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.disabled || self.input_action != Some(action) {
+            return false;
+        }
+        cx.emit(InputActionEvent {
+            action,
+            text: self.content.clone(),
+        });
+        true
+    }
+
     fn text_input_purpose(&self, _: &mut Window, _: &mut Context<Self>) -> gpui::TextInputPurpose {
         self.input_purpose
     }

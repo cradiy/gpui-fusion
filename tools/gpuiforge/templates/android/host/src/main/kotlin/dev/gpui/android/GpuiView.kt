@@ -258,8 +258,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         if (state == null) return null
         info.inputType = state.inputType
         info.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or
-            (if (state.multiline) EditorInfo.IME_ACTION_NONE or EditorInfo.IME_FLAG_NO_ENTER_ACTION
-             else EditorInfo.IME_ACTION_DONE)
+            state.action or (if (state.action == EditorInfo.IME_ACTION_NONE) EditorInfo.IME_FLAG_NO_ENTER_ACTION else 0)
         info.initialSelStart = state.anchor
         info.initialSelEnd = state.head
         if (Build.VERSION.SDK_INT >= 30 && state.text != null) {

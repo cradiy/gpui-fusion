@@ -108,6 +108,15 @@ pub enum InputMode {
     Multiline,
 }
 
+/// A configured software keyboard action, separate from Enter's [`InputEvent::Submit`].
+#[derive(Clone, Debug)]
+pub struct InputActionEvent {
+    /// The configured software keyboard action.
+    pub action: gpui::TextInputAction,
+    /// The committed value at the time of the action.
+    pub text: SharedString,
+}
+
 #[derive(Clone, Debug)]
 pub enum InputEvent {
     /// The committed value changed.

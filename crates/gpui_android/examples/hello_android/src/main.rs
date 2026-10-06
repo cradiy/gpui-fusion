@@ -1,5 +1,14 @@
 use gpui::{prelude::*, *};
-use uic::components::input::{Input, InputEvent, InputMode, TextInput};
+use uic::components::input::{Input, InputActionEvent, InputEvent, InputMode, TextInput};
+
+const INPUT_ACTIONS: [TextInputAction; 6] = [
+    TextInputAction::Next,
+    TextInputAction::Search,
+    TextInputAction::Go,
+    TextInputAction::Send,
+    TextInputAction::Previous,
+    TextInputAction::Done,
+];
 
 const KEYBOARDS: [(&str, TextInputPurpose); 6] = [
     ("Email", TextInputPurpose::Email),
@@ -38,9 +47,18 @@ fn main() {
                 password_visible: false,
                 submissions: 0,
                 keyboard: 0,
+                input_action: 0,
+                action_status: "No keyboard action yet.".into(),
+                reply: cx.new(|cx| {
+                    TextInput::new(cx)
+                        .multiline()
+                        .input_action(TextInputAction::Send)
+                        .placeholder("Reply")
+                }),
                 keyboard_input: cx.new(|cx| {
                     TextInput::new(cx)
                         .input_purpose(KEYBOARDS[0].1)
+                        .input_action(INPUT_ACTIONS[0])
                         .placeholder("Try a keyboard layout")
                 }),
             });
@@ -48,6 +66,35 @@ fn main() {
                 cx.subscribe(&this.title, |this, _, event, cx| {
                     if matches!(event, InputEvent::Submit(_)) {
                         this.submissions += 1;
+                        cx.notify();
+                    }
+                })
+                .detach();
+                cx.subscribe_in(
+                    &this.keyboard_input,
+                    window,
+                    |this, _, event: &InputActionEvent, window, cx| {
+                        this.action_status = format!("Action: {:?}", event.action);
+                        match event.action {
+                            TextInputAction::Next => {
+                                window.focus(&this.reply.focus_handle(cx), cx);
+                                window.show_soft_keyboard();
+                            }
+                            TextInputAction::Previous => {
+                                window.focus(&this.title.focus_handle(cx), cx);
+                                window.show_soft_keyboard();
+                            }
+                            _ => {}
+                        }
+                        cx.notify();
+                    },
+                )
+                .detach();
+                cx.subscribe(&this.reply, |this, _, event: &InputActionEvent, cx| {
+                    if event.action == TextInputAction::Send {
+                        this.action_status =
+                            format!("Send: {} characters", event.text.chars().count());
+                        this.reply.update(cx, |input, cx| input.clear(cx));
                         cx.notify();
                     }
                 })
@@ -79,6 +126,9 @@ struct Counter {
     submissions: usize,
     keyboard: usize,
     keyboard_input: Entity<TextInput>,
+    input_action: usize,
+    action_status: String,
+    reply: Entity<TextInput>,
 }
 
 fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
@@ -108,7 +158,7 @@ impl Render for Counter {
                 .child(div().text_3xl().child("Details"))
                 .child("System Back returns to the main page. With the keyboard open, Back hides it first.")
                 .child(Input::new(&self.title).text_color(rgb(0x172033)))
-                .child(div().text_sm().child(format!("Keyboard: {}", KEYBOARDS[self.keyboard].0)))
+                .child(div().text_sm().child(format!("Keyboard: {} · Action: {:?}", KEYBOARDS[self.keyboard].0, INPUT_ACTIONS[self.input_action])))
                 .child(Input::new(&self.keyboard_input).text_color(rgb(0x172033)))
                 .child(button("keyboard-purpose", "Change keyboard").on_click(cx.listener(|this, _, window, cx| {
                     this.keyboard = (this.keyboard + 1) % KEYBOARDS.len();
@@ -119,6 +169,15 @@ impl Render for Counter {
                     window.show_soft_keyboard();
                     cx.notify();
                 })))
+                .child(button("keyboard-action", "Change action").on_click(cx.listener(|this, _, window, cx| {
+                    this.input_action = (this.input_action + 1) % INPUT_ACTIONS.len();
+                    this.keyboard_input.update(cx, |input, cx| input.set_input_action(Some(INPUT_ACTIONS[this.input_action]), cx));
+                    window.focus(&this.keyboard_input.focus_handle(cx), cx);
+                    window.show_soft_keyboard();
+                    cx.notify();
+                })))
+                .child(Input::new(&self.reply).rows(2).text_color(rgb(0x172033)))
+                .child(div().text_sm().child(self.action_status.clone()))
                 .child(div().flex().flex_wrap().gap_3()
                     .child(button("edit-name", "Edit name").on_click(cx.listener(|this, _, window, cx| {
                         window.focus(&this.title.focus_handle(cx), cx);

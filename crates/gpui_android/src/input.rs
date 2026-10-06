@@ -1,11 +1,12 @@
 use crate::window::AndroidWindow;
-use gpui::{PlatformInputHandler, TextInputMode, TextInputPurpose};
+use gpui::{PlatformInputHandler, TextInputAction, TextInputMode, TextInputPurpose};
 use std::ops::Range;
 
 pub(crate) struct InputState {
     pub epoch: u64,
     pub mode: TextInputMode,
     pub purpose: TextInputPurpose,
+    pub action: Option<TextInputAction>,
     pub text: Option<String>,
     pub offset: usize,
     pub anchor: usize,
@@ -41,12 +42,18 @@ impl AndroidWindow {
             TextInputPurpose::Text
         };
         let purpose_changed = self.input_purpose.replace(purpose) != purpose;
-        if (mode_changed || purpose_changed) && !focus_changed && focus.is_some() {
+        let action = handler
+            .as_mut()
+            .and_then(|handler| handler.text_input_action())
+            .or_else(|| (mode != TextInputMode::Multiline).then_some(TextInputAction::Done));
+        let action_changed = self.input_action.replace(action) != action;
+        if (mode_changed || purpose_changed || action_changed) && !focus_changed && focus.is_some()
+        {
             if let Some(handler) = handler.as_mut() {
                 handler.unmark_text();
             }
         }
-        if focus_changed || mode_changed || purpose_changed {
+        if focus_changed || mode_changed || purpose_changed || action_changed {
             self.input_epoch.set(self.input_epoch.get().wrapping_add(1));
         }
         let result = if focus.is_some() {
@@ -96,6 +103,7 @@ impl AndroidWindow {
                 epoch,
                 mode,
                 purpose: self.input_purpose.get(),
+                action: self.input_action.get(),
                 text,
                 offset,
                 anchor,
@@ -107,6 +115,20 @@ impl AndroidWindow {
             })
         })
         .flatten()
+    }
+
+    pub(crate) fn perform_input_action(&self, epoch: u64, code: i32) -> bool {
+        let handled = self
+            .with_input(|handler, current| {
+                let action = self.input_action.get();
+                if epoch != current || code != action_code(action) {
+                    return false;
+                }
+                action.is_some_and(|action| handler.perform_text_input_action(action))
+            })
+            .unwrap_or(false);
+        self.input_dirty.set(true);
+        handled
     }
 
     pub(crate) fn edit(&self, epoch: u64, operation: i32, text: &str, a: i32, b: i32) -> bool {
@@ -174,6 +196,18 @@ impl AndroidWindow {
             .unwrap_or(false);
         self.input_dirty.set(true);
         edited
+    }
+}
+
+pub(crate) fn action_code(action: Option<TextInputAction>) -> i32 {
+    match action {
+        None => 1,
+        Some(TextInputAction::Go) => 2,
+        Some(TextInputAction::Search) => 3,
+        Some(TextInputAction::Send) => 4,
+        Some(TextInputAction::Next) => 5,
+        Some(TextInputAction::Done) => 6,
+        Some(TextInputAction::Previous) => 7,
     }
 }
 

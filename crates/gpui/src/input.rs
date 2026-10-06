@@ -40,6 +40,23 @@ pub enum TextInputPurpose {
     },
 }
 
+/// An action requested by a software keyboard, independent of physical Enter keys.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TextInputAction {
+    /// Completes editing the current field.
+    Done,
+    /// Opens the destination described by the input.
+    Go,
+    /// Searches for the entered text.
+    Search,
+    /// Sends the entered content.
+    Send,
+    /// Moves to the next field as determined by the application.
+    Next,
+    /// Moves to the previous field as determined by the application.
+    Previous,
+}
+
 /// Implement this trait to allow views to handle textual input when implementing an editor, field, etc.
 ///
 /// Once your view implements this trait, you can use it to construct an [`ElementInputHandler<V>`].
@@ -47,6 +64,25 @@ pub enum TextInputPurpose {
 ///
 /// See [`InputHandler`] for details on how to implement each method.
 pub trait EntityInputHandler: 'static + Sized {
+    /// See [`InputHandler::text_input_action`].
+    fn text_input_action(
+        &self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<TextInputAction> {
+        None
+    }
+
+    /// See [`InputHandler::perform_text_input_action`].
+    fn perform_text_input_action(
+        &mut self,
+        _action: TextInputAction,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> bool {
+        false
+    }
+
     /// See [`InputHandler::text_input_mode`].
     fn text_input_mode(&self, _window: &mut Window, _cx: &mut Context<Self>) -> TextInputMode {
         TextInputMode::default()
@@ -201,6 +237,22 @@ impl<V: 'static> ElementInputHandler<V> {
 }
 
 impl<V: EntityInputHandler> InputHandler for ElementInputHandler<V> {
+    fn text_input_action(&mut self, window: &mut Window, cx: &mut App) -> Option<TextInputAction> {
+        self.view
+            .update(cx, |view, cx| view.text_input_action(window, cx))
+    }
+
+    fn perform_text_input_action(
+        &mut self,
+        action: TextInputAction,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> bool {
+        self.view.update(cx, |view, cx| {
+            view.perform_text_input_action(action, window, cx)
+        })
+    }
+
     fn text_input_mode(&mut self, window: &mut Window, cx: &mut App) -> TextInputMode {
         self.view
             .update(cx, |view, cx| view.text_input_mode(window, cx))

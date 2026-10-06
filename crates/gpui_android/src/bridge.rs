@@ -227,6 +227,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
             edit as *mut c_void,
         ),
         method("nativeKey", "(JLjava/lang/String;IZ)Z", key as *mut c_void),
+        method("nativeInputAction", "(JJI)Z", input_action as *mut c_void),
         method("nativeLifecycle", "(JI)V", lifecycle as *mut c_void),
         method("nativeFocus", "(JZ)V", focus as *mut c_void),
         method("nativeBack", "(J)Z", system_back as *mut c_void),
@@ -379,7 +380,7 @@ extern "system" fn input_state(mut env: JNIEnv, _: JClass, id: jlong) -> jobject
         Ok(env
             .new_object(
                 "dev/gpui/android/TextInputState",
-                "(JLjava/lang/String;IIIIIZZZIZZ)V",
+                "(JLjava/lang/String;IIIIIZZZIZZI)V",
                 &[
                     JValue::Long(state.epoch as i64),
                     JValue::Object(&text),
@@ -406,9 +407,25 @@ extern "system" fn input_state(mut env: JNIEnv, _: JClass, id: jlong) -> jobject
                         state.purpose,
                         gpui::TextInputPurpose::Number { signed: true, .. }
                     ) as u8),
+                    JValue::Int(crate::input::action_code(state.action)),
                 ],
             )?
             .into_raw())
+    })
+}
+
+extern "system" fn input_action(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    epoch: jlong,
+    action: jint,
+) -> jboolean {
+    call(&mut env, |_| {
+        Ok(session(id)?
+            .platform
+            .window
+            .perform_input_action(epoch as u64, action) as u8)
     })
 }
 

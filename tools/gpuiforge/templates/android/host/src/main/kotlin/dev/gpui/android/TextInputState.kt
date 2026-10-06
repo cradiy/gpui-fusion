@@ -16,6 +16,7 @@ internal class TextInputState(
     val purpose: Int,
     val decimal: Boolean,
     val signed: Boolean,
+    val action: Int,
 ) {
     val inputType: Int
         get() = when {

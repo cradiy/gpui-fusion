@@ -1799,6 +1799,21 @@ impl PlatformInputHandler {
             .unwrap_or_default()
     }
 
+    /// Returns the focused editor's software keyboard action override.
+    pub fn text_input_action(&mut self) -> Option<crate::TextInputAction> {
+        self.cx
+            .update(|window, cx| self.handler.text_input_action(window, cx))
+            .ok()
+            .flatten()
+    }
+
+    /// Dispatches an action requested by the software keyboard.
+    pub fn perform_text_input_action(&mut self, action: crate::TextInputAction) -> bool {
+        self.cx
+            .update(|window, cx| self.handler.perform_text_input_action(action, window, cx))
+            .unwrap_or(false)
+    }
+
     #[allow(dead_code)]
     pub fn query_prefers_ime_for_printable_keys(&mut self) -> bool {
         self.cx
@@ -1848,6 +1863,28 @@ impl PreeditSelection {
 ///
 /// <https://developer.apple.com/documentation/appkit/nstextinputclient>
 pub trait InputHandler: 'static {
+    /// Overrides the software keyboard action. `None` uses the editor mode's default.
+    /// Physical Enter key behavior is unaffected.
+    fn text_input_action(
+        &mut self,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> Option<crate::TextInputAction> {
+        None
+    }
+
+    /// Handles a software keyboard action after composition has completed.
+    /// Return true when handled. Backends may dispatch Enter for an unhandled Done.
+    /// Navigation and other actions require an explicit handler.
+    fn perform_text_input_action(
+        &mut self,
+        _action: crate::TextInputAction,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> bool {
+        false
+    }
+
     /// Get the range of the user's currently selected text, if any
     /// Corresponds to [selectedRange()](https://developer.apple.com/documentation/appkit/nstextinputclient/1438242-selectedrange)
     ///

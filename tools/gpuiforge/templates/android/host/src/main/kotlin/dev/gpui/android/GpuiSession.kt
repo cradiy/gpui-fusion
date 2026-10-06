@@ -69,6 +69,11 @@ class GpuiSession : AutoCloseable {
         checkThread()
         return !closed && id != 0L && nativeKey(id, name, modifiers, down)
     }
+
+    internal fun inputAction(epoch: Long, action: Int): Boolean {
+        checkThread()
+        return !closed && id != 0L && nativeInputAction(id, epoch, action)
+    }
     internal fun focus(focused: Boolean) {
         checkThread()
         if (!focused) keyboardRequestVersion++
@@ -237,6 +242,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeInputState(id: Long): TextInputState?
         @JvmStatic private external fun nativeEdit(id: Long, epoch: Long, operation: Int, text: String, a: Int, b: Int): Boolean
         @JvmStatic private external fun nativeKey(id: Long, name: String, modifiers: Int, down: Boolean): Boolean
+        @JvmStatic private external fun nativeInputAction(id: Long, epoch: Long, action: Int): Boolean
         @JvmStatic private external fun nativeLifecycle(id: Long, phase: Int)
         @JvmStatic private external fun nativeFocus(id: Long, active: Boolean)
         @JvmStatic private external fun nativeBack(id: Long): Boolean

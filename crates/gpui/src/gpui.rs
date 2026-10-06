@@ -54,6 +54,7 @@ pub mod profiler;
     test,
     target_os = "windows",
     target_os = "linux",
+    target_os = "android",
     target_family = "wasm",
     feature = "bench"
 ))]

@@ -1,3 +1,4 @@
+mod app_entry;
 mod bench;
 mod derive_action;
 mod derive_app_context;
@@ -14,6 +15,14 @@ mod derive_inspector_reflection;
 
 use proc_macro::TokenStream;
 use syn::{DeriveInput, Ident};
+
+/// Marks a synchronous `main` function as a GPUI application entry point.
+/// On Android, generates the host library loader that invokes it for each session.
+/// Other platforms use the function as their ordinary executable entry point.
+#[proc_macro_attribute]
+pub fn main(args: TokenStream, input: TokenStream) -> TokenStream {
+    app_entry::main(args, input)
+}
 
 /// `Action` derive macro - see the trait documentation for details.
 #[proc_macro_derive(Action, attributes(action))]

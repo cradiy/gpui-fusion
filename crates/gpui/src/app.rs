@@ -146,7 +146,7 @@ impl Drop for AppRefMut<'_> {
 /// You won't interact with this type much outside of initial configuration and startup.
 pub struct Application(Rc<AppCell>);
 
-/// A strong handle to an [`Application`] started with [`Application::run_embedded`].
+/// A strong handle that keeps an [`Application`] alive for an external event loop.
 ///
 /// Dropping this handle releases the app, so an embedder must hold it for as long as the
 /// app should run. While held, it is the embedder's entry point back into GPUI each time
@@ -231,10 +231,15 @@ impl Application {
     {
         let this = self.0.clone();
         let platform = self.0.borrow().platform.clone();
-        platform.run(Box::new(move || {
-            let cx = &mut *this.borrow_mut();
-            on_finish_launching(cx);
-        }));
+        platform.run_app(
+            ApplicationHandle {
+                app: self.0.clone(),
+            },
+            Box::new(move || {
+                let cx = &mut *this.borrow_mut();
+                on_finish_launching(cx);
+            }),
+        );
         // The browser owns the event loop. Retain the app and its callbacks for
         // the page lifetime; embedders with explicit teardown use run_embedded.
         #[cfg(target_family = "wasm")]

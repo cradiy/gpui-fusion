@@ -2,10 +2,14 @@
 //! `current_platform` constructor so consumers don't need `#[cfg]` gating.
 
 pub use gpui::Platform;
+#[cfg(target_os = "android")]
+#[doc(hidden)]
+pub use gpui_android::android_entry as __android_entry;
 #[cfg(all(any(target_os = "linux", target_os = "freebsd"), feature = "wayland"))]
 pub use gpui_linux::{
     WaylandConnection, WaylandSurfaceRoleFactory, wayland_platform_with_external_surface_role,
 };
+pub use gpui_macros::main;
 
 use std::rc::Rc;
 
@@ -38,6 +42,12 @@ pub fn web_init() {
 
 /// Returns the default [`Platform`] for the current OS.
 pub fn current_platform(headless: bool) -> Rc<dyn Platform> {
+    #[cfg(target_os = "android")]
+    {
+        assert!(!headless, "Android applications require a host Surface");
+        gpui_android::current_platform()
+    }
+
     #[cfg(target_os = "macos")]
     {
         Rc::new(gpui_macos::MacPlatform::new(headless))

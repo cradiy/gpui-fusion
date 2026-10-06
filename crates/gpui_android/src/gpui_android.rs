@@ -1,0 +1,37 @@
+//! Android View hosting for GPUI applications.
+#![cfg(target_os = "android")]
+
+mod bridge;
+mod dispatcher;
+mod logging;
+mod platform;
+mod surface;
+mod window;
+
+pub use bridge::{current_platform, initialize};
+pub use jni;
+pub use platform::AndroidPlatform;
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! android_entry {
+    ($entry:path) => {
+        #[unsafe(no_mangle)]
+        #[allow(
+            clippy::main_recursion,
+            reason = "Android invokes main from the host library loader"
+        )]
+        pub extern "system" fn JNI_OnLoad(
+            vm: $crate::jni::JavaVM,
+            _: *mut ::std::ffi::c_void,
+        ) -> $crate::jni::sys::jint {
+            match $crate::initialize(vm, || ::std::process::Termination::report($entry())) {
+                Ok(()) => $crate::jni::sys::JNI_VERSION_1_6,
+                Err(error) => {
+                    eprintln!("GPUI Android initialization failed: {error:#}");
+                    $crate::jni::sys::JNI_ERR
+                }
+            }
+        }
+    };
+}

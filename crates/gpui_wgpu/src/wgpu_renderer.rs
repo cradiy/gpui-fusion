@@ -5369,7 +5369,7 @@ impl WgpuRenderer {
         })
     }
 
-    /// Mark the surface as unconfigured so rendering is skipped until a new
+    /// Release the presentation surface so rendering is skipped until a new
     /// surface is provided via [`replace_surface`](Self::replace_surface).
     ///
     /// This does **not** drop the renderer — the device, queue, atlas, and
@@ -5381,6 +5381,7 @@ impl WgpuRenderer {
         // Drop intermediate textures since they reference the old surface size.
         if let Some(res) = self.resources.as_mut() {
             res.invalidate_intermediate_textures();
+            res.surface.take();
         }
     }
 
@@ -5532,6 +5533,19 @@ impl WgpuRenderer {
     }
 }
 
+#[cfg(target_os = "android")]
+#[derive(Debug)]
+struct AndroidDisplayProvider;
+
+#[cfg(target_os = "android")]
+impl HasDisplayHandle for AndroidDisplayProvider {
+    fn display_handle(
+        &self,
+    ) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
+        Ok(raw_window_handle::DisplayHandle::android())
+    }
+}
+
 #[cfg(not(target_family = "wasm"))]
 fn create_context<W>(
     window: &W,
@@ -5560,7 +5574,11 @@ where
         }
         for &backend in backends {
             let attempt = (|| {
-                let instance = WgpuContext::instance(Box::new(window.clone()), backend);
+                #[cfg(target_os = "android")]
+                let display = Box::new(AndroidDisplayProvider);
+                #[cfg(not(target_os = "android"))]
+                let display = Box::new(window.clone());
+                let instance = WgpuContext::instance(display, backend);
                 // The renderer caller keeps the native window alive for this surface.
                 let surface = create_surface(&instance, window_handle.as_raw())?;
                 let context = if hardware_only {

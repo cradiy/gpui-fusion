@@ -136,6 +136,16 @@ pub trait Platform: 'static {
     fn text_system(&self) -> Arc<dyn PlatformTextSystem>;
 
     fn run(&self, on_finish_launching: Box<dyn 'static + FnOnce()>);
+    /// Starts an application and keeps its state alive for the platform run loop.
+    /// Hosts with an external event loop retain the handle until their session closes.
+    fn run_app(
+        &self,
+        application: crate::ApplicationHandle,
+        on_finish_launching: Box<dyn 'static + FnOnce()>,
+    ) {
+        self.run(on_finish_launching);
+        drop(application);
+    }
     fn quit(&self);
     fn restart(&self, binary_path: Option<PathBuf>);
     fn activate(&self, ignoring_other_apps: bool);

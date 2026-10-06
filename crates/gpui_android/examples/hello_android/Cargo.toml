@@ -1,0 +1,9 @@
+[package]
+name = "hello_android"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+gpui.workspace = true
+gpui_platform = { workspace = true, features = ["wayland", "x11"] }

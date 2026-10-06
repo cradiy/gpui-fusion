@@ -378,6 +378,7 @@ pub struct TextInput {
     selection_scroll_task: Option<Task<()>>,
     pub(super) disabled: bool,
     pub(super) mode: InputMode,
+    input_purpose: gpui::TextInputPurpose,
     pub(super) appearance: InputAppearance,
     pub(super) preferred_x: Option<Pixels>,
     pub(super) scroll_handle: ScrollHandle,
@@ -410,6 +411,7 @@ impl TextInput {
             selection_scroll_task: None,
             disabled: false,
             mode: InputMode::Text,
+            input_purpose: gpui::TextInputPurpose::default(),
             appearance: InputAppearance::default(),
             preferred_x: None,
             scroll_handle: ScrollHandle::new(),
@@ -438,6 +440,20 @@ impl TextInput {
     pub fn mode(mut self, mode: InputMode) -> Self {
         self.mode = mode;
         self
+    }
+
+    /// Requests a software keyboard layout without validating or filtering text.
+    pub fn input_purpose(mut self, purpose: gpui::TextInputPurpose) -> Self {
+        self.input_purpose = purpose;
+        self
+    }
+
+    /// Updates the keyboard hint while retaining the field's value and selection.
+    pub fn set_input_purpose(&mut self, purpose: gpui::TextInputPurpose, cx: &mut Context<Self>) {
+        if self.input_purpose != purpose {
+            self.input_purpose = purpose;
+            cx.notify();
+        }
     }
 
     pub fn disabled(mut self, disabled: bool) -> Self {
@@ -1105,6 +1121,10 @@ impl TextInput {
 }
 
 impl EntityInputHandler for TextInput {
+    fn text_input_purpose(&self, _: &mut Window, _: &mut Context<Self>) -> gpui::TextInputPurpose {
+        self.input_purpose
+    }
+
     fn text_input_mode(&self, _: &mut Window, _: &mut Context<Self>) -> gpui::TextInputMode {
         match self.mode {
             InputMode::Text => gpui::TextInputMode::SingleLine,

@@ -190,11 +190,25 @@ a Done key; multiline fields request a newline key. Done dispatches Enter
 (UIC emits `InputEvent::Submit`) and hides the keyboard if focus has not changed.
 UIC's multiline Enter inserts a newline. Unrecognized editor actions are rejected.
 
+`EntityInputHandler::text_input_purpose` requests a single-line keyboard layout:
+`Text`, `Email`, `Url`, `Phone`, or `Number { decimal, signed }`. UIC configures
+it on the input state:
+
+```rust
+TextInput::new(cx).input_purpose(gpui::TextInputPurpose::Email)
+```
+
+Use `TextInput::set_input_purpose(purpose, cx)` to change it while editing.
+The value and selection are retained; the input connection restarts and finishes
+composition. These hints do not filter typing or pasted content. Validate values
+in the application. Password and multiline modes take precedence over purpose.
+The keyboard's available keys depend on the selected IME.
+
 Password fields never export surrounding text, even when their handler supplies
 it. Personalized learning is disabled for all modes. Changing mode restarts the
 input connection, completes composition, and invalidates callbacks from the old
 connection. Missing surrounding text alone does not change the keyboard type.
-Numeric/email layouts, custom action labels, native selection handles,
+Custom action labels, native selection handles,
 cursor-anchor updates, rich IME content, and hardware dead-key composition are
 not implemented.
 
@@ -259,6 +273,10 @@ Name's Done key must increment Name submissions without inserting a newline;
 Message must allow newlines. Password must use password input settings and hide
 its contents. Toggle Show / hide password while editing to check connection
 refresh without losing the value.
+In Details, type in the keyboard-layout field and use Change keyboard to cycle
+through email, URL, phone, digits, signed decimal, and plain text. Check that the
+layout changes and the field keeps its value; pasting text must remain possible
+with a numeric layout.
 
 Open details, focus its text field, and press Back: the keyboard closes first,
 then another Back returns to the main page. At the main page, Back uses Android's

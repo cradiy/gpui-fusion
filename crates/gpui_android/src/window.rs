@@ -59,6 +59,7 @@ pub(crate) struct AndroidWindow {
     pub(crate) input_focus: Cell<Option<FocusId>>,
     pub(crate) input_epoch: Cell<u64>,
     pub(crate) input_mode: Cell<TextInputMode>,
+    pub(crate) input_purpose: Cell<TextInputPurpose>,
     pub(crate) input_dirty: Cell<bool>,
     callbacks: RefCell<Callbacks>,
 }
@@ -91,6 +92,7 @@ impl AndroidWindow {
             input_focus: Cell::new(None),
             input_epoch: Cell::new(0),
             input_mode: Cell::new(TextInputMode::default()),
+            input_purpose: Cell::new(TextInputPurpose::default()),
             input_dirty: Cell::new(true),
             callbacks: RefCell::default(),
         }

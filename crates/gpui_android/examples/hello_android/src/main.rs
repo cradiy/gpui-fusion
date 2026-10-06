@@ -1,6 +1,27 @@
 use gpui::{prelude::*, *};
 use uic::components::input::{Input, InputEvent, InputMode, TextInput};
 
+const KEYBOARDS: [(&str, TextInputPurpose); 6] = [
+    ("Email", TextInputPurpose::Email),
+    ("URL", TextInputPurpose::Url),
+    ("Phone", TextInputPurpose::Phone),
+    (
+        "Digits",
+        TextInputPurpose::Number {
+            decimal: false,
+            signed: false,
+        },
+    ),
+    (
+        "Signed decimal",
+        TextInputPurpose::Number {
+            decimal: true,
+            signed: true,
+        },
+    ),
+    ("Text", TextInputPurpose::Text),
+];
+
 #[gpui_platform::main]
 fn main() {
     gpui_platform::application().run(|cx| {
@@ -16,6 +37,12 @@ fn main() {
                 password: cx.new(|cx| TextInput::new(cx).password().placeholder("Password")),
                 password_visible: false,
                 submissions: 0,
+                keyboard: 0,
+                keyboard_input: cx.new(|cx| {
+                    TextInput::new(cx)
+                        .input_purpose(KEYBOARDS[0].1)
+                        .placeholder("Try a keyboard layout")
+                }),
             });
             view.update(cx, |this, cx| {
                 cx.subscribe(&this.title, |this, _, event, cx| {
@@ -50,6 +77,8 @@ struct Counter {
     password: Entity<TextInput>,
     password_visible: bool,
     submissions: usize,
+    keyboard: usize,
+    keyboard_input: Entity<TextInput>,
 }
 
 fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
@@ -66,7 +95,9 @@ impl Render for Counter {
         window.set_back_enabled(self.details);
         if self.details {
             return div()
+                .id("details-page")
                 .size_full()
+                .overflow_y_scroll()
                 .bg(rgb(0x101923))
                 .text_color(rgb(0xe7edf7))
                 .font_family("IBM Plex Sans")
@@ -77,6 +108,17 @@ impl Render for Counter {
                 .child(div().text_3xl().child("Details"))
                 .child("System Back returns to the main page. With the keyboard open, Back hides it first.")
                 .child(Input::new(&self.title).text_color(rgb(0x172033)))
+                .child(div().text_sm().child(format!("Keyboard: {}", KEYBOARDS[self.keyboard].0)))
+                .child(Input::new(&self.keyboard_input).text_color(rgb(0x172033)))
+                .child(button("keyboard-purpose", "Change keyboard").on_click(cx.listener(|this, _, window, cx| {
+                    this.keyboard = (this.keyboard + 1) % KEYBOARDS.len();
+                    this.keyboard_input.update(cx, |input, cx| {
+                        input.set_input_purpose(KEYBOARDS[this.keyboard].1, cx);
+                    });
+                    window.focus(&this.keyboard_input.focus_handle(cx), cx);
+                    window.show_soft_keyboard();
+                    cx.notify();
+                })))
                 .child(div().flex().flex_wrap().gap_3()
                     .child(button("edit-name", "Edit name").on_click(cx.listener(|this, _, window, cx| {
                         window.focus(&this.title.focus_handle(cx), cx);

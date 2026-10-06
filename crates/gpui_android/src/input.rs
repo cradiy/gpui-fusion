@@ -1,10 +1,11 @@
 use crate::window::AndroidWindow;
-use gpui::{PlatformInputHandler, TextInputMode};
+use gpui::{PlatformInputHandler, TextInputMode, TextInputPurpose};
 use std::ops::Range;
 
 pub(crate) struct InputState {
     pub epoch: u64,
     pub mode: TextInputMode,
+    pub purpose: TextInputPurpose,
     pub text: Option<String>,
     pub offset: usize,
     pub anchor: usize,
@@ -31,12 +32,21 @@ impl AndroidWindow {
             .unwrap_or_default();
         let focus_changed = self.input_focus.replace(focus) != focus;
         let mode_changed = self.input_mode.replace(mode) != mode;
-        if mode_changed && !focus_changed && focus.is_some() {
+        let purpose = if mode == TextInputMode::SingleLine {
+            handler
+                .as_mut()
+                .map(|handler| handler.text_input_purpose())
+                .unwrap_or_default()
+        } else {
+            TextInputPurpose::Text
+        };
+        let purpose_changed = self.input_purpose.replace(purpose) != purpose;
+        if (mode_changed || purpose_changed) && !focus_changed && focus.is_some() {
             if let Some(handler) = handler.as_mut() {
                 handler.unmark_text();
             }
         }
-        if focus_changed || mode_changed {
+        if focus_changed || mode_changed || purpose_changed {
             self.input_epoch.set(self.input_epoch.get().wrapping_add(1));
         }
         let result = if focus.is_some() {
@@ -85,6 +95,7 @@ impl AndroidWindow {
             Some(InputState {
                 epoch,
                 mode,
+                purpose: self.input_purpose.get(),
                 text,
                 offset,
                 anchor,

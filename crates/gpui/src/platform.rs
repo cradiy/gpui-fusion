@@ -1792,6 +1792,13 @@ impl PlatformInputHandler {
             .unwrap_or_default()
     }
 
+    /// Returns the focused editor's keyboard layout hint.
+    pub fn text_input_purpose(&mut self) -> crate::TextInputPurpose {
+        self.cx
+            .update(|window, cx| self.handler.text_input_purpose(window, cx))
+            .unwrap_or_default()
+    }
+
     #[allow(dead_code)]
     pub fn query_prefers_ime_for_printable_keys(&mut self) -> bool {
         self.cx
@@ -2019,6 +2026,16 @@ pub trait InputHandler: 'static {
     /// Backends may use it to select keyboard layout, action keys, and privacy settings.
     fn text_input_mode(&mut self, _window: &mut Window, _cx: &mut App) -> crate::TextInputMode {
         crate::TextInputMode::default()
+    }
+
+    /// Hints which characters should be readily available on the software keyboard.
+    /// This does not validate text or change the editor's newline and password behavior.
+    fn text_input_purpose(
+        &mut self,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> crate::TextInputPurpose {
+        crate::TextInputPurpose::default()
     }
 
     /// Returns whether printable keys should be routed to the IME before keybinding

@@ -3,7 +3,6 @@ package dev.gpui.android
 import android.content.Context
 import android.graphics.PointF
 import android.os.Build
-import android.text.InputType
 import android.util.SparseArray
 import android.view.Choreographer
 import android.view.KeyCharacterMap
@@ -257,11 +256,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         val state = session.inputState()
         inputState = state
         if (state == null) return null
-        info.inputType = InputType.TYPE_CLASS_TEXT or when {
-            state.sensitive -> InputType.TYPE_TEXT_VARIATION_PASSWORD
-            state.multiline -> InputType.TYPE_TEXT_FLAG_MULTI_LINE
-            else -> InputType.TYPE_TEXT_VARIATION_NORMAL
-        }
+        info.inputType = state.inputType
         info.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or
             (if (state.multiline) EditorInfo.IME_ACTION_NONE or EditorInfo.IME_FLAG_NO_ENTER_ACTION
              else EditorInfo.IME_ACTION_DONE)

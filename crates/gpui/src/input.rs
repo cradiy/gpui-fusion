@@ -18,6 +18,28 @@ pub enum TextInputMode {
     Password,
 }
 
+/// A keyboard layout hint for text entry, without restricting inserted or pasted text.
+/// Backends may ignore hints unsupported by the editor's mode or the system keyboard.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TextInputPurpose {
+    /// General text entry.
+    #[default]
+    Text,
+    /// An email address.
+    Email,
+    /// A web address.
+    Url,
+    /// A telephone number.
+    Phone,
+    /// Numeric entry with optional decimal and sign keys.
+    Number {
+        /// Requests a decimal separator.
+        decimal: bool,
+        /// Requests a positive or negative sign.
+        signed: bool,
+    },
+}
+
 /// Implement this trait to allow views to handle textual input when implementing an editor, field, etc.
 ///
 /// Once your view implements this trait, you can use it to construct an [`ElementInputHandler<V>`].
@@ -28,6 +50,15 @@ pub trait EntityInputHandler: 'static + Sized {
     /// See [`InputHandler::text_input_mode`].
     fn text_input_mode(&self, _window: &mut Window, _cx: &mut Context<Self>) -> TextInputMode {
         TextInputMode::default()
+    }
+
+    /// See [`InputHandler::text_input_purpose`].
+    fn text_input_purpose(
+        &self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> TextInputPurpose {
+        TextInputPurpose::default()
     }
 
     /// See [`InputHandler::text_for_range`] for details
@@ -173,6 +204,11 @@ impl<V: EntityInputHandler> InputHandler for ElementInputHandler<V> {
     fn text_input_mode(&mut self, window: &mut Window, cx: &mut App) -> TextInputMode {
         self.view
             .update(cx, |view, cx| view.text_input_mode(window, cx))
+    }
+
+    fn text_input_purpose(&mut self, window: &mut Window, cx: &mut App) -> TextInputPurpose {
+        self.view
+            .update(cx, |view, cx| view.text_input_purpose(window, cx))
     }
 
     fn selected_text_range(

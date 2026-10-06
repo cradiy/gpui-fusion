@@ -183,17 +183,6 @@ internal open class GpuiInputConnection(
         }
     }
     override fun performContextMenuAction(id: Int): Boolean {
-        val key = when (id) {
-            android.R.id.selectAll -> "a"
-            android.R.id.copy -> "c"
-            android.R.id.cut -> "x"
-            android.R.id.paste -> "v"
-            else -> return false
-        }
-        if (state() == null) return false
-        session.key(key, 2, true)
-        session.key(key, 2, false)
-        view.syncInput(false)
-        return true
+        return state() != null && view.performTextAction(epoch, id)
     }
 }

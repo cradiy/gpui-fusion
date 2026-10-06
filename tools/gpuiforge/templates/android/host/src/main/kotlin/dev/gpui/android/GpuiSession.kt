@@ -93,6 +93,10 @@ class GpuiSession : AutoCloseable {
             .map { it.absolutePath }.sorted().toTypedArray()
     }
     internal fun inputState(): TextInputState? { checkThread(); return if (id != 0L) nativeInputState(id) else null }
+    internal fun inputIndex(epoch: Long, x: Float, y: Float): Int {
+        checkThread()
+        return if (!closed && id != 0L) nativeInputIndex(id, epoch, x, y) else -1
+    }
     internal fun edit(epoch: Long, operation: Int, text: String, a: Int, b: Int): Boolean {
         checkThread()
         return !closed && id != 0L && nativeEdit(id, epoch, operation, text, a, b)
@@ -301,6 +305,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeDetach(id: Long)
         @JvmStatic private external fun nativeFrame(id: Long): Boolean
         @JvmStatic private external fun nativeInputState(id: Long): TextInputState?
+        @JvmStatic private external fun nativeInputIndex(id: Long, epoch: Long, x: Float, y: Float): Int
         @JvmStatic private external fun nativeEdit(id: Long, epoch: Long, operation: Int, text: String, a: Int, b: Int): Boolean
         @JvmStatic private external fun nativeKey(id: Long, name: String, modifiers: Int, down: Boolean): Boolean
         @JvmStatic private external fun nativeInputAction(id: Long, epoch: Long, action: Int): Boolean

@@ -44,6 +44,10 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     private val inputConnections = Collections.newSetFromMap(WeakHashMap<GpuiInputConnection, Boolean>())
     private enum class KeyboardRequest { TAP, SHOW, HIDE }
     private var keyboardRequest: KeyboardRequest? = null
+    private val textMenu = TextEditMenu(this, { inputState }) {
+        tapCandidate = false
+        scroll.block()
+    }
 
     init {
         GpuiSession.checkThread()
@@ -170,10 +174,12 @@ class GpuiView(context: Context, private val session: GpuiSession) :
                     inputManager().hideSoftInputFromWindow(windowToken, 0)
                 } else if (changed || request != null) {
                     if (syncInput(request != null, requireHit = request != KeyboardRequest.SHOW)) {
+                        if (request == KeyboardRequest.TAP) textMenu.tapped(inputState)
                         if (keyboardRequest == request) keyboardRequest = null
                     }
                 }
                 for (connection in inputConnections.toList()) connection.updateCursorAnchor(inputState)
+                textMenu.update(inputState)
             } catch (error: RuntimeException) {
                 session.fail(error)
                 return
@@ -228,6 +234,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
                 }
             }
         }
+        textMenu.touch(event, tapCandidate)
         return true
     }
 
@@ -243,6 +250,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     }
 
     private fun cancelTouches() {
+        textMenu.close()
         tapCandidate = false
         scroll.cancel()
         for (i in 0 until contacts.size()) {
@@ -269,7 +277,38 @@ class GpuiView(context: Context, private val session: GpuiSession) :
 
     internal fun inputManager(): InputMethodManager = context.getSystemService(InputMethodManager::class.java)
 
+    internal fun inputIndex(epoch: Long, x: Float, y: Float): Int {
+        val density = resources.displayMetrics.density
+        return session.inputIndex(epoch, x / density, y / density)
+    }
+
+    internal fun selectText(epoch: Long, anchor: Int, head: Int): Boolean {
+        val input = session.inputState()?.takeIf { it.epoch == epoch } ?: return false
+        if (input.composingStart >= 0 && !session.edit(epoch, 2, "", 0, 0)) return false
+        if (!session.edit(epoch, 3, "", anchor, head)) return false
+        syncInput(false)
+        return true
+    }
+
+    internal fun performTextAction(epoch: Long, id: Int): Boolean {
+        val current = session.inputState()?.takeIf { it.epoch == epoch } ?: return false
+        if (current.sensitive && (id == android.R.id.copy || id == android.R.id.cut)) return false
+        val key = when (id) {
+            android.R.id.selectAll -> "a"
+            android.R.id.copy -> "c"
+            android.R.id.cut -> "x"
+            android.R.id.paste -> "v"
+            else -> return false
+        }
+        if (!session.edit(epoch, 2, "", 0, 0)) return false
+        session.key(key, 2, true)
+        session.key(key, 2, false)
+        syncInput(false)
+        return true
+    }
+
     private fun closeInput() {
+        textMenu.close()
         val previous = inputConnections.toList()
         inputConnections.clear()
         inputConnection = null

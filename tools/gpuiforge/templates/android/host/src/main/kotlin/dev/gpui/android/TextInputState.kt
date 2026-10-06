@@ -19,6 +19,8 @@ internal class TextInputState(
     val action: Int,
     val caretBounds: FloatArray?,
     val editorBounds: FloatArray?,
+    val anchorBounds: FloatArray?,
+    val headBounds: FloatArray?,
 ) {
     val inputType: Int
         get() = when {

@@ -16,6 +16,8 @@ pub(crate) struct InputState {
     pub marked: Option<Range<usize>>,
     pub hit: bool,
     pub caret_bounds: Option<Bounds<Pixels>>,
+    pub anchor_bounds: Option<Bounds<Pixels>>,
+    pub head_bounds: Option<Bounds<Pixels>>,
     pub editor_bounds: Option<Bounds<Pixels>>,
 }
 
@@ -104,9 +106,13 @@ impl AndroidWindow {
                 (selection.range.start, selection.range.end)
             };
             let editor_bounds = handler.element_bounds();
-            let caret_bounds = (anchor == head)
-                .then(|| handler.bounds_for_range(head..head))
-                .flatten();
+            let head_bounds = handler.bounds_for_range(head..head);
+            let anchor_bounds = if anchor == head {
+                head_bounds
+            } else {
+                handler.bounds_for_range(anchor..anchor)
+            };
+            let caret_bounds = (anchor == head).then_some(head_bounds).flatten();
             Some(InputState {
                 epoch,
                 mode,
@@ -119,8 +125,23 @@ impl AndroidWindow {
                 marked,
                 hit: editor_bounds.is_some_and(|bounds| bounds.contains(&self.pointer.get())),
                 caret_bounds,
+                anchor_bounds,
+                head_bounds,
                 editor_bounds,
             })
+        })
+        .flatten()
+    }
+
+    pub(crate) fn input_index(&self, epoch: u64, x: f32, y: f32) -> Option<usize> {
+        if !x.is_finite() || !y.is_finite() {
+            return None;
+        }
+        self.with_input(|handler, current| {
+            if epoch != current {
+                return None;
+            }
+            handler.character_index_for_point(gpui::point(gpui::px(x), gpui::px(y)))
         })
         .flatten()
     }

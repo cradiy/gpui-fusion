@@ -191,6 +191,24 @@ to accept cursor and selection changes from Android. UIC's `TextInput` implement
 this contract. Tapping a focused input requests the soft keyboard. Hardware
 text keys and common editing shortcuts are forwarded to GPUI.
 
+Holding a finger inside the focused input selects a word using Android's locale-aware
+word boundaries and opens its floating edit menu.
+Select all, copy, cut, and plain-text paste dispatch the component's existing
+editing shortcuts. Copy and cut require a selection and are hidden for password
+fields; paste appears when the clipboard advertises plain text. Select all
+keeps the menu open for a subsequent action. Sliding beyond touch slop, adding
+another finger, leaving the window, or changing the input focus dismisses it.
+An unfocused input must be tapped before using its long-press menu.
+
+Tapping an input shows a draggable insertion handle. Selected text exposes two
+endpoint handles using the Android theme's drawables. Handle positions and touch
+indices come from GPUI's input handler; text and selection remain GPUI-rendered.
+Dragging a handle shows Android's magnifier on API 28 and later and temporarily
+hides the toolbar. Password fields expose cursor movement without magnifying text.
+Handles are dismissed on focus loss, surface detachment, or a new gesture in the
+content. Selection dragging is limited to the visible editor; edge autoscroll
+and semantic actions such as text classification are not provided.
+
 Input methods can request immediate or monitored `CursorAnchorInfo` updates.
 GPUI supplies the selection, available composing text, insertion-marker bounds,
 and (on Android 13 and later) editor bounds in screen coordinates. Geometry
@@ -259,8 +277,7 @@ Password fields never export surrounding text, even when their handler supplies
 it. Personalized learning is disabled for all modes. Changing mode restarts the
 input connection, completes composition, and invalidates callbacks from the old
 connection. Missing surrounding text alone does not change the keyboard type.
-Custom action labels, native selection handles,
-rich IME content, and hardware dead-key composition are
+Custom action labels, rich IME content, and hardware dead-key composition are
 not implemented.
 
 ## Permissions

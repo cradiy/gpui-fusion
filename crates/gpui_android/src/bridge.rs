@@ -306,6 +306,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         ),
         method("nativeKey", "(JLjava/lang/String;IZ)Z", key as *mut c_void),
         method("nativeInputAction", "(JJI)Z", input_action as *mut c_void),
+        method("nativeInputIndex", "(JJFF)I", input_index as *mut c_void),
         method("nativeLifecycle", "(JI)V", lifecycle as *mut c_void),
         method("nativeFocus", "(JZ)V", focus as *mut c_void),
         method("nativeAppearance", "(JZ)V", appearance as *mut c_void),
@@ -322,7 +323,15 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
             permission_result as *mut c_void,
         ),
     ];
-    env.register_native_methods("dev/gpui/android/GpuiSession", &methods)?;
+    if let Err(error) = env.register_native_methods("dev/gpui/android/GpuiSession", &methods) {
+        if env.exception_check()? {
+            env.exception_describe()?;
+            env.exception_clear()?;
+        }
+        return Err(error).context(
+            "Android host JNI registration failed; rebuild GPUiForge and regenerate the Android host to match gpui_android",
+        );
+    }
     ENTRY
         .set(entry)
         .map_err(|_| anyhow::anyhow!("GPUI Android entry is already registered"))?;
@@ -504,10 +513,12 @@ extern "system" fn input_state(mut env: JNIEnv, _: JClass, id: jlong) -> jobject
         }
         let caret = bounds_array(env, state.caret_bounds)?;
         let editor = bounds_array(env, state.editor_bounds)?;
+        let anchor = bounds_array(env, state.anchor_bounds)?;
+        let head = bounds_array(env, state.head_bounds)?;
         Ok(env
             .new_object(
                 "dev/gpui/android/TextInputState",
-                "(JLjava/lang/String;IIIIIZZZIZZI[F[F)V",
+                "(JLjava/lang/String;IIIIIZZZIZZI[F[F[F[F)V",
                 &[
                     JValue::Long(state.epoch as i64),
                     JValue::Object(&text),
@@ -537,9 +548,29 @@ extern "system" fn input_state(mut env: JNIEnv, _: JClass, id: jlong) -> jobject
                     JValue::Int(crate::input::action_code(state.action)),
                     JValue::Object(&caret),
                     JValue::Object(&editor),
+                    JValue::Object(&anchor),
+                    JValue::Object(&head),
                 ],
             )?
             .into_raw())
+    })
+}
+
+extern "system" fn input_index(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    epoch: jlong,
+    x: jfloat,
+    y: jfloat,
+) -> jint {
+    call(&mut env, |_| {
+        Ok(session(id)?
+            .platform
+            .window
+            .input_index(epoch as u64, x, y)
+            .and_then(|index| i32::try_from(index).ok())
+            .unwrap_or(-1))
     })
 }
 

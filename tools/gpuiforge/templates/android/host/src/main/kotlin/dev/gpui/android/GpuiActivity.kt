@@ -28,7 +28,6 @@ abstract class GpuiActivity : Activity() {
         } else {
             window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         }
-        System.loadLibrary(nativeLibraryName())
         session = lastNonConfigurationInstance as? GpuiSession ?: GpuiSession()
         session.attachPermissionHost(this)
         session.setOnBackEnabledChanged { enabled ->
@@ -43,6 +42,14 @@ abstract class GpuiActivity : Activity() {
             message.setPadding(padding, padding * 3, padding, padding)
             message.text = "Unable to start GPUI\n\n${error.message}"
             setContentView(message)
+        }
+        try {
+            System.loadLibrary(nativeLibraryName())
+        } catch (error: LinkageError) {
+            session.fail(IllegalStateException(
+                "Unable to load the GPUI native library. Rebuild GPUiForge and regenerate the Android host " +
+                    "with matching GPUI sources.\n\n${error.message}", error))
+            return
         }
         val content = FrameLayout(this)
         val gpui = GpuiView(this, session)

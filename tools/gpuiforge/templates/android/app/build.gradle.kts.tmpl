@@ -1,0 +1,49 @@
+import java.util.Properties
+
+plugins { id("com.android.application") }
+
+val gpuiAbis = providers.gradleProperty("gpuiAbis").getOrElse("{{abis|kotlin}}")
+    .split(',').map { it.trim() }.distinct()
+require(gpuiAbis.isNotEmpty() && gpuiAbis.all { it == "arm64-v8a" || it == "x86_64" }) {
+    "Supported Android ABIs: arm64-v8a, x86_64"
+}
+
+android {
+    namespace = "dev.gpuiforge.app"
+    ndkPath = providers.environmentVariable("ANDROID_NDK_HOME").orNull
+    ndkPath?.let { path ->
+        val properties = Properties()
+        file("$path/source.properties").inputStream().use { properties.load(it) }
+        ndkVersion = properties.getProperty("Pkg.Revision")
+    }
+    compileSdk { version = release(36) { minorApiLevel = 1 } }
+    defaultConfig {
+        applicationId = "{{application_id|kotlin}}"
+        minSdk = "{{var.min_sdk|kotlin}}".toInt()
+        targetSdk = "{{var.target_sdk|kotlin}}".toInt()
+        versionCode = "{{var.version_code|kotlin}}".toInt()
+        versionName = "{{var.version_name|kotlin}}"
+        ndk { abiFilters += gpuiAbis }
+    }
+}
+
+for (profile in listOf("debug", "release")) {
+    val variant = profile.replaceFirstChar { it.uppercase() }
+    val output = layout.buildDirectory.dir("rustJniLibs/$profile")
+    android.sourceSets[profile].jniLibs.directories.add(output.get().asFile.absolutePath)
+    val rustBuilds = gpuiAbis.map { abi ->
+        tasks.register<Exec>("buildRust${variant}_${abi.replace('-', '_')}") {
+            environment("GPUI_ANDROID_ABI", abi)
+            environment("GPUI_ANDROID_PROFILE", profile)
+            environment("GPUI_ANDROID_MIN_SDK", "{{var.min_sdk|kotlin}}")
+            workingDir("{{app_dir|kotlin}}")
+            commandLine("bash", rootProject.file("build-rust.sh").absolutePath,
+                output.get().asFile.absolutePath, "{{app_dir|kotlin}}/Cargo.toml",
+                "{{var.native_library|kotlin}}",
+                providers.gradleProperty("gpuiForgeExecutable").getOrElse("gpuiforge"))
+        }
+    }
+    tasks.matching { it.name == "pre${variant}Build" }.configureEach { dependsOn(rustBuilds) }
+}
+
+dependencies { implementation(project(":host")) }

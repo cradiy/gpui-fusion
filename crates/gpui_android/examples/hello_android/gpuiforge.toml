@@ -1,0 +1,13 @@
+[app]
+name = "GPUI Android"
+
+[[platforms.desktop.build]]
+program = "cargo"
+args = ["build", "-p", "hello_android", "--profile", "{{cargo_profile}}"]
+
+[[platforms.desktop.run]]
+program = "cargo"
+args = ["run", "-p", "hello_android", "--profile", "{{cargo_profile}}"]
+
+[platforms.android]
+application-id = "dev.gpui.example"

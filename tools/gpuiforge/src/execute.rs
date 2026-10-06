@@ -1,0 +1,343 @@
+use crate::{
+    config::{Management, Project, Step, Variables, expand},
+    generate,
+};
+use anyhow::{Context, Result, bail, ensure};
+use std::{
+    io::{self, IsTerminal, Write},
+    path::PathBuf,
+    process::Command,
+};
+
+pub fn choose(prompt: &str, choices: &[String]) -> Result<usize> {
+    ensure!(!choices.is_empty(), "no available choices for {prompt}");
+    ensure!(
+        io::stdin().is_terminal(),
+        "{prompt}: non-interactive execution requires an explicit selection"
+    );
+    eprintln!("{prompt}");
+    for (i, choice) in choices.iter().enumerate() {
+        eprintln!("  {}. {choice}", i + 1);
+    }
+    loop {
+        eprint!("Selection [1]: ");
+        io::stderr().flush()?;
+        let mut input = String::new();
+        ensure!(
+            io::stdin().read_line(&mut input)? > 0,
+            "selection cancelled"
+        );
+        let input = input.trim();
+        if input.is_empty() {
+            return Ok(0);
+        }
+        if let Ok(index) = input.parse::<usize>()
+            && (1..=choices.len()).contains(&index)
+        {
+            return Ok(index - 1);
+        }
+        eprintln!("Enter a number from 1 to {}.", choices.len());
+    }
+}
+
+pub fn platform(project: &Project, selected: Option<String>) -> Result<String> {
+    if let Some(name) = selected {
+        project.platform(&name)?;
+        return Ok(name);
+    }
+    let names: Vec<_> = project.platforms.keys().cloned().collect();
+    let labels: Vec<_> = names
+        .iter()
+        .map(|name| {
+            if name == "desktop" {
+                format!("Desktop ({})", std::env::consts::OS)
+            } else {
+                name.clone()
+            }
+        })
+        .collect();
+    Ok(names[choose("Choose a platform", &labels)?].clone())
+}
+
+pub fn steps(project: &Project, steps: &[Step], vars: &Variables) -> Result<()> {
+    for step in steps {
+        let program = expand(&step.program, vars)?;
+        let args: Vec<_> = step
+            .args
+            .iter()
+            .map(|a| expand(a, vars))
+            .collect::<Result<_>>()?;
+        let cwd = step
+            .cwd
+            .as_deref()
+            .map(|p| expand(p, vars))
+            .transpose()?
+            .map(PathBuf::from)
+            .unwrap_or_else(|| project.root.clone());
+        let cwd = project.root.join(cwd);
+        eprintln!("Running {program} {}", args.join(" "));
+        let mut command = Command::new(&program);
+        command.args(&args).current_dir(&cwd);
+        for (key, value) in &step.env {
+            command.env(key, expand(value, vars)?);
+        }
+        let status = command
+            .status()
+            .with_context(|| format!("starting {program} in {}", cwd.display()))?;
+        ensure!(status.success(), "{program} failed: {status}");
+    }
+    Ok(())
+}
+
+pub fn build(project: &Project, name: &str, release: bool, abi: Option<&str>) -> Result<Variables> {
+    let platform = project.platform(name)?;
+    ensure!(
+        !platform.build.is_empty(),
+        "no build steps configured for {name}"
+    );
+    if (platform.bundled || platform.template.is_some())
+        && platform.management == Management::Managed
+    {
+        generate::generate(project, name)?;
+    }
+    if platform.management == Management::Manual {
+        ensure!(
+            project.directory(name)?.is_dir(),
+            "manual project directory is missing"
+        );
+    }
+    let vars = project.variables(name, release, abi)?;
+    steps(project, &platform.build, &vars)?;
+    if let Some(artifact) = &platform.artifact {
+        let artifact = project.directory(name)?.join(expand(artifact, &vars)?);
+        ensure!(
+            artifact.is_file(),
+            "build did not produce {}",
+            artifact.display()
+        );
+        println!("{}", artifact.display());
+    }
+    Ok(vars)
+}
+
+fn adb() -> PathBuf {
+    std::env::var_os("ANDROID_HOME")
+        .or_else(|| std::env::var_os("ANDROID_SDK_ROOT"))
+        .map(|sdk| {
+            PathBuf::from(sdk)
+                .join("platform-tools")
+                .join(if cfg!(windows) { "adb.exe" } else { "adb" })
+        })
+        .unwrap_or_else(|| PathBuf::from("adb"))
+}
+
+fn adb_output(args: &[&str]) -> Result<String> {
+    let output = Command::new(adb())
+        .args(args)
+        .output()
+        .context("starting adb; set ANDROID_HOME or add adb to PATH")?;
+    ensure!(
+        output.status.success(),
+        "adb failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(String::from_utf8(output.stdout)?)
+}
+
+pub fn devices() -> Result<Vec<String>> {
+    Ok(adb_output(&["devices"])?
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let serial = fields.next()?;
+            let state = fields.next()?;
+            if state != "device" {
+                eprintln!("Skipping {serial}: {state}");
+                return None;
+            }
+            Some(serial.to_owned())
+        })
+        .collect())
+}
+
+pub fn run(project: &Project, name: &str, release: bool, device: Option<&str>) -> Result<()> {
+    let platform = project.platform(name)?;
+    if name != "android" {
+        ensure!(device.is_none(), "--device is only valid for Android");
+        ensure!(
+            !platform.run.is_empty(),
+            "no run steps configured for {name}"
+        );
+        let vars = project.variables(name, release, None)?;
+        return steps(project, &platform.run, &vars);
+    }
+    let devices = devices()?;
+    ensure!(
+        !devices.is_empty(),
+        "no authorized Android device; connect a device or start an emulator"
+    );
+    let device = if let Some(device) = device {
+        ensure!(
+            devices.iter().any(|d| d == device),
+            "device {device} is not connected and authorized"
+        );
+        device.to_owned()
+    } else {
+        devices[choose("Choose an Android device", &devices)?].clone()
+    };
+    let supported = adb_output(&["-s", &device, "shell", "getprop", "ro.product.cpu.abilist"])?;
+    let abi = supported
+        .trim()
+        .split(',')
+        .find(|abi| platform.abis.iter().any(|a| a == abi))
+        .context("device has no ABI enabled in this project")?;
+    let vars = build(project, name, release, Some(abi))?;
+    let artifact = platform
+        .artifact
+        .as_ref()
+        .context("android.artifact is required to run")?;
+    let artifact = project.directory(name)?.join(expand(artifact, &vars)?);
+    let artifact = artifact.to_str().context("APK path must be UTF-8")?;
+    let status = Command::new(adb())
+        .args(["-s", &device, "install", "-r", artifact])
+        .status()?;
+    ensure!(status.success(), "APK installation failed");
+    let id = platform
+        .application_id
+        .as_deref()
+        .context("android.application-id is required")?;
+    let activity = platform
+        .activity
+        .as_deref()
+        .context("android.activity is required")?;
+    let output = adb_output(&[
+        "-s",
+        &device,
+        "shell",
+        "am",
+        "start",
+        "-W",
+        "-n",
+        &format!("{id}/{activity}"),
+    ])?;
+    ensure!(!output.contains("Error:"), "launch failed: {output}");
+    print!("{output}");
+    Ok(())
+}
+
+fn java_development_kit() -> Result<PathBuf> {
+    let executable = |name: &str| {
+        if cfg!(windows) {
+            format!("{name}.exe")
+        } else {
+            name.to_owned()
+        }
+    };
+    let configured_home = std::env::var_os("JAVA_HOME").map(PathBuf::from);
+    let java = configured_home
+        .as_ref()
+        .map(|home| home.join("bin").join(executable("java")))
+        .unwrap_or_else(|| PathBuf::from(executable("java")));
+    let output = Command::new(&java)
+        .args(["-XshowSettings:properties", "-version"])
+        .output()
+        .with_context(|| {
+            format!(
+                "starting {}; set JAVA_HOME to a complete JDK",
+                java.display()
+            )
+        })?;
+    ensure!(
+        output.status.success(),
+        "{} failed: {}",
+        java.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let home = match configured_home {
+        Some(home) => home,
+        None => String::from_utf8_lossy(&output.stderr)
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("java.home = ").map(PathBuf::from))
+            .context("could not determine java.home; set JAVA_HOME to a complete JDK")?,
+    };
+    let javac = home.join("bin").join(executable("javac"));
+    let output = Command::new(&javac)
+        .arg("-version")
+        .output()
+        .with_context(|| {
+            format!(
+                "{} is unavailable; set JAVA_HOME to a complete JDK containing bin/javac",
+                javac.display()
+            )
+        })?;
+    ensure!(
+        output.status.success(),
+        "{} failed: {}; select a complete JDK with JAVA_HOME",
+        javac.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(home)
+}
+
+pub fn doctor(project: &Project) -> Result<()> {
+    let mut missing = false;
+    for program in ["cargo", "rustc"] {
+        let available = Command::new(program)
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        println!(
+            "{program}: {}",
+            if available { "available" } else { "missing" }
+        );
+        missing |= !available;
+    }
+    if project.platforms.contains_key("android") {
+        match java_development_kit() {
+            Ok(home) => println!("JDK: {} (java and javac available)", home.display()),
+            Err(error) => {
+                println!("JDK: {error:#}");
+                missing = true;
+            }
+        }
+        for name in ["ANDROID_HOME", "ANDROID_NDK_HOME"] {
+            let path = std::env::var_os(name).map(PathBuf::from);
+            let available = path.as_ref().is_some_and(|p| p.is_dir());
+            println!(
+                "{name}: {}",
+                path.map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "not set".into())
+            );
+            missing |= !available;
+        }
+        match devices() {
+            Ok(devices) => println!("Android devices: {}", devices.join(", ")),
+            Err(error) => {
+                println!("adb: {error}");
+                missing = true;
+            }
+        }
+    }
+    for (name, platform) in &project.platforms {
+        println!(
+            "{name}: {}",
+            if platform.management == Management::Manual {
+                "manual"
+            } else {
+                "managed"
+            }
+        );
+        if platform.management == Management::Manual {
+            missing |= !project.directory(name)?.is_dir();
+        } else if let Some(template) = &platform.template {
+            println!("  template: {}", template.display());
+            missing |= !template.is_dir();
+        }
+        project.variables(name, false, None)?;
+    }
+    if missing {
+        bail!("one or more prerequisites are missing");
+    }
+    Ok(())
+}

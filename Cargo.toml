@@ -4,7 +4,6 @@ members = [
   "crates/collections",
   "crates/gpui",
   "crates/gpui_android",
-  "crates/gpui_android/build",
   "crates/gpui_android/examples/hello_android",
   "crates/gpui_automation",
   "crates/gpui_inspector",

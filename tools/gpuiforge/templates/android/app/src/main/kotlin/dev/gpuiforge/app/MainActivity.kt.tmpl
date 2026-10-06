@@ -1,0 +1,7 @@
+package dev.gpuiforge.app
+
+import dev.gpui.android.GpuiActivity
+
+class MainActivity : GpuiActivity() {
+    override fun nativeLibraryName() = "{{var.native_library|kotlin}}"
+}

@@ -10,49 +10,59 @@ Requirements:
 - The Rust targets for the selected Android ABIs (listed below).
 - Android 8.0/API 26 or newer with a compatible Vulkan or OpenGL ES driver.
 
-Set `ANDROID_HOME` to the SDK and `ANDROID_NDK_HOME` to the NDK. From
-`crates/gpui_android/android`:
+Install GPUiForge from the repository root with
+`cargo install --path tools/gpuiforge`. Set `ANDROID_HOME` to the SDK
+and `ANDROID_NDK_HOME` to the NDK. From
+`crates/gpui_android/examples/hello_android`:
 
 ```sh
-rustup target add aarch64-linux-android
-./gradlew :example:assembleDebug
-adb install -r example/build/outputs/apk/debug/example-debug.apk
+rustup target add aarch64-linux-android x86_64-linux-android
+gpuiforge run
 ```
+
+External applications enable the bundled Android support in `gpuiforge.toml`:
+
+```toml
+[platforms.android]
+application-id = "dev.example.app"
+```
+
+GPUiForge derives the native library name from the application's Cargo package.
+No recipe or local GPUI checkout path is required.
+
+The platform menu offers desktop and Android. Android run prompts for a device
+and builds its ABI. `gpuiforge build android` packages both configured ABIs;
+`gpuiforge run android --device emulator-5554` selects a device explicitly.
+
+`gpuiforge.toml` belongs to the Rust application. GPUiForge generates the
+Kotlin host and Gradle application under
+`target/gpuiforge/android`. The debug APK is written to
+`target/gpuiforge/android/app/build/outputs/apk/debug/app-debug.apk`.
+
+Use `gpuiforge platform eject android` to export the generated application to
+`platforms/android` and switch the TOML configuration to manual management.
+Subsequent builds preserve user-owned Kotlin, Manifest, and Gradle files.
+See [GPUiForge configuration](../../../tools/gpuiforge/docs/usage.md) for recipes,
+template variables, and ownership rules.
 
 The application is a Cargo binary package with `src/main.rs`. The Android build
 generates a library manifest under `target/android` from the application's
 dependencies and workspace settings, then produces the native library required
 by the APK. The application's manifest does not need a `[lib]` target.
-The shell build helper supports Linux and macOS hosts. The host library's AAR is
-built with `./gradlew :host:assembleDebug`; the APK includes it alongside the
-packaged Rust application.
+The shell build helper supports Linux and macOS hosts. The generated project's
+`:host` module builds the Kotlin host library alongside the Rust application.
 
 The packaging helper currently accepts a binary package with `src/main.rs` and
 no companion library or explicit `[[bin]]` targets.
 
-ARM64 is the default. `gpuiAbi` accepts Android ABI names, architecture names,
-or Rust target triples:
+The configured `abis` list uses Android ABI names:
 
 | Architecture | Android ABI | Rust target |
 | --- | --- | --- |
 | `aarch64` | `arm64-v8a` | `aarch64-linux-android` |
 | `x86_64` | `x86_64` | `x86_64-linux-android` |
 
-```sh
-./gradlew :example:assembleDebug -PgpuiAbi=aarch64
-```
-
-For an x86_64 emulator, install Rust's `x86_64-linux-android` target and use
-`-PgpuiAbi=x86_64`. To include both architectures in one APK:
-
-```sh
-rustup target add aarch64-linux-android x86_64-linux-android
-./gradlew :example:assembleDebug -PgpuiAbis=aarch64,x86_64
-```
-
-Use either `gpuiAbi` or `gpuiAbis`. A multi-ABI APK is larger; Android loads the
-library matching the device. The APK is written to
-`example/build/outputs/apk/debug/example-debug.apk` for either configuration.
+A multi-ABI APK is larger; Android loads the library matching the device.
 Native libraries use 16 KB load-segment and RELRO alignment. The APK's native
 library packaging uses the Android Gradle plugin's 16 KB alignment support.
 
@@ -94,6 +104,15 @@ receive Choreographer ticks. Unchanged UI does not require a new GPU draw.
 If a frame cannot be presented, the next active tick retries it.
 
 ## Host ownership
+
+The host library is written in Kotlin and can also be called from Java. A
+full-page Kotlin host only selects its Rust library:
+
+```kotlin
+class MainActivity : GpuiActivity() {
+    override fun nativeLibraryName() = "my_app"
+}
+```
 
 Load the application library before creating a `GpuiSession`. `GpuiActivity`
 does this through its `nativeLibraryName()` override and hosts a full-page View.

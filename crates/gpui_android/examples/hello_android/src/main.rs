@@ -1,5 +1,5 @@
 use gpui::{prelude::*, *};
-use uic::components::input::{Input, TextInput};
+use uic::components::input::{Input, InputEvent, InputMode, TextInput};
 
 #[gpui_platform::main]
 fn main() {
@@ -13,6 +13,18 @@ fn main() {
                 clipboard_status: "Copy the counter or paste text from another app.".into(),
                 title: cx.new(|cx| TextInput::new(cx).placeholder("Name")),
                 text: cx.new(|cx| TextInput::new(cx).multiline().placeholder("Message")),
+                password: cx.new(|cx| TextInput::new(cx).password().placeholder("Password")),
+                password_visible: false,
+                submissions: 0,
+            });
+            view.update(cx, |this, cx| {
+                cx.subscribe(&this.title, |this, _, event, cx| {
+                    if matches!(event, InputEvent::Submit(_)) {
+                        this.submissions += 1;
+                        cx.notify();
+                    }
+                })
+                .detach();
             });
             window.on_system_back(
                 cx,
@@ -35,6 +47,9 @@ struct Counter {
     clipboard_status: String,
     text: Entity<TextInput>,
     title: Entity<TextInput>,
+    password: Entity<TextInput>,
+    password_visible: bool,
+    submissions: usize,
 }
 
 fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
@@ -102,7 +117,30 @@ impl Render for Counter {
                     .child("A Rust interface inside an Android View."),
             )
             .child(Input::new(&self.title).text_color(rgb(0x172033)))
+            .child(
+                div()
+                    .text_sm()
+                    .child(format!("Name submissions: {}", self.submissions)),
+            )
             .child(Input::new(&self.text).rows(2).text_color(rgb(0x172033)))
+            .child(Input::new(&self.password).text_color(rgb(0x172033)))
+            .child(
+                button("password-mode", "Show / hide password").on_click(cx.listener(
+                    |this, _, window, cx| {
+                        this.password_visible = !this.password_visible;
+                        this.password.update(cx, |input, cx| {
+                            input.set_mode(if this.password_visible {
+                                InputMode::Text
+                            } else {
+                                InputMode::Password
+                            });
+                            cx.notify();
+                        });
+                        window.focus(&this.password.focus_handle(cx), cx);
+                        window.show_soft_keyboard();
+                    },
+                )),
+            )
             .child(
                 div()
                     .flex_shrink_0()

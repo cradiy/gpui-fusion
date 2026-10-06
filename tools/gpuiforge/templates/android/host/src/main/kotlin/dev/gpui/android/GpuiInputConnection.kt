@@ -6,6 +6,7 @@ import android.text.Editable
 import android.text.TextUtils
 import android.view.KeyEvent
 import android.view.inputmethod.BaseInputConnection
+import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.ExtractedText
 import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
@@ -141,13 +142,23 @@ internal open class GpuiInputConnection(
         if (monitorExtracted && text != null) view.inputManager().updateExtractedText(view, extractedToken, text)
     }
 
-    override fun sendKeyEvent(event: KeyEvent) = !closed && view.dispatchKeyEvent(event)
+    override fun sendKeyEvent(event: KeyEvent) = state() != null && view.dispatchKeyEvent(event)
     override fun performEditorAction(action: Int): Boolean {
-        if (closed) return false
-        session.key("enter", 0, true)
-        session.key("enter", 0, false)
-        view.syncInput(false)
-        return true
+        return try {
+            val current = state() ?: return false
+            val expected = if (current.multiline) EditorInfo.IME_ACTION_NONE else EditorInfo.IME_ACTION_DONE
+            if (action != expected && action != EditorInfo.IME_ACTION_UNSPECIFIED) return false
+            if (!session.edit(epoch, 2, "", 0, 0)) return false
+            if (state() == null) return false
+            session.key("enter", 0, true)
+            session.key("enter", 0, false)
+            view.syncInput(false)
+            if (!current.multiline && state() != null) view.requestSoftKeyboard(false)
+            true
+        } catch (error: RuntimeException) {
+            session.fail(error)
+            false
+        }
     }
     override fun performContextMenuAction(id: Int): Boolean {
         val key = when (id) {
@@ -157,7 +168,7 @@ internal open class GpuiInputConnection(
             android.R.id.paste -> "v"
             else -> return false
         }
-        if (closed) return false
+        if (state() == null) return false
         session.key(key, 2, true)
         session.key(key, 2, false)
         view.syncInput(false)

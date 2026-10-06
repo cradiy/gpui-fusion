@@ -1785,6 +1785,13 @@ impl PlatformInputHandler {
             .unwrap_or(true)
     }
 
+    /// Returns the focused editor's text entry mode.
+    pub fn text_input_mode(&mut self) -> crate::TextInputMode {
+        self.cx
+            .update(|window, cx| self.handler.text_input_mode(window, cx))
+            .unwrap_or_default()
+    }
+
     #[allow(dead_code)]
     pub fn query_prefers_ime_for_printable_keys(&mut self) -> bool {
         self.cx
@@ -2006,6 +2013,12 @@ pub trait InputHandler: 'static {
     /// Returns whether this handler is accepting text input to be inserted.
     fn accepts_text_input(&mut self, _window: &mut Window, _cx: &mut App) -> bool {
         true
+    }
+
+    /// Describes the editor to platform input methods. This does not validate inserted text.
+    /// Backends may use it to select keyboard layout, action keys, and privacy settings.
+    fn text_input_mode(&mut self, _window: &mut Window, _cx: &mut App) -> crate::TextInputMode {
+        crate::TextInputMode::default()
     }
 
     /// Returns whether printable keys should be routed to the IME before keybinding

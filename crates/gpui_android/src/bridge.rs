@@ -379,7 +379,7 @@ extern "system" fn input_state(mut env: JNIEnv, _: JClass, id: jlong) -> jobject
         Ok(env
             .new_object(
                 "dev/gpui/android/TextInputState",
-                "(JLjava/lang/String;IIIIIZ)V",
+                "(JLjava/lang/String;IIIIIZZZ)V",
                 &[
                     JValue::Long(state.epoch as i64),
                     JValue::Object(&text),
@@ -389,6 +389,8 @@ extern "system" fn input_state(mut env: JNIEnv, _: JClass, id: jlong) -> jobject
                     JValue::Int(state.marked.as_ref().map_or(-1, |r| r.start as i32)),
                     JValue::Int(state.marked.as_ref().map_or(-1, |r| r.end as i32)),
                     JValue::Bool(state.hit as u8),
+                    JValue::Bool((state.mode == gpui::TextInputMode::Multiline) as u8),
+                    JValue::Bool((state.mode == gpui::TextInputMode::Password) as u8),
                 ],
             )?
             .into_raw())

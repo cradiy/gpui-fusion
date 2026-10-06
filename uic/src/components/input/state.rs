@@ -1105,6 +1105,14 @@ impl TextInput {
 }
 
 impl EntityInputHandler for TextInput {
+    fn text_input_mode(&self, _: &mut Window, _: &mut Context<Self>) -> gpui::TextInputMode {
+        match self.mode {
+            InputMode::Text => gpui::TextInputMode::SingleLine,
+            InputMode::Multiline => gpui::TextInputMode::Multiline,
+            InputMode::Password => gpui::TextInputMode::Password,
+        }
+    }
+
     fn accepts_text_input(&self, _: &mut Window, _: &mut Context<Self>) -> bool {
         !self.disabled
     }

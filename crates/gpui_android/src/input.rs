@@ -1,9 +1,10 @@
 use crate::window::AndroidWindow;
-use gpui::PlatformInputHandler;
+use gpui::{PlatformInputHandler, TextInputMode};
 use std::ops::Range;
 
 pub(crate) struct InputState {
     pub epoch: u64,
+    pub mode: TextInputMode,
     pub text: Option<String>,
     pub offset: usize,
     pub anchor: usize,
@@ -24,7 +25,18 @@ impl AndroidWindow {
                 .then(|| handler.input_focus_id())
                 .flatten()
         });
-        if self.input_focus.replace(focus) != focus {
+        let mode = handler
+            .as_mut()
+            .map(|handler| handler.text_input_mode())
+            .unwrap_or_default();
+        let focus_changed = self.input_focus.replace(focus) != focus;
+        let mode_changed = self.input_mode.replace(mode) != mode;
+        if mode_changed && !focus_changed && focus.is_some() {
+            if let Some(handler) = handler.as_mut() {
+                handler.unmark_text();
+            }
+        }
+        if focus_changed || mode_changed {
             self.input_epoch.set(self.input_epoch.get().wrapping_add(1));
         }
         let result = if focus.is_some() {
@@ -40,6 +52,7 @@ impl AndroidWindow {
 
     pub(crate) fn input_state(&self) -> Option<InputState> {
         self.with_input(|handler, epoch| {
+            let mode = self.input_mode.get();
             let selection = handler.selected_text_range(false)?;
             let marked = handler.marked_text_range();
             let start = selection
@@ -52,16 +65,18 @@ impl AndroidWindow {
                 .max(marked.as_ref().map_or(0, |r| r.end));
             let mut offset = start;
             // A handler may withhold surrounding text for sensitive fields.
-            let text =
-                if end.saturating_sub(start) <= 4096 && handler.surrounding_text(4096).is_some() {
-                    let range = start.saturating_sub(1024)..end.saturating_add(1024);
-                    let mut actual = None;
-                    let text = handler.text_for_range(range.clone(), &mut actual);
-                    offset = actual.unwrap_or(range).start;
-                    text
-                } else {
-                    None
-                };
+            let text = if mode != TextInputMode::Password
+                && end.saturating_sub(start) <= 4096
+                && handler.surrounding_text(4096).is_some()
+            {
+                let range = start.saturating_sub(1024)..end.saturating_add(1024);
+                let mut actual = None;
+                let text = handler.text_for_range(range.clone(), &mut actual);
+                offset = actual.unwrap_or(range).start;
+                text
+            } else {
+                None
+            };
             let (anchor, head) = if selection.reversed {
                 (selection.range.end, selection.range.start)
             } else {
@@ -69,6 +84,7 @@ impl AndroidWindow {
             };
             Some(InputState {
                 epoch,
+                mode,
                 text,
                 offset,
                 anchor,

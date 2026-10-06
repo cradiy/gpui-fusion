@@ -6,6 +6,18 @@ use std::ops::Range;
 mod surrounding;
 pub use surrounding::SurroundingText;
 
+/// Text entry semantics exposed to platform input methods.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TextInputMode {
+    /// A single line, with a completion action instead of a newline key.
+    SingleLine,
+    /// Multiple lines, with a newline key. This is the default for editors.
+    #[default]
+    Multiline,
+    /// A single secret value, requesting password entry without surrounding context.
+    Password,
+}
+
 /// Implement this trait to allow views to handle textual input when implementing an editor, field, etc.
 ///
 /// Once your view implements this trait, you can use it to construct an [`ElementInputHandler<V>`].
@@ -13,6 +25,11 @@ pub use surrounding::SurroundingText;
 ///
 /// See [`InputHandler`] for details on how to implement each method.
 pub trait EntityInputHandler: 'static + Sized {
+    /// See [`InputHandler::text_input_mode`].
+    fn text_input_mode(&self, _window: &mut Window, _cx: &mut Context<Self>) -> TextInputMode {
+        TextInputMode::default()
+    }
+
     /// See [`InputHandler::text_for_range`] for details
     fn text_for_range(
         &mut self,
@@ -153,6 +170,11 @@ impl<V: 'static> ElementInputHandler<V> {
 }
 
 impl<V: EntityInputHandler> InputHandler for ElementInputHandler<V> {
+    fn text_input_mode(&mut self, window: &mut Window, cx: &mut App) -> TextInputMode {
+        self.view
+            .update(cx, |view, cx| view.text_input_mode(window, cx))
+    }
+
     fn selected_text_range(
         &mut self,
         ignore_disabled_input: bool,

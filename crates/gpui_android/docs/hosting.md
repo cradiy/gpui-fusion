@@ -183,10 +183,20 @@ to show an on-screen keyboard when a hardware keyboard is connected.
 
 Surrounding text queries are bounded around the selection and composition.
 Handlers that withhold `surrounding_text` expose no text snapshot to the IME.
-The host uses a generic multiline text keyboard, or a password keyboard when
-no snapshot is available, and disables personalized learning. Per-field keyboard
-types, native selection handles, cursor-anchor updates, rich IME content, and
-hardware dead-key composition are not implemented.
+`EntityInputHandler::text_input_mode` describes the field as `SingleLine`,
+`Multiline`, or `Password`; custom editors default to `Multiline`. UIC maps its
+existing input modes automatically. Single-line and password fields request
+a Done key; multiline fields request a newline key. Done dispatches Enter
+(UIC emits `InputEvent::Submit`) and hides the keyboard if focus has not changed.
+UIC's multiline Enter inserts a newline. Unrecognized editor actions are rejected.
+
+Password fields never export surrounding text, even when their handler supplies
+it. Personalized learning is disabled for all modes. Changing mode restarts the
+input connection, completes composition, and invalidates callbacks from the old
+connection. Missing surrounding text alone does not change the keyboard type.
+Numeric/email layouts, custom action labels, native selection handles,
+cursor-anchor updates, rich IME content, and hardware dead-key composition are
+not implemented.
 
 `GpuiActivity` resizes its content for the keyboard. Embedded hosts must apply
 their own keyboard insets. Register fonts covering the languages your UI uses;
@@ -245,6 +255,10 @@ Tap the text field, type and delete text, move the cursor, and replace a
 selection. With a composing IME, check preedit updates, candidate commitment,
 and deletion around emoji. Dismiss the keyboard with Back, then tap the field
 to reopen it. Check that the visible content resizes when the keyboard opens.
+Name's Done key must increment Name submissions without inserting a newline;
+Message must allow newlines. Password must use password input settings and hide
+its contents. Toggle Show / hide password while editing to check connection
+refresh without losing the value.
 
 Open details, focus its text field, and press Back: the keyboard closes first,
 then another Back returns to the main page. At the main page, Back uses Android's

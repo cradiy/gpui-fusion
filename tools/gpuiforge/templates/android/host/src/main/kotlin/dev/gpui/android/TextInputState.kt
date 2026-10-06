@@ -9,4 +9,6 @@ internal class TextInputState(
     val composingStart: Int,
     val composingEnd: Int,
     val hit: Boolean,
+    val multiline: Boolean,
+    val sensitive: Boolean,
 )

@@ -23,6 +23,8 @@ class GpuiSession : AutoCloseable {
     private var phase = BACKGROUND
     private var closeRequested: Runnable? = null
     private var errorHandler: Consumer<RuntimeException>? = null
+    private var backEnabled = false
+    private var backChanged: Consumer<Boolean>? = null
 
     init { checkThread() }
 
@@ -73,6 +75,20 @@ class GpuiSession : AutoCloseable {
     internal fun active() = !closed && phase == ACTIVE
     fun isClosed() = closed
 
+    /** Reports whether Rust currently handles Back. The host owns callback registration. */
+    fun setOnBackEnabledChanged(callback: Consumer<Boolean>?) {
+        checkThread()
+        backChanged = callback
+        callback?.accept(!closed && backEnabled)
+    }
+
+    /** Dispatches committed system Back after the IME has had a chance to consume it. */
+    fun handleSystemBack(): Boolean {
+        checkThread()
+        if (!active() || !backEnabled || id == 0L) return false
+        return try { nativeBack(id) } catch (error: RuntimeException) { fail(error); false }
+    }
+
     /** Forward the host's onStart/onResume/onPause/onStop transitions. */
     fun setLifecycle(next: Int) {
         checkThread()
@@ -110,6 +126,15 @@ class GpuiSession : AutoCloseable {
     private fun requestClose() {
         handler.postAtTime({
             if (!closed) closeRequested?.run()
+        }, this, SystemClock.uptimeMillis())
+    }
+
+    private fun setBackEnabled(enabled: Boolean) {
+        handler.postAtTime({
+            if (!closed && backEnabled != enabled) {
+                backEnabled = enabled
+                backChanged?.accept(enabled)
+            }
         }, this, SystemClock.uptimeMillis())
     }
 
@@ -161,6 +186,9 @@ class GpuiSession : AutoCloseable {
             try {
                 if (previous != 0L) nativeClose(previous)
             } finally {
+                backEnabled = false
+                backChanged?.accept(false)
+                backChanged = null
                 closeRequested = null
                 errorHandler = null
                 view.clear()
@@ -189,6 +217,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeKey(id: Long, name: String, modifiers: Int, down: Boolean): Boolean
         @JvmStatic private external fun nativeLifecycle(id: Long, phase: Int)
         @JvmStatic private external fun nativeFocus(id: Long, active: Boolean)
+        @JvmStatic private external fun nativeBack(id: Long): Boolean
         @JvmStatic private external fun nativeTouch(id: Long, pointer: Int, phase: Int, x: Float, y: Float): Boolean
         @JvmStatic private external fun nativeTap(id: Long, x: Float, y: Float)
         @JvmStatic private external fun nativeScroll(id: Long, phase: Int, x: Float, y: Float, dx: Float, dy: Float)

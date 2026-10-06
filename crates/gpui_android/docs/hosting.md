@@ -169,8 +169,7 @@ are invalidated when their View detaches or their input focus changes.
 Input components must implement `EntityInputHandler::set_selected_text_range`
 to accept cursor and selection changes from Android. UIC's `TextInput` implements
 this contract. Tapping a focused input requests the soft keyboard. Hardware
-text keys and common editing shortcuts are forwarded to GPUI; system Back is
-left to Android.
+text keys and common editing shortcuts are forwarded to GPUI.
 
 Surrounding text queries are bounded around the selection and composition.
 Handlers that withhold `surrounding_text` expose no text snapshot to the IME.
@@ -182,6 +181,27 @@ hardware dead-key composition are not implemented.
 `GpuiActivity` resizes its content for the keyboard. Embedded hosts must apply
 their own keyboard insets. Register fonts covering the languages your UI uses;
 the bundled Latin font is not a complete CJK or emoji font collection.
+
+## System Back
+
+Register a window callback with `Window::on_system_back(cx, callback)` and call
+`Window::set_back_enabled(true)` while an in-app destination can go back.
+Disable it at the navigation root. The callback should update navigation state
+and disable Back when returning to the root; capture entities weakly or use
+`Window::handler_for`.
+
+`GpuiActivity` handles committed Back through `OnBackInvokedDispatcher` on
+Android 13 and later and `onBackPressed` on older releases. Its callback is
+unregistered while the IME is visible, the Activity is paused, or application
+Back is disabled. The keyboard closes before in-app navigation, and the root
+keeps Android's default Back behavior. Interactive gesture progress is not
+forwarded to GPUI.
+
+Custom hosts use `GpuiSession.setOnBackEnabledChanged` to register or unregister
+their navigation callbacks, then call `GpuiSession.handleSystemBack()` when Back
+is committed. A `false` result leaves navigation to the host. Enable
+`android:enableOnBackInvokedCallback` in the hosting Activity's manifest when
+using the platform dispatcher. Clear the listener when detaching the host.
 
 ## Clipboard and links
 
@@ -215,6 +235,11 @@ Tap the text field, type and delete text, move the cursor, and replace a
 selection. With a composing IME, check preedit updates, candidate commitment,
 and deletion around emoji. Dismiss the keyboard with Back, then tap the field
 to reopen it. Check that the visible content resizes when the keyboard opens.
+
+Open details, focus its text field, and press Back: the keyboard closes first,
+then another Back returns to the main page. At the main page, Back uses Android's
+default navigation. Repeat with the edge gesture and after backgrounding the
+details page; state and Back handling must survive Activity recreation as well.
 
 Use Copy count and Paste text to check clipboard round trips, then copy text
 between GPUI and another application. Include multiline text and non-ASCII

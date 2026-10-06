@@ -5,6 +5,8 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.WindowInsets
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import android.widget.FrameLayout
 import android.widget.TextView
 import kotlin.math.roundToInt
@@ -12,12 +14,20 @@ import kotlin.math.roundToInt
 /** Full-page host retaining the Rust application across configuration changes. */
 abstract class GpuiActivity : Activity() {
     private lateinit var session: GpuiSession
+    private var backEnabled = false
+    private var resumed = false
+    private var imeVisible = false
+    private var backRegistration: AutoCloseable? = null
     protected abstract fun nativeLibraryName(): String
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         System.loadLibrary(nativeLibraryName())
         session = lastNonConfigurationInstance as? GpuiSession ?: GpuiSession()
+        session.setOnBackEnabledChanged { enabled ->
+            backEnabled = enabled
+            updateBackRegistration()
+        }
         session.setOnCloseRequested { finish() }
         session.setOnError { error ->
             Log.e("GPUI", "Unable to display GPUI", error)
@@ -33,6 +43,8 @@ abstract class GpuiActivity : Activity() {
             if (Build.VERSION.SDK_INT >= 30) {
                 val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
                 val keyboard = insets.getInsets(WindowInsets.Type.ime())
+                imeVisible = insets.isVisible(WindowInsets.Type.ime())
+                updateBackRegistration()
                 view.setPadding(safe.left, safe.top, safe.right, maxOf(safe.bottom, keyboard.bottom))
             } else {
                 @Suppress("DEPRECATION")
@@ -47,13 +59,52 @@ abstract class GpuiActivity : Activity() {
 
     override fun onRetainNonConfigurationInstance(): Any? = if (session.isClosed()) null else session
     override fun onStart() { super.onStart(); session.setLifecycle(GpuiSession.FOREGROUND) }
-    override fun onResume() { super.onResume(); session.setLifecycle(GpuiSession.ACTIVE) }
-    override fun onPause() { session.setLifecycle(GpuiSession.INACTIVE); super.onPause() }
+    override fun onResume() {
+        super.onResume()
+        session.setLifecycle(GpuiSession.ACTIVE)
+        resumed = true
+        updateBackRegistration()
+    }
+    override fun onPause() {
+        resumed = false
+        updateBackRegistration()
+        session.setLifecycle(GpuiSession.INACTIVE)
+        super.onPause()
+    }
     override fun onStop() { session.setLifecycle(GpuiSession.BACKGROUND); super.onStop() }
     override fun onDestroy() {
+        backRegistration?.close()
+        backRegistration = null
+        session.setOnBackEnabledChanged(null)
         session.setOnCloseRequested(null)
         session.setOnError(null)
         if (!isChangingConfigurations) session.close()
         super.onDestroy()
+    }
+
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    override fun onBackPressed() {
+        if (!session.handleSystemBack()) super.onBackPressed()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun updateBackRegistration() {
+        if (Build.VERSION.SDK_INT < 33) return
+        val enabled = resumed && backEnabled && !imeVisible
+        if (enabled && backRegistration == null) {
+            backRegistration = BackApi33.register(this) { onBackPressed() }
+        } else if (!enabled) {
+            backRegistration?.close()
+            backRegistration = null
+        }
+    }
+
+    private object BackApi33 {
+        fun register(activity: Activity, action: () -> Unit): AutoCloseable {
+            val dispatcher = activity.onBackInvokedDispatcher
+            val callback = OnBackInvokedCallback { action() }
+            dispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback)
+            return AutoCloseable { dispatcher.unregisterOnBackInvokedCallback(callback) }
+        }
     }
 }

@@ -37,6 +37,7 @@ impl PlatformDisplay for AndroidDisplay {
 
 #[derive(Default)]
 struct Callbacks {
+    back: Option<Box<dyn FnMut()>>,
     frame: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     input: Option<Box<dyn FnMut(PlatformInput) -> DispatchEventResult>>,
     active: Option<Box<dyn FnMut(bool)>>,
@@ -45,6 +46,8 @@ struct Callbacks {
 }
 
 pub(crate) struct AndroidWindow {
+    host: Arc<crate::bridge::Host>,
+    back_enabled: Cell<bool>,
     // Renderer must be dropped before the last native window reference.
     renderer: RefCell<WgpuRenderer>,
     native: RefCell<Option<NativeWindow>>,
@@ -61,6 +64,7 @@ pub(crate) struct AndroidWindow {
 
 impl AndroidWindow {
     pub fn new(
+        host: Arc<crate::bridge::Host>,
         native: NativeWindow,
         renderer: WgpuRenderer,
         width: i32,
@@ -68,6 +72,8 @@ impl AndroidWindow {
         density: f32,
     ) -> Self {
         Self {
+            host,
+            back_enabled: Cell::new(false),
             renderer: RefCell::new(renderer),
             native: RefCell::new(Some(native)),
             display: Rc::new(AndroidDisplay {
@@ -86,6 +92,19 @@ impl AndroidWindow {
             input_dirty: Cell::new(true),
             callbacks: RefCell::default(),
         }
+    }
+
+    pub fn system_back(&self) -> bool {
+        if !self.active.get() || !self.back_enabled.get() {
+            return false;
+        }
+        let callback = self.callbacks.borrow_mut().back.take();
+        let Some(mut callback) = callback else {
+            return false;
+        };
+        callback();
+        self.callbacks.borrow_mut().back.get_or_insert(callback);
+        true
     }
 
     pub fn attach(
@@ -368,4 +387,21 @@ impl PlatformWindow for AndroidWindowHandle {
         Some(self.renderer.borrow().gpu_specs())
     }
     fn update_ime_position(&self, _: Bounds<Pixels>) {}
+
+    fn set_back_handler(&self, callback: Box<dyn FnMut()>) {
+        self.callbacks.borrow_mut().back = Some(callback);
+        if self.back_enabled.get() {
+            if let Err(error) = self.host.set_back_enabled(true) {
+                log::error!("Unable to enable Android Back: {error:#}");
+            }
+        }
+    }
+
+    fn set_back_enabled(&self, enabled: bool) {
+        if self.back_enabled.replace(enabled) != enabled {
+            if let Err(error) = self.host.set_back_enabled(enabled) {
+                log::error!("Unable to update Android Back: {error:#}");
+            }
+        }
+    }
 }

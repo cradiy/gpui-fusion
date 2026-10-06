@@ -5,20 +5,31 @@ use uic::components::input::{Input, TextInput};
 fn main() {
     gpui_platform::application().run(|cx| {
         uic::init(cx);
-        cx.open_window(WindowOptions::default(), |_, cx| {
-            cx.new(|cx| Counter {
+        cx.open_window(WindowOptions::default(), |window, cx| {
+            let view = cx.new(|cx| Counter {
+                details: false,
                 count: 0,
                 scroll: ScrollHandle::new(),
                 clipboard_status: "Copy the counter or paste text from another app.".into(),
                 title: cx.new(|cx| TextInput::new(cx).placeholder("Name")),
                 text: cx.new(|cx| TextInput::new(cx).multiline().placeholder("Message")),
-            })
+            });
+            window.on_system_back(
+                cx,
+                window.handler_for(&view, |this, window, cx| {
+                    this.details = false;
+                    window.set_back_enabled(false);
+                    cx.notify();
+                }),
+            );
+            view
         })
         .expect("failed to open the GPUI window");
     });
 }
 
 struct Counter {
+    details: bool,
     count: usize,
     scroll: ScrollHandle,
     clipboard_status: String,
@@ -36,7 +47,28 @@ fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
 }
 
 impl Render for Counter {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        window.set_back_enabled(self.details);
+        if self.details {
+            return div()
+                .size_full()
+                .bg(rgb(0x101923))
+                .text_color(rgb(0xe7edf7))
+                .font_family("IBM Plex Sans")
+                .p_6()
+                .flex()
+                .flex_col()
+                .gap_5()
+                .child(div().text_3xl().child("Details"))
+                .child("System Back returns to the main page. With the keyboard open, Back hides it first.")
+                .child(Input::new(&self.title).text_color(rgb(0x172033)))
+                .child(button("back", "Back to main page").on_click(cx.listener(|this, _, window, cx| {
+                    this.details = false;
+                    window.set_back_enabled(false);
+                    cx.notify();
+                })))
+                .into_any_element();
+        }
         div()
             .id("page")
             .size_full()
@@ -50,6 +82,12 @@ impl Render for Counter {
             .flex_col()
             .gap_5()
             .child(div().text_3xl().child("GPUI on Android"))
+            .child(
+                button("details", "Open details").on_click(cx.listener(|this, _, _, cx| {
+                    this.details = true;
+                    cx.notify();
+                })),
+            )
             .child(
                 div()
                     .text_color(rgb(0xa0b1c6))
@@ -159,5 +197,6 @@ impl Render for Counter {
                         cx.notify();
                     }))
             }))
+            .into_any_element()
     }
 }

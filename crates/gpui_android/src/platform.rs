@@ -57,7 +57,14 @@ impl AndroidPlatform {
             },
             None,
         )?;
-        let window = Rc::new(AndroidWindow::new(native, renderer, width, height, density));
+        let window = Rc::new(AndroidWindow::new(
+            host.clone(),
+            native,
+            renderer,
+            width,
+            height,
+            density,
+        ));
         Ok(Rc::new(Self {
             dispatcher,
             host,

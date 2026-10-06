@@ -2792,6 +2792,25 @@ impl Window {
         }))
     }
 
+    /// Sets the system Back callback. Android invokes it only while Back is enabled.
+    /// The callback replaces the previous handler; desktop platforms do not invoke it.
+    pub fn on_system_back(
+        &self,
+        cx: &App,
+        mut callback: impl FnMut(&mut Window, &mut App) + 'static,
+    ) {
+        let mut cx = self.to_async(cx);
+        self.platform_window.set_back_handler(Box::new(move || {
+            let _ = cx.update(|window, cx| callback(window, cx));
+        }));
+    }
+
+    /// Enables application handling of system Back, for example while a detail page is open.
+    /// Keep this disabled at the navigation root to preserve the platform's default behavior.
+    pub fn set_back_enabled(&self, enabled: bool) {
+        self.platform_window.set_back_enabled(enabled);
+    }
+
     /// Read information about the GPU backing this window.
     /// Currently returns None on Mac and Windows.
     pub fn gpu_specs(&self) -> Option<GpuSpecs> {

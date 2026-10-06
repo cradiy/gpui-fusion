@@ -85,6 +85,18 @@ pub(crate) struct Host {
     object: GlobalRef,
 }
 impl Host {
+    pub fn set_back_enabled(&self, enabled: bool) -> Result<()> {
+        self.with_env(|env| {
+            env.call_method(
+                self.object.as_obj(),
+                "setBackEnabled",
+                "(Z)V",
+                &[JValue::Bool(enabled as u8)],
+            )?;
+            Ok(())
+        })
+    }
+
     fn with_env<T>(&self, call: impl FnOnce(&mut JNIEnv) -> Result<T>) -> Result<T> {
         let mut env = self.vm.attach_current_thread()?;
         env.with_local_frame(16, |env| {
@@ -205,6 +217,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         method("nativeKey", "(JLjava/lang/String;IZ)Z", key as *mut c_void),
         method("nativeLifecycle", "(JI)V", lifecycle as *mut c_void),
         method("nativeFocus", "(JZ)V", focus as *mut c_void),
+        method("nativeBack", "(J)Z", system_back as *mut c_void),
         method("nativeTouch", "(JIIFF)Z", touch as *mut c_void),
         method("nativeTap", "(JFF)V", tap as *mut c_void),
         method("nativeScroll", "(JIFFFF)V", scroll as *mut c_void),
@@ -442,6 +455,12 @@ extern "system" fn focus(mut env: JNIEnv, _: JClass, id: jlong, active: jboolean
         Ok(())
     });
 }
+extern "system" fn system_back(mut env: JNIEnv, _: JClass, id: jlong) -> jboolean {
+    call(&mut env, |_| {
+        Ok(session(id)?.platform.window.system_back() as u8)
+    })
+}
+
 extern "system" fn touch(
     mut env: JNIEnv,
     _: JClass,

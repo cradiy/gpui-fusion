@@ -104,6 +104,18 @@ fn bundled_android_generates_without_recipe_or_checkout() {
         );
     }
     let generated = app.0.join("target/gpuiforge/android");
+    let config: toml::Value =
+        toml::from_str(&fs::read_to_string(app.0.join("gpuiforge.toml")).unwrap()).unwrap();
+    assert!(
+        config["platforms"]["android"]["build"]
+            .as_array()
+            .is_some_and(|steps| !steps.is_empty())
+    );
+    assert!(
+        config["platforms"]["android"]["run"]
+            .as_array()
+            .is_some_and(|steps| !steps.is_empty())
+    );
     assert!(
         generated
             .join("host/src/main/kotlin/dev/gpui/android/GpuiView.kt")
@@ -130,6 +142,36 @@ fn bundled_android_generates_without_recipe_or_checkout() {
         .unwrap(),
         "user-owned host"
     );
+}
+
+#[test]
+fn missing_android_tools_stop_before_generating_or_starting_gradle() {
+    let app = Fixture::new();
+    fs::write(
+        app.0.join("Cargo.toml"),
+        "[package]\nname = 'fixture-app'\nversion = '0.1.0'\n",
+    )
+    .unwrap();
+    fs::remove_file(app.0.join("gpuiforge.toml")).unwrap();
+    app.ok(&["init", "--android", "--application-id", "dev.example.app"]);
+    let result = Command::new(env!("CARGO_BIN_EXE_gpuiforge"))
+        .args(["build", "android"])
+        .env("JAVA_HOME", app.0.join("missing-jdk"))
+        .env("ANDROID_HOME", app.0.join("missing-sdk"))
+        .env("ANDROID_NDK_HOME", app.0.join("missing-ndk"))
+        .current_dir(&app.0)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("JAVA_HOME")
+            && stderr.contains("SDK platform")
+            && stderr.contains("NDK tool missing"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("Running bash"));
+    assert!(!app.0.join("target/gpuiforge/android").exists());
 }
 
 #[test]
@@ -205,4 +247,82 @@ fn invalid_configuration_cannot_overwrite_existing_project() {
     assert!(!app.run(&["generate", "android"]).status.success());
     fs::write(&config, original).unwrap();
     assert!(!app.run(&["run"]).status.success());
+}
+
+#[cfg(unix)]
+#[test]
+fn android_run_obeys_configured_steps_and_stops_on_adb_errors() {
+    use std::os::unix::fs::PermissionsExt;
+    let app = Fixture::new();
+    let sdk = app.0.join("sdk/platform-tools");
+    fs::create_dir_all(&sdk).unwrap();
+    let adb = sdk.join("adb");
+    fs::write(
+        &adb,
+        r#"#!/bin/sh
+printf '%s\n' "$*" >> "$FORGE_LOG"
+case "$*" in
+  devices) printf 'List of devices attached\nfake-device\tdevice\n' ;;
+  *getprop*) printf 'x86_64\n' ;;
+  *install*) if [ "$FORGE_FAILURE" = install ]; then exit 1; fi ;;
+  *start*) if [ "$FORGE_FAILURE" = launch ]; then printf 'Error: launch failed\n'; fi ;;
+esac
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&adb, fs::Permissions::from_mode(0o755)).unwrap();
+    let recipe = fs::read_to_string(app.0.join("recipe.toml")).unwrap();
+    fs::write(
+        app.0.join("recipe.toml"),
+        recipe
+            .replace("[[build]]", "artifact = 'fixture.apk'\n[[build]]")
+            .replace(
+                "program = \"rustc\"\nargs = [\"--version\"]",
+                r#"program = "sh"
+args = ["-c", "printf apk > \"$1\"", "sh", "{{project_dir}}/fixture.apk"]"#,
+            ),
+    )
+    .unwrap();
+    let mut config = fs::read_to_string(app.0.join("gpuiforge.toml"))
+        .unwrap()
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap();
+    let defaults = include_str!("../android.toml")
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap();
+    config["platforms"]["android"]["activity"] = toml_edit::value("dev.example.MainActivity");
+    config["platforms"]["android"]["run"] = defaults["run"].clone();
+    config["platforms"]["android"]["run"]
+        .as_array_of_tables_mut()
+        .unwrap()
+        .get_mut(1)
+        .unwrap()["args"]
+        .as_array_mut()
+        .unwrap()
+        .push("-S");
+    fs::write(app.0.join("gpuiforge.toml"), config.to_string()).unwrap();
+    let log = app.0.join("adb.log");
+    for failure in ["", "install", "launch"] {
+        fs::write(&log, "").unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_gpuiforge"))
+            .args(["run", "android", "--device", "fake-device"])
+            .env("ANDROID_HOME", app.0.join("sdk"))
+            .env("FORGE_LOG", &log)
+            .env("FORGE_FAILURE", failure)
+            .current_dir(&app.0)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.success(),
+            failure.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let calls = fs::read_to_string(&log).unwrap();
+        assert!(calls.contains("-s fake-device install -r "));
+        assert_eq!(
+            calls.contains("dev.example.app/dev.example.MainActivity -S"),
+            failure != "install"
+        );
+    }
 }

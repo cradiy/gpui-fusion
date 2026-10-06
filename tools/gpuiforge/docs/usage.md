@@ -11,6 +11,8 @@ exit with 1.
 `gpuiforge init` creates desktop configuration for an existing Cargo package.
 To also configure Android, supply `--android`
 and `--application-id dev.example.app`. Existing configuration is never replaced.
+Initialization writes the default build and run steps into the configuration so
+they can be edited directly.
 
 ```toml
 [app]
@@ -26,6 +28,21 @@ args = ["run", "--profile", "{{cargo_profile}}"]
 
 [platforms.android]
 application-id = "dev.example.app"
+abis = ["arm64-v8a", "x86_64"]
+
+[[platforms.android.build]]
+program = "bash"
+args = ["gradlew", "--no-daemon", "-PgpuiAbis={{abis}}", "-PgpuiForgeExecutable={{tool_path}}", ":app:assemble{{variant}}"]
+cwd = "{{project_dir}}"
+
+[[platforms.android.run]]
+program = "{{adb}}"
+args = ["-s", "{{device}}", "install", "-r", "{{artifact}}"]
+
+[[platforms.android.run]]
+program = "{{adb}}"
+args = ["-s", "{{device}}", "shell", "am", "start", "-W", "-n", "{{application_id}}/{{activity}}"]
+error-pattern = "Error:"
 ```
 
 GPUiForge includes the Kotlin host, Gradle wrapper, Android template and Rust
@@ -35,6 +52,11 @@ underscores. The default Android build supports Linux and macOS build hosts,
 ARM64 and x86_64 Android, and packages
 Rust applications using `src/main.rs` without a companion library or explicit
 `[[bin]]`.
+
+`abis` selects the packaged architectures: `arm64-v8a` uses Rust target
+`aarch64-linux-android`, and `x86_64` uses `x86_64-linux-android`. Keep one entry
+for a single-architecture build or both for a multi-ABI APK. Device runs select
+a supported ABI from this list and fail if none matches the device.
 
 Optional Android settings can override the defaults:
 
@@ -50,11 +72,22 @@ version_name = "0.1.0"
 device. It builds only a compatible device ABI. `gpuiforge build android` builds
 all configured ABIs. Non-interactive runs require explicit platform/device
 arguments, for example `gpuiforge run android --device emulator-5554`.
+Android `run` selects the device and ABI, executes the configured build steps,
+then executes the configured run steps in order. Installation and launch are
+performed only by those run steps.
 Desktop/Web `run` executes its configured run steps, which must build or serve
 the application as needed. It does not separately execute the build steps.
 
-`gpuiforge doctor` checks Cargo, Rust, Java, Android SDK/NDK environment variables,
-ADB, and configured paths. It does not install tools, start emulators, or certify
+Default managed Android builds check the selected JDK's `java` and `javac`, SDK
+platform 36.1, NDK compilers for `min_sdk`, and Rust standard libraries before
+generating files or starting Gradle. `run` checks the device ABI; `build` checks
+all configured ABIs. Set `JAVA_HOME`, `ANDROID_HOME` (or `ANDROID_SDK_ROOT`) and
+`ANDROID_NDK_HOME` to complete installations. Custom build steps and manually
+maintained projects control their own prerequisite handling.
+
+`gpuiforge doctor` checks Cargo, Rust, Java, Android SDK/NDK tools, target standard
+libraries for the default Android build, ADB, and configured paths. It reports
+all missing prerequisites together. It does not install tools, start emulators, or certify
 driver compatibility. Platform selection lists configured targets; builds report
 unavailable tools. GPUiForge does not provide a bundled Web recipe.
 
@@ -85,6 +118,10 @@ Each step contains `program`, `args`, optional `cwd`, and optional `env`.
 Commands receive an argument vector directly; there is no implicit shell.
 The default working directory is the application directory. Steps stop on the
 first failure. Configured programs execute with the user's permissions.
+An optional `error-pattern` is a literal substring checked against both output
+streams. These steps capture and print output when the command finishes and fail
+when the substring appears, even if the process exits with zero. The default
+Android launch step uses this to detect errors reported by `adb shell am start`.
 
 Recipe `template`, `paths`, and copy `from` paths resolve relative to the recipe;
 application overrides resolve relative to `gpuiforge.toml`. `project-dir` always
@@ -106,6 +143,8 @@ the supplied Android recipe. `|xml` escapes XML values; `|kotlin` escapes Kotlin
 string contents, including dollar signs. Unknown variables or filters fail
 generation. Templates describe both build profiles; profile-specific values
 are intended for process steps and artifact paths.
+Android run steps also receive `adb` (the selected ADB executable), `device`
+(the selected serial) and `artifact` (the absolute APK path).
 
 The bundled Android template generates the Kotlin host, application, Gradle
 wrapper, Manifest and build script in the application's output directory.

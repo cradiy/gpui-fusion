@@ -34,6 +34,8 @@ pub struct Platform {
     pub _recipe: Option<PathBuf>,
     #[serde(skip)]
     pub bundled: bool,
+    #[serde(skip)]
+    pub default_android_build: bool,
     #[serde(default)]
     pub management: Management,
     pub template: Option<PathBuf>,
@@ -62,8 +64,8 @@ pub struct CopySpec {
     pub to: PathBuf,
 }
 
-#[derive(Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Step {
     pub program: String,
     #[serde(default)]
@@ -71,6 +73,7 @@ pub struct Step {
     pub cwd: Option<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    pub error_pattern: Option<String>,
 }
 
 pub struct Project {
@@ -177,6 +180,9 @@ impl Project {
                 .try_into()
                 .with_context(|| format!("invalid platform {name}"))?;
             platform.bundled = bundled;
+            platform.default_android_build = bundled
+                && platform.build
+                    == toml::from_str::<Platform>(include_str!("../android.toml"))?.build;
             if bundled && !platform.variables.contains_key("native_library") {
                 let manifest = read(&root.join("Cargo.toml"))?;
                 let package = manifest

@@ -11,3 +11,18 @@ args = ["run", "-p", "hello_android", "--profile", "{{cargo_profile}}"]
 
 [platforms.android]
 application-id = "dev.gpui.example"
+abis = ["arm64-v8a", "x86_64"]
+
+[[platforms.android.build]]
+program = "bash"
+args = ["gradlew", "--no-daemon", "-PgpuiAbis={{abis}}", "-PgpuiForgeExecutable={{tool_path}}", ":app:assemble{{variant}}"]
+cwd = "{{project_dir}}"
+
+[[platforms.android.run]]
+program = "{{adb}}"
+args = ["-s", "{{device}}", "install", "-r", "{{artifact}}"]
+
+[[platforms.android.run]]
+program = "{{adb}}"
+args = ["-s", "{{device}}", "shell", "am", "start", "-W", "-n", "{{application_id}}/{{activity}}"]
+error-pattern = "Error:"

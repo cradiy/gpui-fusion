@@ -12,3 +12,12 @@ version_name = "0.1.0"
 program = "bash"
 args = ["gradlew", "--no-daemon", "-PgpuiAbis={{abis}}", "-PgpuiForgeExecutable={{tool_path}}", ":app:assemble{{variant}}"]
 cwd = "{{project_dir}}"
+
+[[run]]
+program = "{{adb}}"
+args = ["-s", "{{device}}", "install", "-r", "{{artifact}}"]
+
+[[run]]
+program = "{{adb}}"
+args = ["-s", "{{device}}", "shell", "am", "start", "-W", "-n", "{{application_id}}/{{activity}}"]
+error-pattern = "Error:"

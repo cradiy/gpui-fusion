@@ -1,4 +1,5 @@
 mod android;
+mod android_tools;
 mod config;
 mod execute;
 mod generate;
@@ -160,6 +161,13 @@ fn init(
         .and_then(toml::Value::as_str)
         .context("Cargo.toml must describe an application package")?;
     let mut doc = toml_edit::DocumentMut::new();
+    doc["app"] = toml_edit::Item::Table(toml_edit::Table::new());
+    let mut platforms = toml_edit::Table::new();
+    platforms.set_implicit(true);
+    doc["platforms"] = toml_edit::Item::Table(platforms);
+    let mut desktop = toml_edit::Table::new();
+    desktop.set_implicit(true);
+    doc["platforms"]["desktop"] = toml_edit::Item::Table(desktop);
     doc["app"]["name"] = toml_edit::value(name.unwrap_or_else(|| package.to_owned()));
     for (kind, command) in [("build", "build"), ("run", "run")] {
         let mut step = toml_edit::Table::new();
@@ -179,7 +187,13 @@ fn init(
         "--application-id requires --android or --android-recipe"
     );
     if android {
+        doc["platforms"]["android"] = toml_edit::Item::Table(toml_edit::Table::new());
         let id = id.context("--application-id is required for Android")?;
+        let defaults: toml_edit::DocumentMut = if let Some(recipe) = &recipe {
+            fs::read_to_string(recipe)?.parse()?
+        } else {
+            include_str!("../android.toml").parse()?
+        };
         if let Some(recipe) = recipe {
             doc["platforms"]["android"]["recipe"] = toml_edit::value(
                 recipe
@@ -189,6 +203,11 @@ fn init(
             );
         }
         doc["platforms"]["android"]["application-id"] = toml_edit::value(id);
+        for field in ["abis", "build", "run"] {
+            if let Some(value) = defaults.get(field) {
+                doc["platforms"]["android"][field] = value.clone();
+            }
+        }
     }
     let mut file = fs::OpenOptions::new()
         .write(true)

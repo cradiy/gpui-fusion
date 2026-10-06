@@ -81,9 +81,23 @@ pub fn steps(project: &Project, steps: &[Step], vars: &Variables) -> Result<()> 
         for (key, value) in &step.env {
             command.env(key, expand(value, vars)?);
         }
-        let status = command
-            .status()
-            .with_context(|| format!("starting {program} in {}", cwd.display()))?;
+        let status = if let Some(pattern) = &step.error_pattern {
+            let output = command
+                .output()
+                .with_context(|| format!("starting {program} in {}", cwd.display()))?;
+            io::stdout().write_all(&output.stdout)?;
+            io::stderr().write_all(&output.stderr)?;
+            ensure!(
+                !String::from_utf8_lossy(&output.stdout).contains(pattern)
+                    && !String::from_utf8_lossy(&output.stderr).contains(pattern),
+                "{program} reported an error matching {pattern:?}"
+            );
+            output.status
+        } else {
+            command
+                .status()
+                .with_context(|| format!("starting {program} in {}", cwd.display()))?
+        };
         ensure!(status.success(), "{program} failed: {status}");
     }
     Ok(())
@@ -95,6 +109,9 @@ pub fn build(project: &Project, name: &str, release: bool, abi: Option<&str>) ->
         !platform.build.is_empty(),
         "no build steps configured for {name}"
     );
+    if platform.default_android_build && platform.management == Management::Managed {
+        crate::android_tools::preflight(project, abi)?;
+    }
     if (platform.bundled || platform.template.is_some())
         && platform.management == Management::Managed
     {
@@ -172,6 +189,10 @@ pub fn run(project: &Project, name: &str, release: bool, device: Option<&str>) -
         let vars = project.variables(name, release, None)?;
         return steps(project, &platform.run, &vars);
     }
+    ensure!(
+        !platform.run.is_empty(),
+        "no run steps configured for android"
+    );
     let devices = devices()?;
     ensure!(
         !devices.is_empty(),
@@ -192,92 +213,22 @@ pub fn run(project: &Project, name: &str, release: bool, device: Option<&str>) -
         .split(',')
         .find(|abi| platform.abis.iter().any(|a| a == abi))
         .context("device has no ABI enabled in this project")?;
-    let vars = build(project, name, release, Some(abi))?;
+    let mut vars = build(project, name, release, Some(abi))?;
     let artifact = platform
         .artifact
         .as_ref()
         .context("android.artifact is required to run")?;
     let artifact = project.directory(name)?.join(expand(artifact, &vars)?);
-    let artifact = artifact.to_str().context("APK path must be UTF-8")?;
-    let status = Command::new(adb())
-        .args(["-s", &device, "install", "-r", artifact])
-        .status()?;
-    ensure!(status.success(), "APK installation failed");
-    let id = platform
-        .application_id
-        .as_deref()
-        .context("android.application-id is required")?;
-    let activity = platform
-        .activity
-        .as_deref()
-        .context("android.activity is required")?;
-    let output = adb_output(&[
-        "-s",
-        &device,
-        "shell",
-        "am",
-        "start",
-        "-W",
-        "-n",
-        &format!("{id}/{activity}"),
-    ])?;
-    ensure!(!output.contains("Error:"), "launch failed: {output}");
-    print!("{output}");
-    Ok(())
-}
-
-fn java_development_kit() -> Result<PathBuf> {
-    let executable = |name: &str| {
-        if cfg!(windows) {
-            format!("{name}.exe")
-        } else {
-            name.to_owned()
-        }
-    };
-    let configured_home = std::env::var_os("JAVA_HOME").map(PathBuf::from);
-    let java = configured_home
-        .as_ref()
-        .map(|home| home.join("bin").join(executable("java")))
-        .unwrap_or_else(|| PathBuf::from(executable("java")));
-    let output = Command::new(&java)
-        .args(["-XshowSettings:properties", "-version"])
-        .output()
-        .with_context(|| {
-            format!(
-                "starting {}; set JAVA_HOME to a complete JDK",
-                java.display()
-            )
-        })?;
-    ensure!(
-        output.status.success(),
-        "{} failed: {}",
-        java.display(),
-        String::from_utf8_lossy(&output.stderr)
+    vars.insert(
+        "artifact".into(),
+        artifact.to_str().context("APK path must be UTF-8")?.into(),
     );
-    let home = match configured_home {
-        Some(home) => home,
-        None => String::from_utf8_lossy(&output.stderr)
-            .lines()
-            .find_map(|line| line.trim().strip_prefix("java.home = ").map(PathBuf::from))
-            .context("could not determine java.home; set JAVA_HOME to a complete JDK")?,
-    };
-    let javac = home.join("bin").join(executable("javac"));
-    let output = Command::new(&javac)
-        .arg("-version")
-        .output()
-        .with_context(|| {
-            format!(
-                "{} is unavailable; set JAVA_HOME to a complete JDK containing bin/javac",
-                javac.display()
-            )
-        })?;
-    ensure!(
-        output.status.success(),
-        "{} failed: {}; select a complete JDK with JAVA_HOME",
-        javac.display(),
-        String::from_utf8_lossy(&output.stderr)
+    vars.insert("device".into(), device);
+    vars.insert(
+        "adb".into(),
+        adb().to_str().context("ADB path must be UTF-8")?.into(),
     );
-    Ok(home)
+    steps(project, &platform.run, &vars)
 }
 
 pub fn doctor(project: &Project) -> Result<()> {
@@ -294,22 +245,34 @@ pub fn doctor(project: &Project) -> Result<()> {
         missing |= !available;
     }
     if project.platforms.contains_key("android") {
-        match java_development_kit() {
-            Ok(home) => println!("JDK: {} (java and javac available)", home.display()),
-            Err(error) => {
-                println!("JDK: {error:#}");
-                missing = true;
+        if project.platform("android")?.default_android_build {
+            for (name, result) in crate::android_tools::inspect(project, None)? {
+                match result {
+                    Ok(detail) => println!("{name}: {detail}"),
+                    Err(error) => {
+                        println!("{name}: {error:#}");
+                        missing = true;
+                    }
+                }
             }
-        }
-        for name in ["ANDROID_HOME", "ANDROID_NDK_HOME"] {
-            let path = std::env::var_os(name).map(PathBuf::from);
-            let available = path.as_ref().is_some_and(|p| p.is_dir());
-            println!(
-                "{name}: {}",
-                path.map(|p| p.display().to_string())
-                    .unwrap_or_else(|| "not set".into())
-            );
-            missing |= !available;
+        } else {
+            match crate::android_tools::java_development_kit() {
+                Ok(home) => println!("JDK: {} (java and javac available)", home.display()),
+                Err(error) => {
+                    println!("JDK: {error:#}");
+                    missing = true;
+                }
+            }
+            for name in ["ANDROID_HOME", "ANDROID_NDK_HOME"] {
+                let path = std::env::var_os(name).map(PathBuf::from);
+                let available = path.as_ref().is_some_and(|p| p.is_dir());
+                println!(
+                    "{name}: {}",
+                    path.map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "not set".into())
+                );
+                missing |= !available;
+            }
         }
         match devices() {
             Ok(devices) => println!("Android devices: {}", devices.join(", ")),

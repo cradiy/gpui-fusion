@@ -191,14 +191,15 @@ to accept cursor and selection changes from Android. UIC's `TextInput` implement
 this contract. Tapping a focused input requests the soft keyboard. Hardware
 text keys and common editing shortcuts are forwarded to GPUI.
 
-Holding a finger inside the focused input selects a word using Android's locale-aware
-word boundaries and opens its floating edit menu.
+Holding a finger inside an input focuses it, selects a word using Android's
+locale-aware word boundaries, and opens its floating edit menu. Input components
+accept `TextInputFocusEvent` through an occlusion-aware hitbox, without dispatching
+a click to surrounding controls. UIC's `TextInput` supports this request.
 Select all, copy, cut, and plain-text paste dispatch the component's existing
 editing shortcuts. Copy and cut require a selection and are hidden for password
 fields; paste appears when the clipboard advertises plain text. Select all
 keeps the menu open for a subsequent action. Sliding beyond touch slop, adding
 another finger, leaving the window, or changing the input focus dismisses it.
-An unfocused input must be tapped before using its long-press menu.
 
 Tapping an input shows a draggable insertion handle. Selected text exposes two
 endpoint handles using the Android theme's drawables. Handle positions and touch

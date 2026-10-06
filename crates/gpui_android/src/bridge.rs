@@ -314,6 +314,11 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         method("nativeBack", "(J)Z", system_back as *mut c_void),
         method("nativeTouch", "(JIIFF)Z", touch as *mut c_void),
         method("nativeTap", "(JFF)V", tap as *mut c_void),
+        method(
+            "nativeFocusTextInput",
+            "(JFF)Z",
+            focus_text_input as *mut c_void,
+        ),
         method("nativeScroll", "(JIFFFF)V", scroll as *mut c_void),
         method("nativeRunTask", "(JJ)V", run_task as *mut c_void),
         method("nativeClose", "(J)V", close as *mut c_void),
@@ -715,6 +720,18 @@ extern "system" fn touch(
         Ok(session(id)?.platform.window.touch(pointer, phase, x, y) as u8)
     })
 }
+extern "system" fn focus_text_input(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    x: jfloat,
+    y: jfloat,
+) -> jboolean {
+    call(&mut env, |_| {
+        Ok(session(id)?.platform.window.focus_text_input(x, y) as u8)
+    })
+}
+
 extern "system" fn tap(mut env: JNIEnv, _: JClass, id: jlong, x: jfloat, y: jfloat) {
     call(&mut env, |_| {
         session(id)?.platform.window.tap(x, y);

@@ -700,6 +700,23 @@ impl TextInput {
         cx.stop_propagation();
     }
 
+    pub(super) fn focus_at(
+        &mut self,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.disabled {
+            return;
+        }
+        window.focus(&self.focus_handle, cx);
+        self.stop_selection();
+        let caret = self.caret_for_mouse_position(position);
+        self.move_to(caret.index, cx);
+        self.caret_affinity = caret.affinity;
+        self.scroll_cursor_pending = false;
+    }
+
     fn on_mouse_down(
         &mut self,
         event: &MouseDownEvent,

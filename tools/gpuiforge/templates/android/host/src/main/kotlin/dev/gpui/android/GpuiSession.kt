@@ -122,6 +122,10 @@ class GpuiSession : AutoCloseable {
     internal fun touch(pointer: Int, phase: Int, x: Float, y: Float) =
         id != 0L && nativeTouch(id, pointer, phase, x, y)
     internal fun tap(x: Float, y: Float) { if (id != 0L) nativeTap(id, x, y) }
+    internal fun focusTextInput(x: Float, y: Float): Boolean {
+        checkThread()
+        return !closed && id != 0L && nativeFocusTextInput(id, x, y)
+    }
     internal fun scroll(phase: Int, x: Float, y: Float, dx: Float, dy: Float) {
         if (id != 0L) nativeScroll(id, phase, x, y, dx, dy)
     }
@@ -320,6 +324,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeBack(id: Long): Boolean
         @JvmStatic private external fun nativeTouch(id: Long, pointer: Int, phase: Int, x: Float, y: Float): Boolean
         @JvmStatic private external fun nativeTap(id: Long, x: Float, y: Float)
+        @JvmStatic private external fun nativeFocusTextInput(id: Long, x: Float, y: Float): Boolean
         @JvmStatic private external fun nativeScroll(id: Long, phase: Int, x: Float, y: Float, dx: Float, dy: Float)
         @JvmStatic private external fun nativeRunTask(id: Long, token: Long)
         @JvmStatic private external fun nativeClose(id: Long)

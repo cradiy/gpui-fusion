@@ -277,10 +277,21 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     }
 
     internal fun inputManager(): InputMethodManager = context.getSystemService(InputMethodManager::class.java)
+    internal fun inputFailure(error: RuntimeException) { session.fail(error) }
 
     internal fun inputIndex(epoch: Long, x: Float, y: Float): Int {
         val density = resources.displayMetrics.density
         return session.inputIndex(epoch, x / density, y / density)
+    }
+
+    internal fun focusTextInput(x: Float, y: Float): TextInputState? {
+        if (!surfaceReady || !session.active() || !hasWindowFocus() || !isShown) return null
+        inputConnection?.finishComposingText()
+        if (!session.focusTextInput(x, y)) return null
+        // Install the newly focused editor's handler before querying its text and geometry.
+        session.frame()
+        syncInput(false)
+        return inputState?.takeIf { it.hit }
     }
 
     internal fun scrollInput(epoch: Long, dx: Float, dy: Float): Boolean {

@@ -150,6 +150,23 @@ impl InputEvent for TouchEvent {
     }
 }
 
+/// Requests focus at a text editor without synthesizing a click.
+/// Editors handle this through [`Window::on_mouse_event`], using their visible hitbox,
+/// and call [`Window::prevent_default`] when they accept the request.
+#[derive(Clone, Debug, Default)]
+pub struct TextInputFocusEvent {
+    /// Position in window coordinates.
+    pub position: Point<Pixels>,
+}
+
+impl Sealed for TextInputFocusEvent {}
+impl InputEvent for TextInputFocusEvent {
+    fn to_platform_input(self) -> PlatformInput {
+        PlatformInput::TextInputFocus(self)
+    }
+}
+impl_mouse_event!(TextInputFocusEvent);
+
 /// A mouse down event from the platform
 #[derive(Clone, Debug, Default)]
 pub struct MouseDownEvent {
@@ -846,6 +863,8 @@ pub enum PlatformInput {
     InternalDrag(InternalDragEvent),
     /// A raw touch event on a touch screen.
     Touch(TouchEvent),
+    /// Requests focus at a text editor, without activating other controls.
+    TextInputFocus(TextInputFocusEvent),
 }
 
 impl PlatformInput {
@@ -864,6 +883,7 @@ impl PlatformInput {
             PlatformInput::FileDrop(event) => Some(event),
             PlatformInput::InternalDrag(_) => None,
             PlatformInput::Touch(_) => None,
+            PlatformInput::TextInputFocus(event) => Some(event),
         }
     }
 
@@ -882,6 +902,7 @@ impl PlatformInput {
             PlatformInput::FileDrop(_) => None,
             PlatformInput::InternalDrag(_) => None,
             PlatformInput::Touch(_) => None,
+            PlatformInput::TextInputFocus(_) => None,
         }
     }
 

@@ -269,6 +269,18 @@ impl AndroidWindow {
         .default_prevented
     }
 
+    pub fn focus_text_input(&self, x: f32, y: f32) -> bool {
+        let position = point(
+            px(x / self.display.scale.get()),
+            px(y / self.display.scale.get()),
+        );
+        self.pointer.set(position);
+        self.input(PlatformInput::TextInputFocus(TextInputFocusEvent {
+            position,
+        }))
+        .default_prevented
+    }
+
     pub fn tap(&self, x: f32, y: f32) {
         let position = point(
             px(x / self.display.scale.get()),

@@ -1,9 +1,9 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, Element, ElementId, ElementInputHandler, Entity, GlobalElementId, LayoutId,
-    PaintQuad, Pixels, Style, TextRun, UnderlineStyle, Window, fill, point, prelude::*, px,
-    relative, size,
+    App, Bounds, Element, ElementId, ElementInputHandler, Entity, GlobalElementId, Hitbox,
+    HitboxBehavior, LayoutId, PaintQuad, Pixels, Style, TextInputFocusEvent, TextRun,
+    UnderlineStyle, Window, fill, point, prelude::*, px, relative, size,
 };
 
 use super::{InputMode, TextInput, state::TextLayout};
@@ -13,6 +13,7 @@ pub(super) struct TextElement {
 }
 
 pub(super) struct PrepaintState {
+    focus_hitbox: Option<Hitbox>,
     layout: Option<TextLayout>,
     cursor: Option<PaintQuad>,
     cursor_bounds: Option<Bounds<Pixels>>,
@@ -211,6 +212,7 @@ impl Element for TextElement {
         };
 
         PrepaintState {
+            focus_hitbox: (!disabled).then(|| window.insert_hitbox(bounds, HitboxBehavior::Normal)),
             layout: Some(layout),
             cursor,
             cursor_bounds: Some(cursor_row_bounds),
@@ -242,6 +244,16 @@ impl Element for TextElement {
             )
         };
         if !disabled {
+            if let Some(hitbox) = prepaint.focus_hitbox.take() {
+                let input = self.input.clone();
+                window.on_mouse_event(move |event: &TextInputFocusEvent, phase, window, cx| {
+                    if phase.bubble() && hitbox.is_hovered(window) {
+                        input.update(cx, |input, cx| input.focus_at(event.position, window, cx));
+                        window.prevent_default();
+                        cx.stop_propagation();
+                    }
+                });
+            }
             window.handle_input(
                 &focus_handle,
                 ElementInputHandler::new(bounds, self.input.clone()),

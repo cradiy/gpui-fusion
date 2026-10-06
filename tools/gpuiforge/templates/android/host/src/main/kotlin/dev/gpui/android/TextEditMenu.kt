@@ -45,17 +45,12 @@ internal class TextEditMenu(
                 if (!eligible) return
                 downX = event.x
                 downY = event.y
-                val input = current() ?: return
-                val bounds = input.editorBounds ?: return
-                val density = view.resources.displayMetrics.density
-                val x = event.x / density
-                val y = event.y / density
-                if (x < bounds[0] || x > bounds[2] || y < bounds[1] || y > bounds[3]) return
-                val epoch = input.epoch
+                val epoch = current()?.epoch
                 pending = Runnable {
                     pending = null
-                    val next = current()
-                    if (next?.epoch == epoch && view.hasWindowFocus() && view.isShown) {
+                    if (current()?.epoch != epoch || !view.hasWindowFocus() || !view.isShown) return@Runnable
+                    try {
+                        val next = view.focusTextInput(downX, downY) ?: return@Runnable
                         selectWord(next)
                         state = current()
                         mode = view.startActionMode(this, ActionMode.TYPE_FLOATING)
@@ -64,6 +59,9 @@ internal class TextEditMenu(
                             state?.let { handles.update(it) }
                             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                         } else state = null
+                    } catch (error: RuntimeException) {
+                        close()
+                        view.inputFailure(error)
                     }
                 }.also { view.postDelayed(it, ViewConfiguration.getLongPressTimeout().toLong()) }
             }

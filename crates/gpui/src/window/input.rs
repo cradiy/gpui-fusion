@@ -125,6 +125,14 @@ impl Window {
 
         let mut preserve_drag_on_mouse_up = false;
         let mut is_drop = false;
+        let cancelled = matches!(&event, PlatformInput::MouseCancelled(_));
+        if cancelled {
+            self.release_pointer();
+            self.default_prevented = true;
+            if cx.has_active_drag() {
+                cx.finish_active_drag(DragEnd::Cancelled, self);
+            }
+        }
 
         let event = match event {
             // Track the mouse position with our own state, since accessing the platform
@@ -139,7 +147,7 @@ impl Window {
                 self.modifiers = mouse_down.modifiers;
                 PlatformInput::MouseDown(mouse_down)
             }
-            PlatformInput::MouseUp(mouse_up) => {
+            PlatformInput::MouseUp(mouse_up) | PlatformInput::MouseCancelled(mouse_up) => {
                 self.mouse_position = mouse_up.position;
                 self.modifiers = mouse_up.modifiers;
                 PlatformInput::MouseUp(mouse_up)
@@ -351,7 +359,7 @@ impl Window {
         };
 
         if let Some(any_mouse_event) = event.mouse_event() {
-            self.dispatch_mouse_event(any_mouse_event, preserve_drag_on_mouse_up, cx);
+            self.dispatch_mouse_event(any_mouse_event, preserve_drag_on_mouse_up, cancelled, cx);
         } else if let Some(any_key_event) = event.keyboard_event() {
             self.dispatch_key_event(any_key_event, cx);
         }

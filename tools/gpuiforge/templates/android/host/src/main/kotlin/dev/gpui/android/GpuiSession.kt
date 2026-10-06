@@ -143,6 +143,10 @@ class GpuiSession : AutoCloseable {
     internal fun scroll(phase: Int, x: Float, y: Float, dx: Float, dy: Float) {
         if (id != 0L) nativeScroll(id, phase, x, y, dx, dy)
     }
+    internal fun mouse(kind: Int, x: Float, y: Float, button: Int, pressed: Int,
+                       clicks: Int, modifiers: Int, dx: Float = 0f, dy: Float = 0f) {
+        if (id != 0L) nativeMouse(id, kind, x, y, button, pressed, clicks, modifiers, dx, dy)
+    }
     internal fun active() = !closed && phase == ACTIVE
     fun isClosed() = closed
 
@@ -251,6 +255,12 @@ class GpuiSession : AutoCloseable {
         }, this, SystemClock.uptimeMillis())
     }
 
+    private fun setCursor(type: Int) {
+        view.get()?.let { target ->
+            target.pointerIcon = android.view.PointerIcon.getSystemIcon(target.context, type)
+        }
+    }
+
     private fun requireContext(): Context {
         checkThread()
         val current = view.get()
@@ -342,6 +352,8 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeOpenUrl(id: Long, url: String)
         @JvmStatic private external fun nativeFocusTextInput(id: Long, x: Float, y: Float): Boolean
         @JvmStatic private external fun nativeScroll(id: Long, phase: Int, x: Float, y: Float, dx: Float, dy: Float)
+        @JvmStatic private external fun nativeMouse(id: Long, kind: Int, x: Float, y: Float,
+            button: Int, pressed: Int, clicks: Int, modifiers: Int, dx: Float, dy: Float)
         @JvmStatic private external fun nativeRunTask(id: Long, token: Long)
         @JvmStatic private external fun nativeClose(id: Long)
         @JvmStatic private external fun nativePermissionResult(id: Long, token: Long, status: Int)

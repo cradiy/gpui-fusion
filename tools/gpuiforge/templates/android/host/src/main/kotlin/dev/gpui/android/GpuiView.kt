@@ -25,6 +25,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     SurfaceView(context), SurfaceHolder.Callback2, Choreographer.FrameCallback {
     private val choreographer = Choreographer.getInstance()
     private val scroll = TouchScroll(context, session)
+    private val mouse = MouseInput(context, session)
     private val contacts = SparseArray<PointF>()
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var initialized = false
@@ -192,8 +193,31 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!surfaceReady || !session.active()) return false
         if (event.actionMasked == MotionEvent.ACTION_DOWN && event.y >= height - bottomInset) return false
-        return try { dispatchTouch(event) }
+        return try {
+            if (mouse.accepts(event)) dispatchMouse(event) else dispatchTouch(event)
+        }
         catch (error: RuntimeException) { session.fail(error); true }
+    }
+
+    override fun onHoverEvent(event: MotionEvent): Boolean =
+        dispatchGenericMouse(event) || super.onHoverEvent(event)
+
+    override fun onGenericMotionEvent(event: MotionEvent): Boolean =
+        dispatchGenericMouse(event) || super.onGenericMotionEvent(event)
+
+    private fun dispatchGenericMouse(event: MotionEvent): Boolean {
+        if (!surfaceReady || !session.active() || !mouse.accepts(event)) return false
+        return try { dispatchMouse(event) }
+        catch (error: RuntimeException) { session.fail(error); true }
+    }
+
+    private fun dispatchMouse(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            requestFocus()
+            textMenu.close()
+            inputConnection?.finishComposingText()
+        }
+        return mouse.event(event)
     }
 
     private fun dispatchTouch(event: MotionEvent): Boolean {
@@ -251,6 +275,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     }
 
     private fun cancelTouches() {
+        mouse.cancel()
         textMenu.close()
         tapCandidate = false
         scroll.cancel()

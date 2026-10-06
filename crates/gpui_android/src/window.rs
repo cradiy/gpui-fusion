@@ -41,6 +41,7 @@ struct Callbacks {
     frame: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     input: Option<Box<dyn FnMut(PlatformInput) -> DispatchEventResult>>,
     active: Option<Box<dyn FnMut(bool)>>,
+    hover: Option<Box<dyn FnMut(bool)>>,
     appearance: Option<Box<dyn FnMut()>>,
     resize: Option<Box<dyn FnMut(Size<Pixels>, f32)>>,
     close: Option<Box<dyn FnOnce()>>,
@@ -57,6 +58,8 @@ pub(crate) struct AndroidWindow {
     pub appearance: Cell<WindowAppearance>,
     force_frame: Cell<bool>,
     pub(crate) pointer: Cell<Point<Pixels>>,
+    pub(crate) hovered: Cell<bool>,
+    modifiers: Cell<Modifiers>,
     pub(crate) handler: RefCell<Option<PlatformInputHandler>>,
     pub(crate) input_focus: Cell<Option<FocusId>>,
     pub(crate) input_epoch: Cell<u64>,
@@ -93,6 +96,8 @@ impl AndroidWindow {
             appearance: Cell::new(appearance),
             force_frame: Cell::new(true),
             pointer: Cell::default(),
+            hovered: Cell::new(false),
+            modifiers: Cell::default(),
             handler: RefCell::default(),
             input_focus: Cell::new(None),
             input_epoch: Cell::new(0),
@@ -244,6 +249,11 @@ impl AndroidWindow {
     }
 
     pub fn input(&self, input: PlatformInput) -> DispatchEventResult {
+        if let PlatformInput::KeyDown(event) = &input {
+            self.modifiers.set(event.keystroke.modifiers);
+        } else if let PlatformInput::KeyUp(event) = &input {
+            self.modifiers.set(event.keystroke.modifiers);
+        }
         let callback = self.callbacks.borrow_mut().input.take();
         if let Some(mut callback) = callback {
             let result = callback(input);
@@ -310,6 +320,18 @@ impl AndroidWindow {
             ..Default::default()
         }));
     }
+
+    pub fn mouse(&self, event: PlatformInput, hovered: bool, modifiers: Modifiers) {
+        self.modifiers.set(modifiers);
+        if self.hovered.replace(hovered) != hovered {
+            let callback = self.callbacks.borrow_mut().hover.take();
+            if let Some(mut callback) = callback {
+                callback(hovered);
+                self.callbacks.borrow_mut().hover.get_or_insert(callback);
+            }
+        }
+        self.input(event);
+    }
 }
 
 impl HasWindowHandle for AndroidWindow {
@@ -375,7 +397,7 @@ impl PlatformWindow for AndroidWindowHandle {
         self.pointer.get()
     }
     fn modifiers(&self) -> Modifiers {
-        Modifiers::default()
+        self.modifiers.get()
     }
     fn capslock(&self) -> Capslock {
         Capslock::default()
@@ -402,7 +424,7 @@ impl PlatformWindow for AndroidWindowHandle {
         self.active.get()
     }
     fn is_hovered(&self) -> bool {
-        false
+        self.hovered.get()
     }
     fn background_appearance(&self) -> WindowBackgroundAppearance {
         WindowBackgroundAppearance::Opaque
@@ -424,7 +446,9 @@ impl PlatformWindow for AndroidWindowHandle {
     fn on_active_status_change(&self, callback: Box<dyn FnMut(bool)>) {
         self.callbacks.borrow_mut().active = Some(callback);
     }
-    fn on_hover_status_change(&self, _: Box<dyn FnMut(bool)>) {}
+    fn on_hover_status_change(&self, callback: Box<dyn FnMut(bool)>) {
+        self.callbacks.borrow_mut().hover = Some(callback);
+    }
     fn on_resize(&self, callback: Box<dyn FnMut(Size<Pixels>, f32)>) {
         self.callbacks.borrow_mut().resize = Some(callback);
     }

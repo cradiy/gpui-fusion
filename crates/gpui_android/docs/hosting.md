@@ -173,6 +173,13 @@ backgrounding stop the gesture and its inertia. Touching during inertia stops
 it without activating a button. Long holds do not synthesize clicks. There is
 no mouse drag emulation or Android nested-scrolling integration.
 
+External mice provide hover, button presses, dragging, double/triple clicks, and
+horizontal/vertical wheel scrolling. GPUI cursor styles use Android system pointer
+icons. Wheel distances follow Android's scroll factors and the View's density.
+Focus loss, cancellation, and Surface replacement release pressed buttons without
+activating click or drop handlers. Mouse input does not synthesize touch gestures
+or open the finger-selection handles.
+
 Configuration changes and Surface recreation preserve in-process state.
 Process death starts a new application; persistent document restoration is the
 application's responsibility. A lost GPU device requires recreating the session.

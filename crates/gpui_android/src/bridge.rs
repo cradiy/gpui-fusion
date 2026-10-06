@@ -85,6 +85,17 @@ pub(crate) struct Host {
     object: GlobalRef,
 }
 impl Host {
+    pub fn set_cursor(&self, style: i32) -> Result<()> {
+        self.with_env(|env| {
+            env.call_method(
+                self.object.as_obj(),
+                "setCursor",
+                "(I)V",
+                &[JValue::Int(style)],
+            )?;
+            Ok(())
+        })
+    }
     pub fn window_appearance(&self) -> Result<gpui::WindowAppearance> {
         self.with_env(|env| {
             let dark = env
@@ -325,6 +336,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
             focus_text_input as *mut c_void,
         ),
         method("nativeScroll", "(JIFFFF)V", scroll as *mut c_void),
+        method("nativeMouse", "(JIFFIIIIFF)V", mouse as *mut c_void),
         method("nativeRunTask", "(JJ)V", run_task as *mut c_void),
         method("nativeClose", "(J)V", close as *mut c_void),
         method("nativeRedraw", "(J)V", redraw as *mut c_void),
@@ -771,6 +783,89 @@ extern "system" fn scroll(
             _ => anyhow::bail!("invalid scroll phase"),
         };
         session(id)?.platform.window.scroll(phase, x, y, dx, dy);
+        Ok(())
+    });
+}
+
+extern "system" fn mouse(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    kind: jint,
+    x: jfloat,
+    y: jfloat,
+    button: jint,
+    pressed: jint,
+    click_count: jint,
+    modifiers: jint,
+    dx: jfloat,
+    dy: jfloat,
+) {
+    call(&mut env, |_| {
+        use gpui::*;
+        let session = session(id)?;
+        let window = &session.platform.window;
+        let scale = window.display.scale_factor();
+        let position = point(px(x / scale), px(y / scale));
+        let modifiers = Modifiers {
+            shift: modifiers & 1 != 0,
+            control: modifiers & 2 != 0,
+            alt: modifiers & 4 != 0,
+            platform: modifiers & 8 != 0,
+            ..Default::default()
+        };
+        let decode_button = |mask| match mask {
+            1 => Some(MouseButton::Left),
+            2 => Some(MouseButton::Right),
+            4 => Some(MouseButton::Middle),
+            8 => Some(MouseButton::Navigate(NavigationDirection::Back)),
+            16 => Some(MouseButton::Navigate(NavigationDirection::Forward)),
+            _ => None,
+        };
+        let pressed_button = decode_button(pressed);
+        let click_count = click_count.clamp(1, 3) as usize;
+        let event = match kind {
+            0 => PlatformInput::MouseMove(MouseMoveEvent {
+                position,
+                pressed_button,
+                modifiers,
+            }),
+            1 => PlatformInput::MouseDown(MouseDownEvent {
+                position,
+                modifiers,
+                click_count,
+                button: decode_button(button).context("invalid mouse button")?,
+                ..Default::default()
+            }),
+            2 | 5 => {
+                let event = MouseUpEvent {
+                    position,
+                    modifiers,
+                    click_count,
+                    button: decode_button(button).context("invalid mouse button")?,
+                };
+                if kind == 5 {
+                    PlatformInput::MouseCancelled(event)
+                } else {
+                    PlatformInput::MouseUp(event)
+                }
+            }
+            3 => PlatformInput::MouseExited(MouseExitEvent {
+                position,
+                pressed_button,
+                modifiers,
+            }),
+            4 => PlatformInput::ScrollWheel(ScrollWheelEvent {
+                position,
+                modifiers,
+                delta: ScrollDelta::Pixels(point(px(dx / scale), px(dy / scale))),
+                touch_phase: TouchPhase::Moved,
+            }),
+            _ => anyhow::bail!("invalid mouse event"),
+        };
+        window.pointer.set(position);
+        let hovered = kind != 3 && kind != 5 && window.display.bounds().contains(&position);
+        window.mouse(event, hovered, modifiers);
         Ok(())
     });
 }

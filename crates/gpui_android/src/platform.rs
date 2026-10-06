@@ -263,10 +263,38 @@ impl Platform for AndroidPlatform {
     fn path_for_auxiliary_executable(&self, _: &str) -> Result<PathBuf> {
         bail!("Android auxiliary executables are unsupported")
     }
-    fn set_cursor_style(&self, _: CursorStyle) {}
+    fn set_cursor_style(&self, style: CursorStyle) {
+        // Android PointerIcon.TYPE_* values, available since API 24.
+        let icon = match style {
+            CursorStyle::Arrow => 1000,
+            CursorStyle::ContextualMenu => 1001,
+            CursorStyle::PointingHand => 1002,
+            CursorStyle::Crosshair => 1007,
+            CursorStyle::IBeam => 1008,
+            CursorStyle::IBeamCursorForVerticalLayout => 1009,
+            CursorStyle::DragLink => 1010,
+            CursorStyle::DragCopy => 1011,
+            CursorStyle::OperationNotAllowed => 1012,
+            CursorStyle::ResizeLeft
+            | CursorStyle::ResizeRight
+            | CursorStyle::ResizeLeftRight
+            | CursorStyle::ResizeColumn => 1014,
+            CursorStyle::ResizeUp
+            | CursorStyle::ResizeDown
+            | CursorStyle::ResizeUpDown
+            | CursorStyle::ResizeRow => 1015,
+            CursorStyle::ResizeUpRightDownLeft => 1016,
+            CursorStyle::ResizeUpLeftDownRight => 1017,
+            CursorStyle::OpenHand => 1020,
+            CursorStyle::ClosedHand => 1021,
+        };
+        if let Err(error) = self.host.set_cursor(icon) {
+            log::error!("Failed to set Android pointer icon: {error:#}");
+        }
+    }
     fn hide_cursor_until_mouse_moves(&self) {}
     fn is_cursor_visible(&self) -> bool {
-        false
+        self.window.hovered.get()
     }
     fn should_auto_hide_scrollbars(&self) -> bool {
         true

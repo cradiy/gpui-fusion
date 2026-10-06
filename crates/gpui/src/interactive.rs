@@ -847,6 +847,9 @@ pub enum PlatformInput {
     MouseDown(MouseDownEvent),
     /// The mouse was released.
     MouseUp(MouseUpEvent),
+    /// A mouse press was cancelled. Release listeners run with default prevented,
+    /// without hit testing, pointer capture, or a drop.
+    MouseCancelled(MouseUpEvent),
     /// Mouse pressure.
     MousePressure(MousePressureEvent),
     /// The mouse was moved.
@@ -875,6 +878,7 @@ impl PlatformInput {
             PlatformInput::ModifiersChanged { .. } => None,
             PlatformInput::MouseDown(event) => Some(event),
             PlatformInput::MouseUp(event) => Some(event),
+            PlatformInput::MouseCancelled(event) => Some(event),
             PlatformInput::MouseMove(event) => Some(event),
             PlatformInput::MousePressure(event) => Some(event),
             PlatformInput::MouseExited(event) => Some(event),
@@ -894,6 +898,7 @@ impl PlatformInput {
             PlatformInput::ModifiersChanged(event) => Some(event),
             PlatformInput::MouseDown(_) => None,
             PlatformInput::MouseUp(_) => None,
+            PlatformInput::MouseCancelled(_) => None,
             PlatformInput::MouseMove(_) => None,
             PlatformInput::MousePressure(_) => None,
             PlatformInput::MouseExited(_) => None,

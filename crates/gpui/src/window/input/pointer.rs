@@ -60,9 +60,14 @@ impl Window {
         &mut self,
         event: &dyn Any,
         preserve_drag_on_mouse_up: bool,
+        cancelled: bool,
         cx: &mut App,
     ) {
-        let hit_test = self.rendered_frame.hit_test(self.raw_mouse_position());
+        let hit_test = if cancelled {
+            Default::default()
+        } else {
+            self.rendered_frame.hit_test(self.raw_mouse_position())
+        };
         if hit_test != self.mouse_hit_test {
             self.mouse_hit_test = hit_test;
             self.reset_cursor_style(cx);
@@ -79,7 +84,8 @@ impl Window {
         }
 
         #[cfg(any(feature = "inspector", debug_assertions))]
-        if self.is_inspector_picking(cx)
+        if !cancelled
+            && self.is_inspector_picking(cx)
             && self.raw_mouse_position().x < self.viewport_size.width - self.inspector_width()
         {
             self.handle_inspector_mouse_event(event, cx);

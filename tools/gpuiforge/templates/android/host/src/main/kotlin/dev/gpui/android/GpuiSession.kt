@@ -25,6 +25,7 @@ class GpuiSession : AutoCloseable {
     private var errorHandler: Consumer<RuntimeException>? = null
     private var backEnabled = false
     private var backChanged: Consumer<Boolean>? = null
+    private var keyboardRequestVersion = 0L
 
     init { checkThread() }
 
@@ -40,7 +41,10 @@ class GpuiSession : AutoCloseable {
 
     internal fun unbind(previous: GpuiView) {
         checkThread()
-        if (view.get() === previous) view.clear()
+        if (view.get() === previous) {
+            keyboardRequestVersion++
+            view.clear()
+        }
     }
 
     internal fun surface(surface: Surface, width: Int, height: Int, density: Float) {
@@ -65,7 +69,11 @@ class GpuiSession : AutoCloseable {
         checkThread()
         return !closed && id != 0L && nativeKey(id, name, modifiers, down)
     }
-    internal fun focus(focused: Boolean) { checkThread(); if (id != 0L) nativeFocus(id, focused) }
+    internal fun focus(focused: Boolean) {
+        checkThread()
+        if (!focused) keyboardRequestVersion++
+        if (id != 0L) nativeFocus(id, focused)
+    }
     internal fun touch(pointer: Int, phase: Int, x: Float, y: Float) =
         id != 0L && nativeTouch(id, pointer, phase, x, y)
     internal fun tap(x: Float, y: Float) { if (id != 0L) nativeTap(id, x, y) }
@@ -86,6 +94,8 @@ class GpuiSession : AutoCloseable {
     fun handleSystemBack(): Boolean {
         checkThread()
         if (!active() || !backEnabled || id == 0L) return false
+        keyboardRequestVersion++
+        view.get()?.requestSoftKeyboard(false)
         return try { nativeBack(id) } catch (error: RuntimeException) { fail(error); false }
     }
 
@@ -95,6 +105,7 @@ class GpuiSession : AutoCloseable {
         require(next in FOREGROUND..BACKGROUND) { "Invalid lifecycle phase" }
         if (closed || next == phase) return
         phase = next
+        if (next != ACTIVE) keyboardRequestVersion++
         if (id != 0L) nativeLifecycle(id, phase)
         view.get()?.updateFrameScheduling()
     }
@@ -134,6 +145,17 @@ class GpuiSession : AutoCloseable {
             if (!closed && backEnabled != enabled) {
                 backEnabled = enabled
                 backChanged?.accept(enabled)
+            }
+        }, this, SystemClock.uptimeMillis())
+    }
+
+    private fun setKeyboardVisible(visible: Boolean) {
+        if (!active()) return
+        val target = view.get() ?: return
+        val version = ++keyboardRequestVersion
+        handler.postAtTime({
+            if (active() && keyboardRequestVersion == version && view.get() === target) {
+                target.requestSoftKeyboard(visible)
             }
         }, this, SystemClock.uptimeMillis())
     }

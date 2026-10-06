@@ -35,7 +35,8 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     private var tapY = 0f
     private var inputState: TextInputState? = null
     private var inputConnection: GpuiInputConnection? = null
-    private var requestKeyboard = false
+    private enum class KeyboardRequest { TAP, SHOW, HIDE }
+    private var keyboardRequest: KeyboardRequest? = null
 
     init {
         GpuiSession.checkThread()
@@ -74,6 +75,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     override fun surfaceDestroyed(holder: SurfaceHolder) = releaseSurface()
 
     internal fun releaseSurface() {
+        keyboardRequest = null
         closeInput()
         choreographer.removeFrameCallback(this)
         framePosted = false
@@ -107,6 +109,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
             framePosted = true
             choreographer.postFrameCallback(this)
         } else if (!active) {
+            keyboardRequest = null
             choreographer.removeFrameCallback(this)
             framePosted = false
             cancelTouches()
@@ -118,7 +121,18 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         if (surfaceReady && session.active() && hasWindowFocus() && isShown) {
             try {
                 scroll.frame()
-                if (session.frame() || requestKeyboard) syncInput(requestKeyboard)
+                val changed = session.frame()
+                val request = keyboardRequest
+                if (request == KeyboardRequest.HIDE) {
+                    keyboardRequest = null
+                    if (changed) syncInput(false)
+                    inputManager().hideSoftInputFromWindow(windowToken, 0)
+                } else if (changed || request != null) {
+                    if (inputConnection?.batching() != true) {
+                        keyboardRequest = null
+                        syncInput(request != null, requireHit = request != KeyboardRequest.SHOW)
+                    }
+                }
             } catch (error: RuntimeException) {
                 session.fail(error)
                 return
@@ -199,9 +213,15 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     override fun performClick(): Boolean {
         super.performClick()
         closeInput()
+        keyboardRequest = KeyboardRequest.TAP
         session.tap(tapX, tapY)
-        requestKeyboard = true
         return true
+    }
+
+    internal fun requestSoftKeyboard(visible: Boolean) {
+        if (!surfaceReady || !session.active() || !hasWindowFocus() || !isShown) return
+        if (visible && !requestFocus()) return
+        keyboardRequest = if (visible) KeyboardRequest.SHOW else KeyboardRequest.HIDE
     }
 
     internal fun inputManager(): InputMethodManager = context.getSystemService(InputMethodManager::class.java)
@@ -211,11 +231,9 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         inputConnection = null
         previous?.closeConnection()
         inputState = null
-        requestKeyboard = false
     }
 
-    internal fun syncInput(show: Boolean) {
-        requestKeyboard = false
+    internal fun syncInput(show: Boolean, requireHit: Boolean = true) {
         if (!surfaceReady || !hasWindowFocus() || inputConnection?.batching() == true) return
         val next = session.inputState()
         if (next?.epoch != inputState?.epoch) {
@@ -227,7 +245,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         if (next != null) {
             inputManager().updateSelection(this, next.anchor, next.head, next.composingStart, next.composingEnd)
             inputConnection?.updateExtracted(next)
-            if (show && next.hit) inputManager().showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+            if (show && (!requireHit || next.hit)) inputManager().showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
         }
     }
 

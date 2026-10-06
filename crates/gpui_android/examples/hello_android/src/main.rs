@@ -62,6 +62,14 @@ impl Render for Counter {
                 .child(div().text_3xl().child("Details"))
                 .child("System Back returns to the main page. With the keyboard open, Back hides it first.")
                 .child(Input::new(&self.title).text_color(rgb(0x172033)))
+                .child(div().flex().flex_wrap().gap_3()
+                    .child(button("edit-name", "Edit name").on_click(cx.listener(|this, _, window, cx| {
+                        window.focus(&this.title.focus_handle(cx), cx);
+                        window.show_soft_keyboard();
+                    })))
+                    .child(button("hide-keyboard", "Hide keyboard").on_click(|_, window, _| {
+                        window.hide_soft_keyboard();
+                    })))
                 .child(button("back", "Back to main page").on_click(cx.listener(|this, _, window, cx| {
                     this.details = false;
                     window.set_back_enabled(false);

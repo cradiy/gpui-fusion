@@ -171,6 +171,16 @@ to accept cursor and selection changes from Android. UIC's `TextInput` implement
 this contract. Tapping a focused input requests the soft keyboard. Hardware
 text keys and common editing shortcuts are forwarded to GPUI.
 
+Call `Window::show_soft_keyboard()` after focusing a text input to request the
+keyboard without tapping the field. `Window::hide_soft_keyboard()` dismisses
+it without clearing input focus or text. Requests are applied after the next
+GPUI frame so the input handler reflects the current focus. The latest pending
+request wins; requests are discarded when the View loses focus, detaches, or
+the session becomes inactive. In-app Back cancels pending keyboard requests and
+dismisses the keyboard. Showing requires an active, visible Surface and
+an input handler accepting text. Android and the selected IME decide whether
+to show an on-screen keyboard when a hardware keyboard is connected.
+
 Surrounding text queries are bounded around the selection and composition.
 Handlers that withhold `surrounding_text` expose no text snapshot to the IME.
 The host uses a generic multiline text keyboard, or a password keyboard when
@@ -240,6 +250,9 @@ Open details, focus its text field, and press Back: the keyboard closes first,
 then another Back returns to the main page. At the main page, Back uses Android's
 default navigation. Repeat with the edge gesture and after backgrounding the
 details page; state and Back handling must survive Activity recreation as well.
+Use Edit name to focus and open the keyboard without tapping the field. Hide
+keyboard must dismiss it while preserving the text and input focus; Edit name
+and tapping the field must both reopen it.
 
 Use Copy count and Paste text to check clipboard round trips, then copy text
 between GPUI and another application. Include multiline text and non-ASCII

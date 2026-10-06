@@ -388,6 +388,18 @@ impl PlatformWindow for AndroidWindowHandle {
     }
     fn update_ime_position(&self, _: Bounds<Pixels>) {}
 
+    fn show_soft_keyboard(&self) {
+        if let Err(error) = self.host.set_keyboard_visible(true) {
+            log::error!("Unable to show Android keyboard: {error:#}");
+        }
+    }
+
+    fn hide_soft_keyboard(&self) {
+        if let Err(error) = self.host.set_keyboard_visible(false) {
+            log::error!("Unable to hide Android keyboard: {error:#}");
+        }
+    }
+
     fn set_back_handler(&self, callback: Box<dyn FnMut()>) {
         self.callbacks.borrow_mut().back = Some(callback);
         if self.back_enabled.get() {

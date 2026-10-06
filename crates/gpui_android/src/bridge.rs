@@ -85,6 +85,18 @@ pub(crate) struct Host {
     object: GlobalRef,
 }
 impl Host {
+    pub fn set_keyboard_visible(&self, visible: bool) -> Result<()> {
+        self.with_env(|env| {
+            env.call_method(
+                self.object.as_obj(),
+                "setKeyboardVisible",
+                "(Z)V",
+                &[JValue::Bool(visible as u8)],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn set_back_enabled(&self, enabled: bool) -> Result<()> {
         self.with_env(|env| {
             env.call_method(

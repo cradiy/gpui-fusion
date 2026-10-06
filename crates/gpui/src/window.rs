@@ -2811,6 +2811,17 @@ impl Window {
         self.platform_window.set_back_enabled(enabled);
     }
 
+    /// Requests the soft keyboard for the focused text input on supported platforms.
+    /// Focus the input first. The platform may decline the request while the window is inactive.
+    pub fn show_soft_keyboard(&self) {
+        self.platform_window.show_soft_keyboard();
+    }
+
+    /// Requests that the soft keyboard be hidden without clearing text input focus.
+    pub fn hide_soft_keyboard(&self) {
+        self.platform_window.hide_soft_keyboard();
+    }
+
     /// Read information about the GPU backing this window.
     /// Currently returns None on Mac and Windows.
     pub fn gpu_specs(&self) -> Option<GpuSpecs> {

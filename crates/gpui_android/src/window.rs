@@ -125,24 +125,48 @@ impl AndroidWindow {
             width > 0 && height > 0 && density.is_finite() && density > 0.,
             "invalid Android surface geometry"
         );
-        self.detach();
-        let config = WgpuSurfaceConfig {
-            size: size(DevicePixels(width), DevicePixels(height)),
-            transparent: false,
-            preferred_present_mode: None,
-        };
-        let instance = context
+        let same_window = self
+            .native
             .borrow()
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("GPU context unavailable"))?
-            .instance
-            .clone();
-        self.renderer
-            .borrow_mut()
-            .replace_surface(&native, config, &instance)?;
-        *self.native.borrow_mut() = Some(native);
-        self.display.scale.set(density);
+            .is_some_and(|current| current.is_same_window(&native));
+        let drawable_size = size(DevicePixels(width), DevicePixels(height));
+        if same_window {
+            self.renderer
+                .borrow_mut()
+                .update_drawable_size(drawable_size);
+        } else {
+            self.detach();
+            let config = WgpuSurfaceConfig {
+                size: drawable_size,
+                transparent: false,
+                preferred_present_mode: None,
+            };
+            let instance = context
+                .borrow()
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("GPU context unavailable"))?
+                .instance
+                .clone();
+            self.renderer
+                .borrow_mut()
+                .replace_surface(&native, config, &instance)?;
+            *self.native.borrow_mut() = Some(native);
+        }
+        self.force_frame.set(true);
+        self.set_viewport(width, height, density)
+    }
+
+    pub fn set_viewport(&self, width: i32, height: i32, density: f32) -> Result<()> {
+        anyhow::ensure!(
+            width > 0 && height > 0 && density.is_finite() && density > 0.,
+            "invalid Android viewport geometry"
+        );
         let logical = size(px(width as f32 / density), px(height as f32 / density));
+        if self.display.size.get() == logical && self.display.scale.get() == density {
+            return Ok(());
+        }
+        self.display.scale.set(density);
         self.display.size.set(logical);
         self.force_frame.set(true);
         let callback = self.callbacks.borrow_mut().resize.take();
@@ -171,7 +195,18 @@ impl AndroidWindow {
     }
 
     pub fn frame(&self) -> Result<()> {
-        if self.native.borrow().is_none() || !self.active.get() {
+        if !self.active.get() {
+            return Ok(());
+        }
+        self.render_frame(false)
+    }
+
+    pub fn redraw(&self) -> Result<()> {
+        self.render_frame(true)
+    }
+
+    fn render_frame(&self, redraw: bool) -> Result<()> {
+        if self.native.borrow().is_none() {
             return Ok(());
         }
         anyhow::ensure!(
@@ -181,8 +216,8 @@ impl AndroidWindow {
         let callback = self.callbacks.borrow_mut().frame.take();
         if let Some(mut callback) = callback {
             callback(RequestFrameOptions {
-                require_presentation: false,
-                force_render: self.force_frame.replace(false),
+                require_presentation: redraw,
+                force_render: self.force_frame.replace(false) || redraw,
             });
             self.callbacks.borrow_mut().frame = Some(callback);
         }

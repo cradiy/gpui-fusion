@@ -197,9 +197,55 @@ Rust packaging still uses GPUiForge. Direct Gradle invocations resolve
 
 ## Build boundaries
 
-The supplied Android debug recipe produces a signed development APK. Its
-release APK is unsigned; signing and store publication require application
-configuration in a manually maintained Gradle project. Adjust `artifact` if
-the signed APK has another filename. AAB packaging, signing configuration,
-framework update automation and native source overlays are not built-in
-commands. Customization can use a project-owned recipe/template or manual mode.
+The supplied Android debug recipe produces a signed development APK. Release
+produces `app-release-unsigned.apk` without signing configuration, or
+`app-release.apk` when signing is configured. Custom Gradle projects must keep
+`artifact` consistent with their output. AAB packaging, store publication,
+framework update automation and native source overlays are not built-in commands.
+
+## Android permissions
+
+Declare permission names on the Android platform:
+
+```toml
+[platforms.android]
+application-id = "dev.example.app"
+permissions = ["android.permission.INTERNET", "android.permission.RECORD_AUDIO"]
+```
+
+The bundled template writes these names as `uses-permission` entries in the
+application Manifest. Duplicates are removed. A custom template can use
+`{{android_permissions}}` for the generated XML. In manual mode, maintain the
+Manifest yourself. Runtime permissions still require application authorization
+requests; configuration does not show dialogs or grant access. GPUI's Android
+backend provides `AndroidPermissions` for these requests.
+
+## Android release signing
+
+```toml
+[platforms.android.signing]
+keystore = ".gpuiforge/signing/release.jks"
+key-alias = "release"
+store-password-env = "ANDROID_STORE_PASSWORD"
+key-password-env = "ANDROID_KEY_PASSWORD"
+```
+
+The keystore must already exist. Paths are relative to the configuration file
+(or recipe when declared there); absolute paths are also supported. Keep the
+keystore outside the generated Android directory. GPUiForge does not create,
+copy, replace, or delete keys. Exclude `.gpuiforge/signing/` from version control
+and keep a separate backup.
+
+Provide the named password environment variables before `build android --release`
+or `run android --release`. Missing files and unset or empty passwords fail before
+the build. Debug builds do not require release credentials. Passwords are passed
+to build child processes through the environment, not template variables or CLI
+arguments. Generated Gradle files contain no password values. Build scripts run
+with access to these credentials and must be trusted.
+
+The bundled Gradle project and its ejected copy use `GPUIFORGE_SIGNING_ENABLED`,
+`GPUIFORGE_SIGNING_KEYSTORE`, `GPUIFORGE_SIGNING_KEY_ALIAS`,
+`GPUIFORGE_SIGNING_STORE_PASSWORD`, and `GPUIFORGE_SIGNING_KEY_PASSWORD`.
+Custom build steps can consume the same environment. These names are reserved
+for GPUiForge's build process. A configured release build sets the enabled flag
+to `1`; other Android builds set it to `0`.

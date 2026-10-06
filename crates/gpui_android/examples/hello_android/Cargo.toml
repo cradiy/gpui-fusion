@@ -8,3 +8,6 @@ publish = false
 gpui.workspace = true
 gpui_platform = { workspace = true, features = ["wayland", "x11"] }
 uic = { path = "../../../../uic" }
+
+[target.'cfg(target_os = "android")'.dependencies]
+gpui_android.workspace = true

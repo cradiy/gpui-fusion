@@ -19,13 +19,16 @@ import kotlin.math.hypot
 
 /** A GPUI rendering surface. The caller owns and eventually closes its session. */
 class GpuiView(context: Context, private val session: GpuiSession) :
-    SurfaceView(context), SurfaceHolder.Callback, Choreographer.FrameCallback {
+    SurfaceView(context), SurfaceHolder.Callback2, Choreographer.FrameCallback {
     private val choreographer = Choreographer.getInstance()
     private val scroll = TouchScroll(context, session)
     private val contacts = SparseArray<PointF>()
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var initialized = false
     private var surfaceReady = false
+    private var surfaceWidth = 0
+    private var surfaceHeight = 0
+    private var bottomInset = 0
     private var framePosted = false
     private var tapCandidate = false
     private var downX = 0f
@@ -63,6 +66,9 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         cancelTouches()
         try {
             session.surface(holder.surface, width, height, resources.displayMetrics.density)
+            surfaceWidth = width
+            surfaceHeight = height
+            updateViewport()
         } catch (error: RuntimeException) {
             session.fail(error)
             return
@@ -72,6 +78,28 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) = releaseSurface()
+
+    /** Excludes an occluded bottom region from GPUI layout without resizing the GPU surface. Uses physical pixels. */
+    fun setViewportBottomInset(inset: Int) {
+        GpuiSession.checkThread()
+        require(inset >= 0)
+        if (bottomInset == inset) return
+        bottomInset = inset
+        if (surfaceReady) {
+            try { updateViewport(); session.redraw() }
+            catch (error: RuntimeException) { session.fail(error) }
+        }
+    }
+
+    private fun updateViewport() {
+        session.viewport(surfaceWidth, (surfaceHeight - bottomInset).coerceAtLeast(1), resources.displayMetrics.density)
+    }
+
+    override fun surfaceRedrawNeeded(holder: SurfaceHolder) {
+        if (!surfaceReady) return
+        try { session.redraw() }
+        catch (error: RuntimeException) { session.fail(error) }
+    }
 
     internal fun releaseSurface() {
         keyboardRequest = null
@@ -142,6 +170,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!surfaceReady || !session.active()) return false
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && event.y >= height - bottomInset) return false
         return try { dispatchTouch(event) }
         catch (error: RuntimeException) { session.fail(error); true }
     }
@@ -211,7 +240,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
 
     override fun performClick(): Boolean {
         super.performClick()
-        closeInput()
+        inputConnection?.finishComposingText()
         keyboardRequest = KeyboardRequest.TAP
         session.tap(tapX, tapY)
         return true

@@ -1,0 +1,49 @@
+package dev.gpui.android
+
+import android.annotation.TargetApi
+import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsAnimation
+
+@TargetApi(30)
+internal class KeyboardInsets(
+    private val container: View,
+    private val gpui: GpuiView,
+    private val visibilityChanged: (Boolean) -> Unit,
+) : WindowInsetsAnimation.Callback(DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+    private val animations = mutableSetOf<WindowInsetsAnimation>()
+    private var finalInsets: WindowInsets? = null
+
+    init {
+        container.setWindowInsetsAnimationCallback(this)
+        container.setOnApplyWindowInsetsListener { view, insets ->
+            finalInsets = insets
+            val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+            visibilityChanged(insets.isVisible(WindowInsets.Type.ime()))
+            if (animations.isEmpty()) apply(insets)
+            insets
+        }
+    }
+
+    private fun apply(insets: WindowInsets) {
+        val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+        val keyboard = insets.getInsets(WindowInsets.Type.ime())
+        gpui.setViewportBottomInset((keyboard.bottom - safe.bottom).coerceAtLeast(0))
+    }
+
+    override fun onPrepare(animation: WindowInsetsAnimation) {
+        if (animation.typeMask and WindowInsets.Type.ime() != 0) animations.add(animation)
+    }
+
+    override fun onProgress(insets: WindowInsets, runningAnimations: MutableList<WindowInsetsAnimation>): WindowInsets {
+        animations.retainAll(runningAnimations.toSet())
+        apply(insets)
+        return insets
+    }
+
+    override fun onEnd(animation: WindowInsetsAnimation) {
+        animations.remove(animation)
+        if (animations.isEmpty()) finalInsets?.let(::apply)
+    }
+}

@@ -41,6 +41,9 @@ fn main() {
                 count: 0,
                 scroll: ScrollHandle::new(),
                 clipboard_status: "Copy the counter or paste text from another app.".into(),
+                permission_status: "Microphone permission has not been requested.".into(),
+                #[cfg(target_os = "android")]
+                permissions: gpui_android::current_platform().permissions(),
                 title: cx.new(|cx| TextInput::new(cx).placeholder("Name")),
                 text: cx.new(|cx| TextInput::new(cx).multiline().placeholder("Message")),
                 password: cx.new(|cx| TextInput::new(cx).password().placeholder("Password")),
@@ -119,6 +122,9 @@ struct Counter {
     count: usize,
     scroll: ScrollHandle,
     clipboard_status: String,
+    permission_status: String,
+    #[cfg(target_os = "android")]
+    permissions: gpui_android::AndroidPermissions,
     text: Entity<TextInput>,
     title: Entity<TextInput>,
     password: Entity<TextInput>,
@@ -138,6 +144,32 @@ fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
         .rounded_lg()
         .bg(rgb(0x375c91))
         .child(label)
+}
+
+impl Counter {
+    fn request_microphone(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(target_os = "android")]
+        {
+            let permissions = self.permissions.clone();
+            self.permission_status = "Waiting for Android permission...".into();
+            cx.spawn(async move |this, cx| {
+                let result = permissions.request("android.permission.RECORD_AUDIO").await;
+                let _ = this.update(cx, |this, cx| {
+                    this.permission_status = match result {
+                        Ok(status) => format!("Microphone: {status:?}"),
+                        Err(error) => format!("Permission request: {error}"),
+                    };
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            self.permission_status = "Permission requests are available on Android.".into();
+        }
+        cx.notify();
+    }
 }
 
 impl Render for Counter {
@@ -206,6 +238,11 @@ impl Render for Counter {
             .flex_col()
             .gap_5()
             .child(div().text_3xl().child("GPUI on Android"))
+            .child(
+                button("microphone", "Request microphone permission")
+                    .on_click(cx.listener(Self::request_microphone)),
+            )
+            .child(div().text_sm().child(self.permission_status.clone()))
             .child(
                 button("details", "Open details").on_click(cx.listener(|this, _, _, cx| {
                     this.details = true;

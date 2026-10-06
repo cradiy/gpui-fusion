@@ -24,6 +24,7 @@ pub struct AndroidPlatform {
     text: Arc<CosmicTextSystem>,
     pub(crate) context: GpuContext,
     pub(crate) window: Rc<AndroidWindow>,
+    pub(crate) permissions: Rc<crate::permissions::PermissionState>,
     handle: Cell<Option<AnyWindowHandle>>,
     lifecycle: RefCell<Option<Box<dyn FnMut(AppLifecyclePhase)>>>,
     quit: RefCell<Option<Box<dyn FnMut()>>>,
@@ -43,6 +44,7 @@ impl AndroidPlatform {
         );
         let dispatcher = AndroidDispatcher::new(host.clone());
         let text = Arc::new(CosmicTextSystem::new_without_system_fonts("IBM Plex Sans"));
+        text.add_font_files(&host.system_font_paths()?);
         text.add_fonts(vec![Cow::Borrowed(include_bytes!(
             "../../../assets/fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf"
         ))])?;
@@ -67,6 +69,7 @@ impl AndroidPlatform {
         ));
         Ok(Rc::new(Self {
             dispatcher,
+            permissions: crate::permissions::PermissionState::new(host.clone()),
             host,
             text,
             context,
@@ -86,6 +89,7 @@ impl AndroidPlatform {
     }
 
     pub(crate) fn close(&self) {
+        self.permissions.close();
         self.window.detach();
         let callback = self.quit.borrow_mut().take();
         if let Some(mut callback) = callback {
@@ -96,6 +100,11 @@ impl AndroidPlatform {
 
     fn read_clipboard(&self) -> Result<Option<ClipboardItem>> {
         Ok(self.host.read_clipboard()?.map(ClipboardItem::new_string))
+    }
+
+    /// Returns the session's main-thread Android permission interface.
+    pub fn permissions(&self) -> crate::AndroidPermissions {
+        crate::AndroidPermissions(self.permissions.clone())
     }
 
     fn write_clipboard(&self, item: ClipboardItem) -> Result<()> {

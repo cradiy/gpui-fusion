@@ -133,7 +133,19 @@ usable GPU backend is available. An embedded host can supply its own error UI.
 All public session and View operations run on the Android main Looper.
 Surface callbacks release the old WGPU surface before releasing the native
 window reference. Reattachment preserves the device, atlas, and logical GPUI
-window. Hiding the View or backgrounding the host stops frame callbacks.
+window. Resizing an existing native window retains its WGPU surface.
+`GpuiView` completes `SurfaceHolder.Callback2` redraws before returning control
+to Android. Hiding the View or backgrounding the host stops frame callbacks.
+On Android 11 and later, the full-page host keeps the Surface at its safe-area
+size and animates GPUI's layout viewport with the keyboard insets. Keyboard
+visibility does not resize the swapchain. Embedded hosts can use
+`GpuiView.setViewportBottomInset` with a physical-pixel occlusion relative to the
+View's bottom edge. Android 8 through 10 use the system's resize behavior.
+
+Text rendering loads the device's available system font files, including CJK
+and emoji fonts, alongside the embedded default font. Android 10 and later use
+`SystemFonts`; Android 8 and 9 use `/system/fonts`. Applications can also register
+their own fonts through GPUI's text system.
 
 The host must handle its own embedding insets. `PlatformWindow::insets` does not
 yet publish Android keyboard or safe-area geometry. SurfaceView hosting does
@@ -237,6 +249,48 @@ not implemented.
 `GpuiActivity` resizes its content for the keyboard. Embedded hosts must apply
 their own keyboard insets. Register fonts covering the languages your UI uses;
 the bundled Latin font is not a complete CJK or emoji font collection.
+
+## Permissions
+
+Declare Android permissions in the application's `gpuiforge.toml`:
+
+```toml
+[platforms.android]
+application-id = "dev.example.app"
+permissions = ["android.permission.RECORD_AUDIO"]
+```
+
+Capture `gpui_android::current_platform().permissions()` during application
+startup and retain the resulting `AndroidPermissions` handle in the application.
+It belongs to one session and is used on the GPUI foreground thread:
+
+```rust
+let status = permissions.status("android.permission.RECORD_AUDIO")?;
+let result = permissions.request("android.permission.RECORD_AUDIO").await?;
+```
+
+Request after the user invokes the relevant feature. `PermissionStatus` reports
+`Granted` or `Denied { should_show_rationale }`. A false rationale hint does not
+distinguish a first request from a denial without another prompt. Recheck before
+accessing a resource because Android or the user can revoke grants.
+
+The interface supports manifest-declared normal and dangerous permissions.
+Unknown permissions, undeclared permissions, specialized authorization flows
+(such as overlay access), unavailable Activities, cancellation, and concurrent
+requests return errors. Already granted permissions return without a dialog.
+Only one request can be pending per session. Dropping the future discards its
+result; an existing system dialog remains until Android completes it.
+
+`GpuiActivity` connects the permission host automatically. Embedded hosts call
+`session.attachPermissionHost(activity)`, forward `onRequestPermissionsResult`
+to the session, and call `detachPermissionHost(activity)` on destruction.
+Request codes `0x4700..0x7fff` are reserved for GPUI. Detaching the Activity,
+including configuration recreation, cancels pending requests; stale results
+are ignored. Closing the session also completes pending requests with an error.
+The requesting task should be cancelled with its owning UI when appropriate.
+
+The example's Request microphone permission button only checks authorization;
+it does not record audio.
 
 ## System Back
 

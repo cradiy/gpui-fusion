@@ -60,6 +60,15 @@ pub fn platform(project: &Project, selected: Option<String>) -> Result<String> {
 }
 
 pub fn steps(project: &Project, steps: &[Step], vars: &Variables) -> Result<()> {
+    steps_with_env(project, steps, vars, &std::collections::BTreeMap::new())
+}
+
+fn steps_with_env(
+    project: &Project,
+    steps: &[Step],
+    vars: &Variables,
+    env: &std::collections::BTreeMap<String, std::ffi::OsString>,
+) -> Result<()> {
     for step in steps {
         let program = expand(&step.program, vars)?;
         let args: Vec<_> = step
@@ -81,6 +90,7 @@ pub fn steps(project: &Project, steps: &[Step], vars: &Variables) -> Result<()> 
         for (key, value) in &step.env {
             command.env(key, expand(value, vars)?);
         }
+        command.envs(env);
         let status = if let Some(pattern) = &step.error_pattern {
             let output = command
                 .output()
@@ -105,6 +115,44 @@ pub fn steps(project: &Project, steps: &[Step], vars: &Variables) -> Result<()> 
 
 pub fn build(project: &Project, name: &str, release: bool, abi: Option<&str>) -> Result<Variables> {
     let platform = project.platform(name)?;
+    let mut signing_env = std::collections::BTreeMap::new();
+    if name == "android" {
+        signing_env.insert("GPUIFORGE_SIGNING_ENABLED".into(), "0".into());
+        if release && let Some(signing) = &platform.signing {
+            let keystore = signing
+                .keystore
+                .canonicalize()
+                .context("signing keystore not found")?;
+            ensure!(keystore.is_file(), "signing keystore must be a file");
+            ensure!(
+                !keystore.starts_with(project.directory(name)?),
+                "keep the signing keystore outside the generated Android project"
+            );
+            signing_env.insert("GPUIFORGE_SIGNING_ENABLED".into(), "1".into());
+            signing_env.insert(
+                "GPUIFORGE_SIGNING_KEYSTORE".into(),
+                keystore.into_os_string(),
+            );
+            signing_env.insert(
+                "GPUIFORGE_SIGNING_KEY_ALIAS".into(),
+                signing.key_alias.clone().into(),
+            );
+            for (destination, source) in [
+                (
+                    "GPUIFORGE_SIGNING_STORE_PASSWORD",
+                    &signing.store_password_env,
+                ),
+                ("GPUIFORGE_SIGNING_KEY_PASSWORD", &signing.key_password_env),
+            ] {
+                let value = std::env::var_os(source)
+                    .filter(|value| !value.is_empty())
+                    .with_context(|| {
+                        format!("set environment variable {source} for release signing")
+                    })?;
+                signing_env.insert(destination.into(), value);
+            }
+        }
+    }
     if let Some(abi) = abi {
         ensure!(name == "android", "--abi is only valid for Android");
         ensure!(
@@ -132,7 +180,7 @@ pub fn build(project: &Project, name: &str, release: bool, abi: Option<&str>) ->
         );
     }
     let vars = project.variables(name, release, abi)?;
-    steps(project, &platform.build, &vars)?;
+    steps_with_env(project, &platform.build, &vars, &signing_env)?;
     if let Some(artifact) = &platform.artifact {
         let artifact = project.directory(name)?.join(expand(artifact, &vars)?);
         ensure!(

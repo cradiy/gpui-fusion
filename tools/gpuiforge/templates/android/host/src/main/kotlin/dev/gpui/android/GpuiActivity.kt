@@ -4,7 +4,7 @@ import android.app.Activity
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.view.WindowInsets
+import android.view.WindowManager
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import android.widget.FrameLayout
@@ -22,8 +22,15 @@ abstract class GpuiActivity : Activity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.setDecorFitsSystemWindows(false)
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+        } else {
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
         System.loadLibrary(nativeLibraryName())
         session = lastNonConfigurationInstance as? GpuiSession ?: GpuiSession()
+        session.attachPermissionHost(this)
         session.setOnBackEnabledChanged { enabled ->
             backEnabled = enabled
             updateBackRegistration()
@@ -38,20 +45,20 @@ abstract class GpuiActivity : Activity() {
             setContentView(message)
         }
         val content = FrameLayout(this)
-        content.addView(GpuiView(this, session), FrameLayout.LayoutParams(-1, -1))
-        content.setOnApplyWindowInsetsListener { view, insets ->
-            if (Build.VERSION.SDK_INT >= 30) {
-                val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
-                val keyboard = insets.getInsets(WindowInsets.Type.ime())
-                imeVisible = insets.isVisible(WindowInsets.Type.ime())
+        val gpui = GpuiView(this, session)
+        content.addView(gpui, FrameLayout.LayoutParams(-1, -1))
+        if (Build.VERSION.SDK_INT >= 30) {
+            KeyboardInsets(content, gpui) { visible ->
+                imeVisible = visible
                 updateBackRegistration()
-                view.setPadding(safe.left, safe.top, safe.right, maxOf(safe.bottom, keyboard.bottom))
-            } else {
+            }
+        } else {
+            content.setOnApplyWindowInsetsListener { view, insets ->
                 @Suppress("DEPRECATION")
                 view.setPadding(insets.systemWindowInsetLeft, insets.systemWindowInsetTop,
                     insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
+                insets
             }
-            insets
         }
         setContentView(content)
         content.requestApplyInsets()
@@ -73,6 +80,7 @@ abstract class GpuiActivity : Activity() {
     }
     override fun onStop() { session.setLifecycle(GpuiSession.BACKGROUND); super.onStop() }
     override fun onDestroy() {
+        session.detachPermissionHost(this)
         backRegistration?.close()
         backRegistration = null
         session.setOnBackEnabledChanged(null)
@@ -85,6 +93,12 @@ abstract class GpuiActivity : Activity() {
     @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
         if (!session.handleSystemBack()) super.onBackPressed()
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        if (!session.onRequestPermissionsResult(this, requestCode, permissions, grantResults)) {
+            super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        }
     }
 
     @Suppress("DEPRECATION")

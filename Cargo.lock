@@ -3345,6 +3345,7 @@ name = "hello_android"
 version = "0.1.0"
 dependencies = [
  "gpui",
+ "gpui_android",
  "gpui_platform",
  "uic",
 ]

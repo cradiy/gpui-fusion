@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use gpui::{AppLifecyclePhase, ApplicationHandle, TouchPhase};
 use jni::{
     JNIEnv, JavaVM, NativeMethod,
-    objects::{GlobalRef, JClass, JObject, JString, JValue},
+    objects::{GlobalRef, JClass, JObject, JObjectArray, JString, JValue},
     sys::{jboolean, jfloat, jint, jlong, jobject},
 };
 use std::{
@@ -85,6 +85,70 @@ pub(crate) struct Host {
     object: GlobalRef,
 }
 impl Host {
+    pub fn system_font_paths(&self) -> Result<Vec<std::path::PathBuf>> {
+        self.with_env(|env| {
+            let paths = JObjectArray::from(
+                env.call_method(
+                    self.object.as_obj(),
+                    "systemFontPaths",
+                    "()[Ljava/lang/String;",
+                    &[],
+                )?
+                .l()?,
+            );
+            let mut result = Vec::new();
+            for index in 0..env.get_array_length(&paths)? {
+                let path = env.get_object_array_element(&paths, index)?;
+                let path = env.auto_local(path);
+                let path: &JString = path.as_ref().into();
+                result.push(String::from(env.get_string(path)?).into());
+            }
+            Ok(result)
+        })
+    }
+
+    pub fn permission_status(&self, permission: &str) -> Result<i32> {
+        self.with_env(|env| {
+            let permission = env.new_string(permission)?;
+            Ok(env
+                .call_method(
+                    self.object.as_obj(),
+                    "permissionStatus",
+                    "(Ljava/lang/String;)I",
+                    &[JValue::Object(permission.as_ref())],
+                )?
+                .i()?)
+        })
+    }
+
+    pub fn request_permission(&self, permission: &str, token: u64) -> Result<()> {
+        self.with_env(|env| {
+            let permission = env.new_string(permission)?;
+            env.call_method(
+                self.object.as_obj(),
+                "requestPermission",
+                "(Ljava/lang/String;J)V",
+                &[
+                    JValue::Object(permission.as_ref()),
+                    JValue::Long(token as i64),
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn cancel_permission(&self, token: u64) -> Result<()> {
+        self.with_env(|env| {
+            env.call_method(
+                self.object.as_obj(),
+                "cancelPermission",
+                "(J)V",
+                &[JValue::Long(token as i64)],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn set_keyboard_visible(&self, visible: bool) -> Result<()> {
         self.with_env(|env| {
             env.call_method(
@@ -216,6 +280,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         ),
         method("nativeDetach", "(J)V", detach as *mut c_void),
         method("nativeFrame", "(J)Z", frame as *mut c_void),
+        method("nativeViewport", "(JIIF)V", viewport as *mut c_void),
         method(
             "nativeInputState",
             "(J)Ldev/gpui/android/TextInputState;",
@@ -236,6 +301,12 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         method("nativeScroll", "(JIFFFF)V", scroll as *mut c_void),
         method("nativeRunTask", "(JJ)V", run_task as *mut c_void),
         method("nativeClose", "(J)V", close as *mut c_void),
+        method("nativeRedraw", "(J)V", redraw as *mut c_void),
+        method(
+            "nativePermissionResult",
+            "(JJI)V",
+            permission_result as *mut c_void,
+        ),
     ];
     env.register_native_methods("dev/gpui/android/GpuiSession", &methods)?;
     ENTRY
@@ -366,6 +437,26 @@ extern "system" fn frame(mut env: JNIEnv, _: JClass, id: jlong) -> jboolean {
         session.platform.window.frame()?;
         Ok(session.platform.window.input_dirty.replace(false) as u8)
     })
+}
+
+extern "system" fn redraw(mut env: JNIEnv, _: JClass, id: jlong) {
+    call(&mut env, |_| session(id)?.platform.window.redraw());
+}
+
+extern "system" fn viewport(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    width: jint,
+    height: jint,
+    density: jfloat,
+) {
+    call(&mut env, |_| {
+        session(id)?
+            .platform
+            .window
+            .set_viewport(width, height, density)
+    });
 }
 
 extern "system" fn input_state(mut env: JNIEnv, _: JClass, id: jlong) -> jobject {
@@ -568,6 +659,21 @@ extern "system" fn close(mut env: JNIEnv, _: JClass, id: jlong) {
         let session = SESSIONS.with(|sessions| sessions.borrow_mut().remove(&id));
         if let Some(session) = session {
             session.platform.close();
+        }
+        Ok(())
+    });
+}
+
+extern "system" fn permission_result(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    token: jlong,
+    status: jint,
+) {
+    call(&mut env, |_| {
+        if let Ok(session) = session(id) {
+            session.platform.permissions.complete(token as u64, status);
         }
         Ok(())
     });

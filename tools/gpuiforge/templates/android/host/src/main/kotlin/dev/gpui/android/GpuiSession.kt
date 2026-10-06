@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -26,6 +27,12 @@ class GpuiSession : AutoCloseable {
     private var backEnabled = false
     private var backChanged: Consumer<Boolean>? = null
     private var keyboardRequestVersion = 0L
+    private var permissionHostVersion = 0L
+    private val permissions = PermissionHost { token, status ->
+        handler.postAtTime({
+            if (!closed && id != 0L) nativePermissionResult(id, token, status)
+        }, this, SystemClock.uptimeMillis())
+    }
 
     init { checkThread() }
 
@@ -60,6 +67,21 @@ class GpuiSession : AutoCloseable {
 
     internal fun detachSurface() { checkThread(); if (id != 0L) nativeDetach(id) }
     internal fun frame(): Boolean { checkThread(); return id != 0L && nativeFrame(id) }
+    internal fun redraw() { checkThread(); if (!closed && id != 0L) nativeRedraw(id) }
+    internal fun viewport(width: Int, height: Int, density: Float) {
+        checkThread()
+        if (!closed && id != 0L) nativeViewport(id, width, height, density)
+    }
+
+    private fun systemFontPaths(): Array<String> {
+        if (Build.VERSION.SDK_INT >= 29) {
+            return android.graphics.fonts.SystemFonts.getAvailableFonts()
+                .mapNotNull { it.file?.absolutePath }.distinct().sorted().toTypedArray()
+        }
+        return java.io.File("/system/fonts").listFiles().orEmpty()
+            .filter { it.isFile && it.extension.lowercase() in setOf("ttf", "otf", "ttc") }
+            .map { it.absolutePath }.sorted().toTypedArray()
+    }
     internal fun inputState(): TextInputState? { checkThread(); return if (id != 0L) nativeInputState(id) else null }
     internal fun edit(epoch: Long, operation: Int, text: String, a: Int, b: Int): Boolean {
         checkThread()
@@ -87,6 +109,34 @@ class GpuiSession : AutoCloseable {
     }
     internal fun active() = !closed && phase == ACTIVE
     fun isClosed() = closed
+
+    /** Attach an Activity and forward its permission results to this session. */
+    fun attachPermissionHost(activity: Activity) { checkThread(); check(!closed); permissions.attach(activity); permissionHostVersion++ }
+
+    /** Detaching cancels pending Rust requests, including during configuration changes. */
+    fun detachPermissionHost(activity: Activity) { checkThread(); permissions.detach(activity); permissionHostVersion++ }
+
+    /** Returns true for a permission result owned by this session. Codes 0x4700..0x7fff are reserved. */
+    fun onRequestPermissionsResult(activity: Activity, code: Int, names: Array<out String>, results: IntArray): Boolean {
+        checkThread()
+        return !closed && permissions.result(activity, code, names, results)
+    }
+
+    private fun permissionStatus(permission: String): Int { checkThread(); return if (closed) -4 else permissions.status(permission) }
+
+    private fun requestPermission(permission: String, token: Long) {
+        val version = permissionHostVersion
+        handler.postAtTime({
+            if (!closed) {
+                if (version == permissionHostVersion) permissions.request(permission, token, active())
+                else if (id != 0L) nativePermissionResult(id, token, -1)
+            }
+        }, this, SystemClock.uptimeMillis())
+    }
+
+    private fun cancelPermission(token: Long) {
+        handler.postAtTime({ if (!closed) permissions.cancel(token) }, this, SystemClock.uptimeMillis())
+    }
 
     /** Reports whether Rust currently handles Back. The host owns callback registration. */
     fun setOnBackEnabledChanged(callback: Consumer<Boolean>?) {
@@ -204,6 +254,7 @@ class GpuiSession : AutoCloseable {
         checkThread()
         if (closed) return
         closed = true
+        permissions.close()
         try {
             view.get()?.releaseSurface()
         } finally {
@@ -251,5 +302,8 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeScroll(id: Long, phase: Int, x: Float, y: Float, dx: Float, dy: Float)
         @JvmStatic private external fun nativeRunTask(id: Long, token: Long)
         @JvmStatic private external fun nativeClose(id: Long)
+        @JvmStatic private external fun nativePermissionResult(id: Long, token: Long, status: Int)
+        @JvmStatic private external fun nativeRedraw(id: Long)
+        @JvmStatic private external fun nativeViewport(id: Long, width: Int, height: Int, density: Float)
     }
 }

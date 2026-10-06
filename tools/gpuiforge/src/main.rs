@@ -218,7 +218,7 @@ fn init(
             );
         }
         doc["platforms"]["android"]["application-id"] = toml_edit::value(id);
-        for field in ["abis", "build", "run"] {
+        for field in ["abis", "permissions", "build", "run"] {
             if let Some(value) = defaults.get(field) {
                 doc["platforms"]["android"][field] = value.clone();
             }

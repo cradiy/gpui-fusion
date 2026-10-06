@@ -65,6 +65,20 @@ struct LoadedFont {
 }
 
 impl CosmicTextSystem {
+    /// Loads font files for platforms that provide their own system font discovery.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn add_font_files(&self, paths: &[std::path::PathBuf]) {
+        let mut state = self.0.write();
+        let db = state.font_system.db_mut();
+        for path in paths {
+            if let Err(error) = db.load_font_file(path) {
+                log::warn!("Could not load font {}: {error}", path.display());
+            }
+        }
+        state.font_ids_by_family_cache.clear();
+        state.resolved_font_cache.clear();
+    }
+
     pub fn new(system_font_fallback: &str) -> Self {
         let font_system = FontSystem::new();
 

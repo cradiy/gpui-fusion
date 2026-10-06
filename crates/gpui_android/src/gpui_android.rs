@@ -5,12 +5,14 @@ mod bridge;
 mod dispatcher;
 mod input;
 mod logging;
+mod permissions;
 mod platform;
 mod surface;
 mod window;
 
 pub use bridge::{current_platform, initialize};
 pub use jni;
+pub use permissions::{AndroidPermissions, PermissionStatus};
 pub use platform::AndroidPlatform;
 
 #[doc(hidden)]

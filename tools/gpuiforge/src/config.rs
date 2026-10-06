@@ -55,6 +55,18 @@ pub struct Platform {
     pub activity: Option<String>,
     #[serde(default)]
     pub abis: Vec<String>,
+    #[serde(default)]
+    pub permissions: Vec<String>,
+    pub signing: Option<Signing>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Signing {
+    pub keystore: PathBuf,
+    pub key_alias: String,
+    pub store_password_env: String,
+    pub key_password_env: String,
 }
 
 #[derive(Clone, Deserialize)]
@@ -100,6 +112,14 @@ fn paths(value: &mut toml::Value, base: &Path) -> Result<()> {
     }
     if let Some(template) = value.get_mut("template") {
         resolve(template, base)?;
+    }
+    if let Some(signing) = value.get_mut("signing") {
+        resolve(
+            signing
+                .get_mut("keystore")
+                .context("signing.keystore is required")?,
+            base,
+        )?;
     }
     if let Some(table) = value.get_mut("paths").and_then(toml::Value::as_table_mut) {
         for (_, path) in table.iter_mut() {
@@ -201,6 +221,37 @@ impl Project {
                 relative(&copy.to)?;
             }
             if name == "android" {
+                for permission in &platform.permissions {
+                    ensure!(
+                        permission.contains('.')
+                            && permission.split('.').all(|part| {
+                                let mut chars = part.chars();
+                                chars
+                                    .next()
+                                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                                    && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+                            }),
+                        "invalid Android permission name: {permission}"
+                    );
+                }
+                platform.permissions.sort();
+                platform.permissions.dedup();
+                if let Some(signing) = &platform.signing {
+                    ensure!(
+                        !signing.key_alias.trim().is_empty(),
+                        "signing.key-alias must not be empty"
+                    );
+                    for name in [&signing.store_password_env, &signing.key_password_env] {
+                        let mut chars = name.chars();
+                        ensure!(
+                            chars
+                                .next()
+                                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_'),
+                            "invalid signing environment variable name"
+                        );
+                    }
+                }
                 ensure!(
                     !platform.abis.is_empty()
                         && platform
@@ -221,6 +272,11 @@ impl Project {
                                 && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
                         }),
                     "invalid Android application-id"
+                );
+            } else {
+                ensure!(
+                    platform.permissions.is_empty() && platform.signing.is_none(),
+                    "permissions and signing are Android-only settings"
                 );
             }
             platforms.insert(name, platform);
@@ -273,7 +329,12 @@ impl Project {
             ),
             (
                 "apk_suffix".into(),
-                if release { "-unsigned" } else { "" }.into(),
+                if release && p.signing.is_none() {
+                    "-unsigned"
+                } else {
+                    ""
+                }
+                .into(),
             ),
             (
                 "variant".into(),
@@ -284,6 +345,13 @@ impl Project {
                 abi.map(str::to_owned).unwrap_or_else(|| p.abis.join(",")),
             ),
         ]);
+        vars.insert(
+            "android_permissions".into(),
+            p.permissions
+                .iter()
+                .map(|name| format!("    <uses-permission android:name=\"{name}\" />\n"))
+                .collect(),
+        );
         if let Some(id) = &p.application_id {
             vars.insert("application_id".into(), id.clone());
         }

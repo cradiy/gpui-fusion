@@ -32,6 +32,10 @@ impl Drop for NativeWindowRef {
 }
 
 impl NativeWindow {
+    pub fn is_same_window(&self, other: &Self) -> bool {
+        self.0.0 == other.0.0
+    }
+
     pub fn from_surface(env: &JNIEnv, surface: &JObject) -> Result<Self> {
         // SAFETY: called with a live Java Surface on the JNI callback thread.
         let pointer = unsafe { ANativeWindow_fromSurface(env.get_raw(), surface.as_raw()) };

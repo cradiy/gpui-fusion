@@ -1,5 +1,6 @@
 activity = "dev.gpuiforge.app.MainActivity"
 abis = ["arm64-v8a", "x86_64"]
+permissions = []
 artifact = "app/build/outputs/apk/{{profile}}/app-{{profile}}{{apk_suffix}}.apk"
 
 [variables]

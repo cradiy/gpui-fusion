@@ -25,6 +25,15 @@ android {
         versionName = "{{var.version_name|kotlin}}"
         ndk { abiFilters += gpuiAbis }
     }
+    if (providers.environmentVariable("GPUIFORGE_SIGNING_ENABLED").orNull == "1") {
+        val signing = signingConfigs.create("gpuiRelease") {
+            storeFile = file(providers.environmentVariable("GPUIFORGE_SIGNING_KEYSTORE").get())
+            keyAlias = providers.environmentVariable("GPUIFORGE_SIGNING_KEY_ALIAS").get()
+            storePassword = providers.environmentVariable("GPUIFORGE_SIGNING_STORE_PASSWORD").get()
+            keyPassword = providers.environmentVariable("GPUIFORGE_SIGNING_KEY_PASSWORD").get()
+        }
+        buildTypes.getByName("release").signingConfig = signing
+    }
 }
 
 for (profile in listOf("debug", "release")) {

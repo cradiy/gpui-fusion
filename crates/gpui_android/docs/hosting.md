@@ -339,9 +339,9 @@ The requesting task should be cancelled with its owning UI when appropriate.
 The example's Request microphone permission button only checks authorization;
 it does not record audio.
 
-## File selection
+## Files
 
-Use `App::prompt_for_files(FilePromptOptions { multiple })` to open Android's
+Use `App::prompt_for_files(FilePromptOptions { multiple, ..Default::default() })` to open Android's
 system document picker. It returns `Some(files)` after selection and `None`
 after cancellation. Each `SelectedFile` exposes a display name and an asynchronous
 `read()` method. Metadata queries, descriptor opening, and reads run on background
@@ -351,8 +351,42 @@ Android documents do not expose a GPUI filesystem path or browser URL. Use
 `SelectedFile::read()` instead; it loads the complete contents into memory. Each
 read opens a fresh descriptor. Reading can fail if the provider is unavailable or
 access has been revoked. Grants are not persisted for use after application
-restart. The picker requires no broad storage permission. Directory selection,
-save dialogs, and `prompt_for_paths` are not supported.
+restart. The picker requires no broad storage permission. Directory selection
+and `prompt_for_paths` are not supported.
+
+To edit an existing document, set `FilePromptOptions::writable` to `true`.
+To choose a new destination, call `App::prompt_for_file_save`:
+
+```rust
+let selection = cx.prompt_for_file_save(FileSaveOptions {
+    suggested_name: "note.txt".into(),
+    mime_type: "text/plain".into(),
+    ..Default::default()
+});
+// In a foreground task:
+if let Some(file) = selection.await?? {
+    file.write(contents).await?;
+}
+```
+
+The save picker creates a document before returning its handle. A duplicate
+filename creates a separate document with a system-selected suffix. Retain the
+handle and call `write()` again to save subsequent edits to that document.
+The `directory` option is a desktop hint and is ignored on Android.
+
+Read-only selections reject writes. Writable selection fails if the provider
+does not grant write access; `can_write()` reports the handle's permitted access,
+not whether a future provider operation will succeed. Writes replace and truncate
+the complete contents, including when saving an empty buffer. Opening, writing,
+flushing, and closing run on background workers, with bounded JNI transfer chunks.
+Operations through the same handle or its clones are serialized. Await each write
+before starting the next to preserve save order.
+
+Writes are not atomic. An error may leave a partial file, and a newly created
+document is not automatically deleted on failure. Success means the provider's
+output stream completed and closed, not that remote storage has finished syncing.
+Save data before dropping the handle; URI grants are not persisted for reopening
+documents after a restart. Browser writable handles are not supported.
 
 Only one file selection can be pending per session. Dropping its receiver discards
 the result without dismissing the system picker. Closing the session completes

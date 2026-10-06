@@ -1135,8 +1135,12 @@ mod tests {
             std::env::temp_dir().join(format!("gpui-selected-file-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&directory).unwrap();
         let path = directory.join("selected file.txt");
-        let selection =
-            cx.update(|cx| cx.prompt_for_files(crate::FilePromptOptions { multiple: true }));
+        let selection = cx.update(|cx| {
+            cx.prompt_for_files(crate::FilePromptOptions {
+                multiple: true,
+                ..Default::default()
+            })
+        });
         cx.simulate_path_prompt_response(|options| {
             assert!(options.files && options.multiple && !options.directories);
             Some(vec![path.clone()])
@@ -1148,6 +1152,9 @@ mod tests {
         // Selection succeeds without reading; contents can become available later.
         std::fs::write(&path, b"selected contents").unwrap();
         assert_eq!(files[0].read().await.unwrap(), b"selected contents");
+        assert!(!files[0].can_write());
+        assert!(files[0].write(b"unexpected".to_vec()).await.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"selected contents");
         std::fs::remove_file(&path).unwrap();
         assert!(files[0].read().await.is_err());
         std::fs::remove_dir(directory).unwrap();
@@ -1155,6 +1162,46 @@ mod tests {
         let selection = cx.update(|cx| cx.prompt_for_files(Default::default()));
         cx.simulate_path_prompt_response(|_| None);
         assert!(selection.await.unwrap().unwrap().is_none());
+    }
+
+    #[gpui::test]
+    async fn saved_file_handles_replace_contents_and_preserve_cancellation(
+        cx: &mut TestAppContext,
+    ) {
+        let directory =
+            std::env::temp_dir().join(format!("gpui-save-file-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("note.txt");
+        let selection = cx.update(|cx| {
+            cx.prompt_for_file_save(crate::FileSaveOptions {
+                directory: Some(directory.clone()),
+                ..Default::default()
+            })
+        });
+        cx.simulate_new_path_selection(|_| Some(path.clone()));
+        let file = selection.await.unwrap().unwrap().unwrap();
+        assert!(file.can_write());
+        file.write(b"long original contents".to_vec())
+            .await
+            .unwrap();
+        file.clone().write(b"short".to_vec()).await.unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"short");
+        let selection = cx.update(|cx| {
+            cx.prompt_for_files(crate::FilePromptOptions {
+                writable: true,
+                ..Default::default()
+            })
+        });
+        cx.simulate_path_prompt_response(|_| Some(vec![path.clone()]));
+        let files = selection.await.unwrap().unwrap().unwrap();
+        files[0].write(Vec::new()).await.unwrap();
+        assert!(file.read().await.unwrap().is_empty());
+        let selection = cx.update(|cx| cx.prompt_for_file_save(Default::default()));
+        cx.simulate_new_path_selection(|_| None);
+        assert!(selection.await.unwrap().unwrap().is_none());
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
+        assert!(file.write(b"no parent".to_vec()).await.is_err());
     }
 
     #[gpui::test]

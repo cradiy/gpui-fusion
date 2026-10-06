@@ -248,6 +248,12 @@ impl Platform for AndroidPlatform {
     fn can_select_mixed_files_and_dirs(&self) -> bool {
         false
     }
+    fn prompt_for_file_save(
+        &self,
+        options: FileSaveOptions,
+    ) -> oneshot::Receiver<Result<Option<SelectedFile>>> {
+        self.files.prompt_save(options)
+    }
     fn reveal_path(&self, _: &Path) {}
     fn open_with_system(&self, _: &Path) {}
     fn on_quit(&self, callback: Box<dyn FnMut()>) {

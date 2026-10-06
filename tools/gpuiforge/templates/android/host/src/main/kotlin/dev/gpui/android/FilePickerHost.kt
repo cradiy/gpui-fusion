@@ -6,11 +6,12 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import java.io.FileNotFoundException
+import java.io.OutputStream
 import java.lang.ref.WeakReference
 
 internal class FilePickerHost(private val deliver: (Long, Array<SelectedDocument>?, String?) -> Unit) {
     private var owner = WeakReference<Activity>(null)
-    private data class Request(val token: Long, val code: Int, val multiple: Boolean)
+    private data class Request(val token: Long, val code: Int, val multiple: Boolean, val writable: Boolean)
     private var pending: Request? = null
 
     fun attach(activity: Activity) {
@@ -24,20 +25,37 @@ internal class FilePickerHost(private val deliver: (Long, Array<SelectedDocument
         owner.clear()
     }
 
+    fun request(token: Long, multiple: Boolean, writable: Boolean, active: Boolean) {
+        launch(token, multiple, writable, active, Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            type = "*/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple)
+        })
+    }
+
+    fun create(token: Long, name: String, mime: String, active: Boolean) {
+        if (name.isBlank() || name.contains('/') || name.contains('\\') || name.contains('\u0000') ||
+            !mime.matches(Regex("[^/\\s]+/[^/\\s]+")) || mime.contains('*')) {
+            deliver(token, null, "Save requires a filename and a concrete MIME type"); return
+        }
+        launch(token, false, true, active, Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            type = mime
+            putExtra(Intent.EXTRA_TITLE, name)
+        })
+    }
+
     @Suppress("DEPRECATION")
-    fun request(token: Long, multiple: Boolean, active: Boolean) {
+    private fun launch(token: Long, multiple: Boolean, writable: Boolean, active: Boolean, intent: Intent) {
         val activity = owner.get()?.takeUnless { it.isFinishing || it.isDestroyed }
         if (!active || activity == null) { deliver(token, null, "File selection requires an active Activity"); return }
         if (pending != null) { deliver(token, null, "Another file selection is pending"); return }
         if (nextCode > 0xbfff) { deliver(token, null, "File request codes exhausted"); return }
-        val request = Request(token, nextCode++, multiple)
+        val request = Request(token, nextCode++, multiple, writable)
         pending = request
         try {
-            activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            activity.startActivityForResult(intent.apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
-                type = "*/*"
-                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                if (writable) addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             }, request.code)
         } catch (error: RuntimeException) { finish(null, error.message ?: "Unable to open file picker") }
     }
@@ -55,8 +73,11 @@ internal class FilePickerHost(private val deliver: (Long, Array<SelectedDocument
             data?.data?.let { uris.add(it) }
             require(uris.isNotEmpty() && uris.all { it.scheme == "content" }) { "File picker returned no readable document URIs" }
             require(request.multiple || uris.size == 1) { "File picker returned multiple documents for a single selection" }
+            require(!request.writable || ((data?.flags ?: 0) and Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0) {
+                "The document provider did not grant write access"
+            }
             val resolver = activity.applicationContext.contentResolver
-            finish(uris.map { SelectedDocument(resolver, it) }.toTypedArray(), null)
+            finish(uris.map { SelectedDocument(resolver, it, request.writable) }.toTypedArray(), null)
         } catch (error: RuntimeException) { finish(null, error.message ?: "Invalid file selection") }
         return true
     }
@@ -73,7 +94,8 @@ internal class FilePickerHost(private val deliver: (Long, Array<SelectedDocument
 }
 
 /** Owns no Activity. Metadata and descriptor access run on Rust background workers. */
-internal class SelectedDocument(private val resolver: ContentResolver, private val uri: Uri) {
+internal class SelectedDocument(private val resolver: ContentResolver, private val uri: Uri, private val writable: Boolean) {
+    fun canWrite(): Boolean = writable
     fun displayName(): String {
         resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst() && !cursor.isNull(0)) return cursor.getString(0)
@@ -83,4 +105,10 @@ internal class SelectedDocument(private val resolver: ContentResolver, private v
 
     fun openRead(): Int = (resolver.openFileDescriptor(uri, "r")
         ?: throw FileNotFoundException("Document provider returned no descriptor")).use { it.detachFd() }
+
+    fun openWrite(): OutputStream {
+        check(writable) { "File handle is read-only" }
+        return resolver.openOutputStream(uri, "wt")
+            ?: throw FileNotFoundException("Document provider returned no output stream")
+    }
 }

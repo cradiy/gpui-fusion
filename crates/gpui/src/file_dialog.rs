@@ -11,6 +11,29 @@ use std::{
 pub struct FilePromptOptions {
     /// Allow more than one file to be selected.
     pub multiple: bool,
+    /// Request handles that allow replacing file contents. Unsupported platforms return an error.
+    pub writable: bool,
+}
+
+/// Options for choosing a writable destination through a system save dialog.
+#[derive(Clone, Debug)]
+pub struct FileSaveOptions {
+    /// Suggested filename, including its extension.
+    pub suggested_name: String,
+    /// Content MIME type. Used by Android document providers.
+    pub mime_type: String,
+    /// Initial directory on desktop. Ignored by URI-based document pickers.
+    pub directory: Option<PathBuf>,
+}
+
+impl Default for FileSaveOptions {
+    fn default() -> Self {
+        Self {
+            suggested_name: "untitled".into(),
+            mime_type: "application/octet-stream".into(),
+            directory: None,
+        }
+    }
 }
 
 /// Platform storage for a selected file. Reads may require the platform UI thread.
@@ -27,6 +50,14 @@ pub trait PlatformFile: std::fmt::Debug + Send + Sync {
     }
     /// Read the file on demand without blocking the UI thread.
     fn read(&self) -> LocalBoxFuture<'static, Result<Vec<u8>>>;
+    /// Whether this handle permits writes. Provider or filesystem errors may still prevent a write.
+    fn can_write(&self) -> bool {
+        false
+    }
+    /// Replace the complete contents. Failure may leave a partially written file.
+    fn write(&self, _contents: Vec<u8>) -> LocalBoxFuture<'static, Result<()>> {
+        Box::pin(async { anyhow::bail!("file handle is read-only") })
+    }
 }
 
 /// A selected file with lazy contents and shared ownership of its platform resource.
@@ -58,7 +89,20 @@ impl SelectedFile {
         self.0.read()
     }
 
-    pub(crate) fn from_path(path: PathBuf, executor: BackgroundExecutor) -> Self {
+    /// Whether this handle permits writes. Recheck the result of every write for access errors.
+    pub fn can_write(&self) -> bool {
+        self.0.can_write()
+    }
+
+    /// Replace all contents, truncating any previous data, without blocking the UI thread.
+    ///
+    /// This is not an atomic transaction: failure can leave partial contents. Await completion
+    /// before starting another write; success does not guarantee a cloud provider has synced.
+    pub fn write(&self, contents: Vec<u8>) -> LocalBoxFuture<'static, Result<()>> {
+        self.0.write(contents)
+    }
+
+    pub(crate) fn from_path(path: PathBuf, executor: BackgroundExecutor, writable: bool) -> Self {
         let name = path
             .file_name()
             .unwrap_or_default()
@@ -68,6 +112,8 @@ impl SelectedFile {
             path,
             name,
             executor,
+            writable,
+            access: Arc::new(parking_lot::Mutex::new(())),
         }))
     }
 }
@@ -76,6 +122,8 @@ struct NativeFile {
     path: PathBuf,
     name: String,
     executor: BackgroundExecutor,
+    writable: bool,
+    access: Arc<parking_lot::Mutex<()>>,
 }
 impl std::fmt::Debug for NativeFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -91,6 +139,24 @@ impl PlatformFile for NativeFile {
     }
     fn read(&self) -> LocalBoxFuture<'static, Result<Vec<u8>>> {
         let path = self.path.clone();
-        Box::pin(self.executor.spawn(async move { Ok(std::fs::read(path)?) }))
+        let access = self.access.clone();
+        Box::pin(self.executor.spawn(async move {
+            let _guard = access.lock();
+            Ok(std::fs::read(path)?)
+        }))
+    }
+    fn can_write(&self) -> bool {
+        self.writable
+    }
+    fn write(&self, contents: Vec<u8>) -> LocalBoxFuture<'static, Result<()>> {
+        if !self.writable {
+            return Box::pin(async { anyhow::bail!("file handle is read-only") });
+        }
+        let path = self.path.clone();
+        let access = self.access.clone();
+        Box::pin(self.executor.spawn(async move {
+            let _guard = access.lock();
+            Ok(std::fs::write(path, contents)?)
+        }))
     }
 }

@@ -208,7 +208,7 @@ pub trait Platform: 'static {
         &self,
         options: PathPromptOptions,
     ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>>;
-    /// Select files with readable handles on both desktop and web platforms.
+    /// Select files with readable handles and optional write access.
     fn prompt_for_files(
         &self,
         options: crate::FilePromptOptions,
@@ -227,9 +227,47 @@ pub trait Platform: 'static {
                     Ok(paths.await??.map(|paths| {
                         paths
                             .into_iter()
-                            .map(|path| crate::SelectedFile::from_path(path, executor.clone()))
+                            .map(|path| {
+                                crate::SelectedFile::from_path(
+                                    path,
+                                    executor.clone(),
+                                    options.writable,
+                                )
+                            })
                             .collect()
                     }))
+                }
+                .await;
+                let _ = tx.send(result);
+            })
+            .detach();
+        rx
+    }
+    /// Choose a writable destination. Cancellation returns `None`.
+    fn prompt_for_file_save(
+        &self,
+        options: crate::FileSaveOptions,
+    ) -> oneshot::Receiver<Result<Option<crate::SelectedFile>>> {
+        let (tx, rx) = oneshot::channel();
+        let directory = match options
+            .directory
+            .map(Ok)
+            .unwrap_or_else(std::env::current_dir)
+        {
+            Ok(directory) => directory,
+            Err(error) => {
+                let _ = tx.send(Err(error.into()));
+                return rx;
+            }
+        };
+        let path = self.prompt_for_new_path(&directory, Some(&options.suggested_name));
+        let executor = self.background_executor();
+        self.foreground_executor()
+            .spawn(async move {
+                let result = async {
+                    Ok(path
+                        .await??
+                        .map(|path| crate::SelectedFile::from_path(path, executor, true)))
                 }
                 .await;
                 let _ = tx.send(result);

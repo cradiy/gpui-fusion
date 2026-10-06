@@ -1,10 +1,13 @@
 use crate::bridge::Host;
 use anyhow::{Result, anyhow, ensure};
 use futures::{channel::oneshot, future::LocalBoxFuture};
-use gpui::{BackgroundExecutor, FilePromptOptions, ForegroundExecutor, PlatformFile, SelectedFile};
+use gpui::{
+    BackgroundExecutor, FilePromptOptions, FileSaveOptions, ForegroundExecutor, PlatformFile,
+    SelectedFile,
+};
 use jni::{
     JNIEnv, JavaVM,
-    objects::{GlobalRef, JString},
+    objects::{GlobalRef, JString, JValue},
 };
 use std::{
     cell::{Cell, RefCell},
@@ -46,6 +49,35 @@ impl FileDialog {
     }
 
     pub fn prompt(&self, options: FilePromptOptions) -> oneshot::Receiver<Selection> {
+        self.prompt_with(|token| {
+            self.host
+                .request_files(token, options.multiple, options.writable)
+        })
+    }
+
+    pub fn prompt_save(
+        &self,
+        options: FileSaveOptions,
+    ) -> oneshot::Receiver<Result<Option<SelectedFile>>> {
+        let selection = self.prompt_with(|token| self.host.request_file_save(token, &options));
+        let (tx, rx) = oneshot::channel();
+        self.foreground
+            .spawn(async move {
+                let result = async {
+                    let Some(mut files) = selection.await?? else {
+                        return Ok(None);
+                    };
+                    ensure!(files.len() == 1, "save picker must return one document");
+                    Ok(files.pop())
+                }
+                .await;
+                let _ = tx.send(result);
+            })
+            .detach();
+        rx
+    }
+
+    fn prompt_with(&self, request: impl FnOnce(u64) -> Result<()>) -> oneshot::Receiver<Selection> {
         let (tx, rx) = oneshot::channel();
         if self.closed.get() || self.pending.borrow().is_some() {
             let _ = tx.send(Err(anyhow!(
@@ -59,7 +91,7 @@ impl FileDialog {
         };
         self.next.set(token);
         *self.pending.borrow_mut() = Some((token, tx));
-        if let Err(error) = self.host.request_files(token, options.multiple) {
+        if let Err(error) = request(token) {
             self.finish(token, Err(error));
         }
         rx
@@ -106,10 +138,17 @@ impl FileDialog {
                             .l()?;
                         Ok(env.get_string(&JString::from(value))?.into())
                     })?;
+                    let writable = document.call(|env| {
+                        Ok(env
+                            .call_method(document.object.as_obj(), "canWrite", "()Z", &[])?
+                            .z()?)
+                    })?;
                     Ok(SelectedFile::new(Arc::new(AndroidFile {
                         name,
                         document,
                         executor: executor.clone(),
+                        writable,
+                        access: Arc::new(parking_lot::Mutex::new(())),
                     })))
                 })
                 .collect::<Result<Vec<_>>>()
@@ -185,6 +224,8 @@ struct AndroidFile {
     name: String,
     document: Arc<Document>,
     executor: BackgroundExecutor,
+    writable: bool,
+    access: Arc<parking_lot::Mutex<()>>,
 }
 
 impl std::fmt::Debug for AndroidFile {
@@ -202,7 +243,9 @@ impl PlatformFile for AndroidFile {
 
     fn read(&self) -> LocalBoxFuture<'static, Result<Vec<u8>>> {
         let document = self.document.clone();
+        let access = self.access.clone();
         Box::pin(self.executor.spawn(async move {
+            let _guard = access.lock();
             let fd = document.call(|env| {
                 Ok(env
                     .call_method(document.object.as_obj(), "openRead", "()I", &[])?
@@ -217,6 +260,56 @@ impl PlatformFile for AndroidFile {
             let mut bytes = Vec::new();
             file.read_to_end(&mut bytes)?;
             Ok(bytes)
+        }))
+    }
+
+    fn can_write(&self) -> bool {
+        self.writable
+    }
+
+    fn write(&self, contents: Vec<u8>) -> LocalBoxFuture<'static, Result<()>> {
+        if !self.writable {
+            return Box::pin(async { anyhow::bail!("file handle is read-only") });
+        }
+        let document = self.document.clone();
+        let access = self.access.clone();
+        Box::pin(self.executor.spawn(async move {
+            let _guard = access.lock();
+            let object = document.call(|env| {
+                let stream = env
+                    .call_method(
+                        document.object.as_obj(),
+                        "openWrite",
+                        "()Ljava/io/OutputStream;",
+                        &[],
+                    )?
+                    .l()?;
+                Ok(env.new_global_ref(stream)?)
+            })?;
+            let stream = Document {
+                vm: document.vm.clone(),
+                object,
+            };
+            let result = stream.call(|env| {
+                for chunk in contents.chunks(1024 * 1024) {
+                    let bytes = env.byte_array_from_slice(chunk)?;
+                    env.call_method(
+                        stream.object.as_obj(),
+                        "write",
+                        "([B)V",
+                        &[JValue::Object(bytes.as_ref())],
+                    )?;
+                    env.delete_local_ref(bytes)?;
+                }
+                env.call_method(stream.object.as_obj(), "flush", "()V", &[])?;
+                Ok(())
+            });
+            // Keep the Java stream so provider close errors are reported, including after a failed write.
+            let closed = stream.call(|env| {
+                env.call_method(stream.object.as_obj(), "close", "()V", &[])?;
+                Ok(())
+            });
+            result.and(closed)
         }))
     }
 }

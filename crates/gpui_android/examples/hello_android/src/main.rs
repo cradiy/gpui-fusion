@@ -61,6 +61,12 @@ fn main() {
                 clipboard_status: "Copy the counter or paste text from another app.".into(),
                 file_status: "Choose a file to read its contents.".into(),
                 file_pending: false,
+                document: None,
+                file_text: cx.new(|cx| {
+                    TextInput::new(cx)
+                        .multiline()
+                        .initial_value("Hello from GPUI — 你好！\n")
+                }),
                 permission_status: "Microphone permission has not been requested.".into(),
                 #[cfg(target_os = "android")]
                 permissions: gpui_android::current_platform().permissions(),
@@ -151,6 +157,8 @@ struct Counter {
     clipboard_status: String,
     file_status: String,
     file_pending: bool,
+    document: Option<SelectedFile>,
+    file_text: Entity<TextInput>,
     permission_status: String,
     #[cfg(target_os = "android")]
     permissions: gpui_android::AndroidPermissions,
@@ -183,7 +191,10 @@ impl Counter {
         }
         self.file_pending = true;
         self.file_status = "Choosing files...".into();
-        let selection = cx.prompt_for_files(FilePromptOptions { multiple });
+        let selection = cx.prompt_for_files(FilePromptOptions {
+            multiple,
+            ..Default::default()
+        });
         cx.spawn(async move |this, cx| {
             let result = async {
                 let Some(files) = selection.await?? else {
@@ -205,6 +216,101 @@ impl Counter {
                 this.file_pending = false;
                 this.file_status =
                     result.unwrap_or_else(|error| format!("File selection: {error}"));
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn open_document(&mut self, cx: &mut Context<Self>) {
+        if self.file_pending {
+            return;
+        }
+        self.file_pending = true;
+        self.file_status = "Opening a text document...".into();
+        let selection = cx.prompt_for_files(FilePromptOptions {
+            multiple: false,
+            writable: true,
+        });
+        cx.spawn(async move |this, cx| {
+            let result = async {
+                let Some(files) = selection.await?? else {
+                    return Ok::<_, anyhow::Error>(None);
+                };
+                let file = files
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("No document selected"))?;
+                let text = String::from_utf8(file.read().await?)?;
+                Ok(Some((file, text)))
+            }
+            .await;
+            let _ = this.update(cx, |this, cx| {
+                this.file_pending = false;
+                this.file_status = match result {
+                    Ok(Some((file, text))) => {
+                        let status = format!("Editing {}", file.name());
+                        this.file_text
+                            .update(cx, |input, cx| input.set_value(text, cx));
+                        this.document = Some(file);
+                        status
+                    }
+                    Ok(None) => "Selection cancelled.".into(),
+                    Err(error) => format!("Open: {error}"),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn save_document(&mut self, save_as: bool, cx: &mut Context<Self>) {
+        if self.file_pending {
+            return;
+        }
+        if !save_as && self.document.is_none() {
+            self.file_status = "Use Save as or open a document for editing first.".into();
+            cx.notify();
+            return;
+        }
+        let selection = save_as.then(|| {
+            cx.prompt_for_file_save(FileSaveOptions {
+                suggested_name: "gpui-note.txt".into(),
+                mime_type: "text/plain".into(),
+                ..Default::default()
+            })
+        });
+        let document = self.document.clone();
+        let contents = self.file_text.read(cx).value().as_bytes().to_vec();
+        let count = contents.len();
+        self.file_pending = true;
+        self.file_status = "Saving...".into();
+        cx.spawn(async move |this, cx| {
+            let result = async {
+                let file = match selection {
+                    Some(selection) => selection.await??,
+                    None => document,
+                };
+                let Some(file) = file else {
+                    return Ok::<_, anyhow::Error>(None);
+                };
+                file.write(contents).await?;
+                Ok(Some(file))
+            }
+            .await;
+            let _ = this.update(cx, |this, cx| {
+                this.file_pending = false;
+                this.file_status = match result {
+                    Ok(Some(file)) => {
+                        let status = format!("Saved {} · {count} bytes", file.name());
+                        this.document = Some(file);
+                        status
+                    }
+                    Ok(None) => "Save cancelled.".into(),
+                    Err(error) => format!("Save: {error}"),
+                };
                 cx.notify();
             });
         })
@@ -456,6 +562,27 @@ impl Render for Counter {
                     .flex_col()
                     .gap_4()
                     .child(div().text_xl().child("Files"))
+                    .child(
+                        Input::new(&self.file_text)
+                            .rows(3)
+                            .text_color(rgb(0x172033)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap_3()
+                            .child(
+                                button("open-document", "Open for editing")
+                                    .on_click(cx.listener(|this, _, _, cx| this.open_document(cx))),
+                            )
+                            .child(button("save-as", "Save as").on_click(
+                                cx.listener(|this, _, _, cx| this.save_document(true, cx)),
+                            ))
+                            .child(button("save-document", "Save").on_click(
+                                cx.listener(|this, _, _, cx| this.save_document(false, cx)),
+                            )),
+                    )
                     .child(
                         div()
                             .flex()

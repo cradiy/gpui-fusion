@@ -76,6 +76,12 @@ pub(crate) fn prompt(
     options: FilePromptOptions,
 ) -> oneshot::Receiver<anyhow::Result<Option<Vec<SelectedFile>>>> {
     let (mut tx, rx) = oneshot::channel();
+    if options.writable {
+        let _ = tx.send(Err(anyhow::anyhow!(
+            "browser file picker does not provide writable handles"
+        )));
+        return rx;
+    }
     let setup = || -> anyhow::Result<_> {
         let document = web_sys::window()
             .and_then(|w| w.document())

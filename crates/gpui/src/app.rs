@@ -1502,6 +1502,17 @@ impl App {
         self.platform.prompt_for_files(options)
     }
 
+    /// Choose a writable file through the platform save dialog. Cancellation returns `None`.
+    ///
+    /// Android creates a document during selection; desktop creation happens on the first write.
+    /// Call `SelectedFile::write` to store contents and retain the handle for subsequent saves.
+    pub fn prompt_for_file_save(
+        &self,
+        options: crate::FileSaveOptions,
+    ) -> oneshot::Receiver<Result<Option<crate::SelectedFile>>> {
+        self.platform.prompt_for_file_save(options)
+    }
+
     /// Displays a platform modal for selecting a new path where a file can be saved.
     ///
     /// The provided directory will be used to set the initial location.

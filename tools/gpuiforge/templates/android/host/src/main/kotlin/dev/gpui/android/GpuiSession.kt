@@ -55,9 +55,15 @@ class GpuiSession : AutoCloseable {
         return !closed && files.result(activity, code, result, data)
     }
 
-    private fun requestFiles(token: Long, multiple: Boolean) {
+    private fun requestFiles(token: Long, multiple: Boolean, writable: Boolean) {
         handler.postAtTime({
-            if (!closed) files.request(token, multiple, active())
+            if (!closed) files.request(token, multiple, writable, active())
+        }, this, SystemClock.uptimeMillis())
+    }
+
+    private fun requestFileSave(token: Long, name: String, mime: String) {
+        handler.postAtTime({
+            if (!closed) files.create(token, name, mime, active())
         }, this, SystemClock.uptimeMillis())
     }
 

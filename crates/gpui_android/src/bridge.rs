@@ -85,13 +85,34 @@ pub(crate) struct Host {
     object: GlobalRef,
 }
 impl Host {
-    pub fn request_files(&self, token: u64, multiple: bool) -> Result<()> {
+    pub fn request_files(&self, token: u64, multiple: bool, writable: bool) -> Result<()> {
         self.with_env(|env| {
             env.call_method(
                 self.object.as_obj(),
                 "requestFiles",
-                "(JZ)V",
-                &[JValue::Long(token as i64), JValue::Bool(multiple as u8)],
+                "(JZZ)V",
+                &[
+                    JValue::Long(token as i64),
+                    JValue::Bool(multiple as u8),
+                    JValue::Bool(writable as u8),
+                ],
+            )?;
+            Ok(())
+        })
+    }
+    pub fn request_file_save(&self, token: u64, options: &gpui::FileSaveOptions) -> Result<()> {
+        self.with_env(|env| {
+            let name = env.new_string(&options.suggested_name)?;
+            let mime = env.new_string(&options.mime_type)?;
+            env.call_method(
+                self.object.as_obj(),
+                "requestFileSave",
+                "(JLjava/lang/String;Ljava/lang/String;)V",
+                &[
+                    JValue::Long(token as i64),
+                    JValue::Object(name.as_ref()),
+                    JValue::Object(mime.as_ref()),
+                ],
             )?;
             Ok(())
         })

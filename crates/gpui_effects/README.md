@@ -14,6 +14,7 @@ pipeline and `gpui_effects` providing higher-level components and presets.
 - [Point gradient](docs/point_gradient.md): independently positioned colors with adjustable influence.
 - [Border trail](docs/border_trail.md): a traveling edge light with a fading tail.
 - [Layout transitions](docs/layout_transition.md): interruptible position and size changes with live child layout.
+- [Animated layout](docs/animated_layout.md): automatic position transitions for keyed flex and grid children.
 - [Animated presence](docs/presence.md): reversible entrance and exit lifecycles for caller-styled content.
 - [Animated collapse](docs/collapse.md): measured-height expansion with surrounding layout movement.
 - [Staggered presence](docs/stagger.md): sequenced entrances and exits for keyed flex and grid items.

@@ -1,5 +1,6 @@
 //! Motion, layout transitions and content transitions.
 
+mod animated_layout;
 mod collapse;
 mod flip;
 mod layout_transition;
@@ -15,6 +16,7 @@ mod switch;
 mod transform_group;
 mod transition;
 
+pub use animated_layout::{AnimatedLayout, animated_layout};
 pub use collapse::{AnimatedCollapse, animated_collapse};
 pub use flip::{
     FLIP_APPEARANCE_SLOT, FLIP_BACKGROUND_SLOT, FLIP_INTERACTION_SLOT, FLIP_LAYOUT_SLOT,

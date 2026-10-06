@@ -1417,7 +1417,8 @@ impl Window {
     /// Applies immediately when mapped and persists across hiding and showing.
     /// `OnDemand` requires layer-shell v4 and falls back to `None` on older
     /// versions. The compositor determines actual focus. Other window kinds
-    /// and platforms ignore this request.
+    /// ignore this request.
+    #[cfg(all(target_os = "linux", feature = "wayland"))]
     pub fn set_keyboard_interactivity(&self, mode: crate::layer_shell::KeyboardInteractivity) {
         self.platform_window.set_keyboard_interactivity(mode);
     }

@@ -969,6 +969,7 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn show_window_menu(&self, _position: Point<Pixels>) {}
     fn start_window_move(&self) {}
     fn start_window_resize(&self, _edge: ResizeEdge) {}
+    #[cfg(all(target_os = "linux", feature = "wayland"))]
     fn set_keyboard_interactivity(&self, _mode: layer_shell::KeyboardInteractivity) {}
     fn set_input_region(&self, _region: Option<&[Bounds<Pixels>]>) {}
     fn window_decorations(&self) -> Decorations {

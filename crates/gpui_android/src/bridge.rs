@@ -4,7 +4,7 @@ use gpui::{AppLifecyclePhase, ApplicationHandle, TouchPhase};
 use jni::{
     JNIEnv, JavaVM, NativeMethod,
     objects::{GlobalRef, JClass, JObject, JString, JValue},
-    sys::{jboolean, jfloat, jint, jlong},
+    sys::{jboolean, jfloat, jint, jlong, jobject},
 };
 use std::{
     cell::RefCell,
@@ -191,7 +191,18 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
             attach as *mut c_void,
         ),
         method("nativeDetach", "(J)V", detach as *mut c_void),
-        method("nativeFrame", "(J)V", frame as *mut c_void),
+        method("nativeFrame", "(J)Z", frame as *mut c_void),
+        method(
+            "nativeInputState",
+            "(J)Ldev/gpui/android/TextInputState;",
+            input_state as *mut c_void,
+        ),
+        method(
+            "nativeEdit",
+            "(JJILjava/lang/String;II)Z",
+            edit as *mut c_void,
+        ),
+        method("nativeKey", "(JLjava/lang/String;IZ)Z", key as *mut c_void),
         method("nativeLifecycle", "(JI)V", lifecycle as *mut c_void),
         method("nativeFocus", "(JZ)V", focus as *mut c_void),
         method("nativeTouch", "(JIIFF)Z", touch as *mut c_void),
@@ -323,8 +334,94 @@ extern "system" fn detach(mut env: JNIEnv, _: JClass, id: jlong) {
         Ok(())
     });
 }
-extern "system" fn frame(mut env: JNIEnv, _: JClass, id: jlong) {
-    call(&mut env, |_| session(id)?.platform.window.frame());
+extern "system" fn frame(mut env: JNIEnv, _: JClass, id: jlong) -> jboolean {
+    call(&mut env, |_| {
+        let session = session(id)?;
+        session.platform.window.frame()?;
+        Ok(session.platform.window.input_dirty.replace(false) as u8)
+    })
+}
+
+extern "system" fn input_state(mut env: JNIEnv, _: JClass, id: jlong) -> jobject {
+    call(&mut env, |env| {
+        let Some(state) = session(id)?.platform.window.input_state() else {
+            return Ok(std::ptr::null_mut());
+        };
+        let text = match state.text {
+            Some(text) => JObject::from(env.new_string(text)?),
+            None => JObject::null(),
+        };
+        Ok(env
+            .new_object(
+                "dev/gpui/android/TextInputState",
+                "(JLjava/lang/String;IIIIIZ)V",
+                &[
+                    JValue::Long(state.epoch as i64),
+                    JValue::Object(&text),
+                    JValue::Int(state.offset as i32),
+                    JValue::Int(state.anchor as i32),
+                    JValue::Int(state.head as i32),
+                    JValue::Int(state.marked.as_ref().map_or(-1, |r| r.start as i32)),
+                    JValue::Int(state.marked.as_ref().map_or(-1, |r| r.end as i32)),
+                    JValue::Bool(state.hit as u8),
+                ],
+            )?
+            .into_raw())
+    })
+}
+
+extern "system" fn edit(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    epoch: jlong,
+    operation: jint,
+    text: JString,
+    a: jint,
+    b: jint,
+) -> jboolean {
+    call(&mut env, |env| {
+        let text: String = env.get_string(&text)?.into();
+        Ok(session(id)?
+            .platform
+            .window
+            .edit(epoch as u64, operation, &text, a, b) as u8)
+    })
+}
+
+extern "system" fn key(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    name: JString,
+    modifiers: jint,
+    down: jboolean,
+) -> jboolean {
+    call(&mut env, |env| {
+        use gpui::{KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, PlatformInput};
+        let key: String = env.get_string(&name)?.into();
+        let keystroke = Keystroke {
+            key,
+            key_char: None,
+            modifiers: Modifiers {
+                shift: modifiers & 1 != 0,
+                control: modifiers & 2 != 0,
+                alt: modifiers & 4 != 0,
+                platform: modifiers & 8 != 0,
+                ..Default::default()
+            },
+        };
+        let input = if down != 0 {
+            PlatformInput::KeyDown(KeyDownEvent {
+                keystroke,
+                is_held: false,
+                prefer_character_input: false,
+            })
+        } else {
+            PlatformInput::KeyUp(KeyUpEvent { keystroke })
+        };
+        Ok(session(id)?.platform.window.input(input).default_prevented as u8)
+    })
 }
 extern "system" fn lifecycle(mut env: JNIEnv, _: JClass, id: jlong, phase: jint) {
     call(&mut env, |_| {

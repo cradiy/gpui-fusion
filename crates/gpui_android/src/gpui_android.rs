@@ -3,6 +3,7 @@
 
 mod bridge;
 mod dispatcher;
+mod input;
 mod logging;
 mod platform;
 mod surface;

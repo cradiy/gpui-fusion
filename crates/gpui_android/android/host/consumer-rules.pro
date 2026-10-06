@@ -1,1 +1,2 @@
 -keep class dev.gpui.android.GpuiSession { *; }
+-keep class dev.gpui.android.TextInputState { *; }

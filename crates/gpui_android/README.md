@@ -6,11 +6,12 @@ and `GpuiActivity`.
 
 The backend builds for Android's `arm64-v8a` and `x86_64` ABIs using Vulkan
 or OpenGL ES, and supports bundled fonts, raw touch events,
-single-finger taps and inertial scrolling, text clipboard access, external links,
+single-finger taps and inertial scrolling, text input and IME composition,
+text clipboard access, external links,
 lifecycle notifications, and Surface replacement while
 retaining the Rust application and GPU atlas. Each session hosts one GPUI window.
 
-IME, text selection handles, image/file clipboard data, file pickers,
+Native text selection handles, image/file clipboard data, file pickers,
 TalkBack semantics, and GPU device-loss recovery are not implemented. System
 font discovery is not configured; applications can register their own fonts.
 

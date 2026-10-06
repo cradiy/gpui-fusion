@@ -1,13 +1,17 @@
 use gpui::{prelude::*, *};
+use uic::components::input::{Input, TextInput};
 
 #[gpui_platform::main]
 fn main() {
     gpui_platform::application().run(|cx| {
+        uic::init(cx);
         cx.open_window(WindowOptions::default(), |_, cx| {
-            cx.new(|_| Counter {
+            cx.new(|cx| Counter {
                 count: 0,
                 scroll: ScrollHandle::new(),
                 clipboard_status: "Copy the counter or paste text from another app.".into(),
+                title: cx.new(|cx| TextInput::new(cx).placeholder("Name")),
+                text: cx.new(|cx| TextInput::new(cx).multiline().placeholder("Message")),
             })
         })
         .expect("failed to open the GPUI window");
@@ -18,6 +22,8 @@ struct Counter {
     count: usize,
     scroll: ScrollHandle,
     clipboard_status: String,
+    text: Entity<TextInput>,
+    title: Entity<TextInput>,
 }
 
 fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
@@ -49,6 +55,8 @@ impl Render for Counter {
                     .text_color(rgb(0xa0b1c6))
                     .child("A Rust interface inside an Android View."),
             )
+            .child(Input::new(&self.title).text_color(rgb(0x172033)))
+            .child(Input::new(&self.text).rows(2).text_color(rgb(0x172033)))
             .child(
                 div()
                     .flex_shrink_0()

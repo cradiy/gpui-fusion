@@ -64,7 +64,16 @@ public final class GpuiSession implements AutoCloseable {
     }
 
     void detachSurface() { checkThread(); if (id != 0) nativeDetach(id); }
-    void frame() { checkThread(); if (id != 0) nativeFrame(id); }
+    boolean frame() { checkThread(); return id != 0 && nativeFrame(id); }
+    TextInputState inputState() { checkThread(); return id != 0 ? nativeInputState(id) : null; }
+    boolean edit(long epoch, int operation, String text, int a, int b) {
+        checkThread();
+        return !closed && id != 0 && nativeEdit(id, epoch, operation, text, a, b);
+    }
+    boolean key(String name, int modifiers, boolean down) {
+        checkThread();
+        return !closed && id != 0 && nativeKey(id, name, modifiers, down);
+    }
     void focus(boolean focused) { checkThread(); if (id != 0) nativeFocus(id, focused); }
     boolean touch(int pointer, int phase, float x, float y) {
         return id != 0 && nativeTouch(id, pointer, phase, x, y);
@@ -187,7 +196,10 @@ public final class GpuiSession implements AutoCloseable {
     private static native long nativeCreate(GpuiSession host, Surface surface, int width, int height, float density);
     private static native void nativeAttach(long id, Surface surface, int width, int height, float density);
     private static native void nativeDetach(long id);
-    private static native void nativeFrame(long id);
+    private static native boolean nativeFrame(long id);
+    private static native TextInputState nativeInputState(long id);
+    private static native boolean nativeEdit(long id, long epoch, int operation, String text, int a, int b);
+    private static native boolean nativeKey(long id, String name, int modifiers, boolean down);
     private static native void nativeLifecycle(long id, int phase);
     private static native void nativeFocus(long id, boolean active);
     private static native boolean nativeTouch(long id, int pointer, int phase, float x, float y);

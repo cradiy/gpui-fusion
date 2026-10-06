@@ -1105,6 +1105,35 @@ impl TextInput {
 }
 
 impl EntityInputHandler for TextInput {
+    fn accepts_text_input(&self, _: &mut Window, _: &mut Context<Self>) -> bool {
+        !self.disabled
+    }
+
+    fn text_length_utf16(&mut self, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
+        Some(self.content.encode_utf16().count())
+    }
+
+    fn set_selected_text_range(
+        &mut self,
+        range: Range<usize>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.disabled {
+            return;
+        }
+        self.stop_selection();
+        let anchor = self.offset_from_utf16(range.start);
+        let head = self.offset_from_utf16(range.end);
+        self.selected_range = anchor.min(head)..anchor.max(head);
+        self.selection_reversed = head < anchor;
+        self.caret_affinity = CaretAffinity::Downstream;
+        self.horizontal_selection_anchor = None;
+        self.preferred_x = None;
+        self.scroll_cursor_pending = true;
+        cx.notify();
+    }
+
     fn surrounding_text(
         &mut self,
         max_bytes: usize,
@@ -2669,6 +2698,31 @@ mod tests {
         window
             .update(&mut visual.cx, |view, _, cx| {
                 assert_eq!(view.state.read(cx).value().as_ref(), "first");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn system_selection_uses_utf16_and_preserves_direction(cx: &mut TestAppContext) {
+        let window = open_input(cx, |cx| TextInput::new(cx).initial_value("前😀后"));
+        let mut visual = draw_and_focus(&window, cx);
+        window
+            .update(&mut visual.cx, |view, window, cx| {
+                view.state.update(cx, |input, cx| {
+                    input.set_selected_text_range(3..1, window, cx);
+                    let selection = input.selected_text_range(false, window, cx).unwrap();
+                    assert_eq!(selection.range, 1..3);
+                    assert!(selection.reversed);
+                    input.replace_text_in_range(None, "X", window, cx);
+                    assert_eq!(input.value().as_ref(), "前X后");
+                    input.disabled = true;
+                    input.set_selected_text_range(0..usize::MAX, window, cx);
+                    assert_eq!(
+                        input.selected_text_range(false, window, cx).unwrap().range,
+                        2..2
+                    );
+                    assert!(!input.accepts_text_input(window, cx));
+                });
             })
             .unwrap();
     }

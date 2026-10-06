@@ -51,8 +51,11 @@ pub(crate) struct AndroidWindow {
     pub display: Rc<AndroidDisplay>,
     pub active: Cell<bool>,
     force_frame: Cell<bool>,
-    pointer: Cell<Point<Pixels>>,
-    handler: RefCell<Option<PlatformInputHandler>>,
+    pub(crate) pointer: Cell<Point<Pixels>>,
+    pub(crate) handler: RefCell<Option<PlatformInputHandler>>,
+    pub(crate) input_focus: Cell<Option<FocusId>>,
+    pub(crate) input_epoch: Cell<u64>,
+    pub(crate) input_dirty: Cell<bool>,
     callbacks: RefCell<Callbacks>,
 }
 
@@ -78,6 +81,9 @@ impl AndroidWindow {
             force_frame: Cell::new(true),
             pointer: Cell::default(),
             handler: RefCell::default(),
+            input_focus: Cell::new(None),
+            input_epoch: Cell::new(0),
+            input_dirty: Cell::new(true),
             callbacks: RefCell::default(),
         }
     }
@@ -285,8 +291,10 @@ impl PlatformWindow for AndroidWindowHandle {
     }
     fn set_input_handler(&mut self, handler: PlatformInputHandler) {
         *self.handler.borrow_mut() = Some(handler);
+        self.input_dirty.set(true);
     }
     fn take_input_handler(&mut self) -> Option<PlatformInputHandler> {
+        self.input_dirty.set(true);
         self.handler.borrow_mut().take()
     }
     fn prompt(

@@ -98,7 +98,7 @@ If a frame cannot be presented, the next active tick retries it.
 Load the application library before creating a `GpuiSession`. `GpuiActivity`
 does this through its `nativeLibraryName()` override and hosts a full-page View.
 It forwards lifecycle events and retains the session during configuration
-changes. The page is laid out inside system-bar and display-cutout insets.
+changes. The page is laid out inside system-bar, display-cutout, and keyboard insets.
 
 For an embedded host, construct `GpuiView(context, session)`, forward the host's
 start/resume/pause/stop events through `session.setLifecycle(...)`, and call
@@ -138,6 +138,32 @@ Configuration changes and Surface recreation preserve in-process state.
 Process death starts a new application; persistent document restoration is the
 application's responsibility. A lost GPU device requires recreating the session.
 
+## Text input
+
+Focused GPUI input handlers are exposed through Android's `InputConnection`.
+Text stays in the Rust component. The connection supports text commitment,
+composition updates and completion, composing regions, directed UTF-16
+selections, and surrounding deletion in UTF-16 units or Unicode code points.
+Batch edits defer selection notifications until the batch ends. Connections
+are invalidated when their View detaches or their input focus changes.
+
+Input components must implement `EntityInputHandler::set_selected_text_range`
+to accept cursor and selection changes from Android. UIC's `TextInput` implements
+this contract. Tapping a focused input requests the soft keyboard. Hardware
+text keys and common editing shortcuts are forwarded to GPUI; system Back is
+left to Android.
+
+Surrounding text queries are bounded around the selection and composition.
+Handlers that withhold `surrounding_text` expose no text snapshot to the IME.
+The host uses a generic multiline text keyboard, or a password keyboard when
+no snapshot is available, and disables personalized learning. Per-field keyboard
+types, native selection handles, cursor-anchor updates, rich IME content, and
+hardware dead-key composition are not implemented.
+
+`GpuiActivity` resizes its content for the keyboard. Embedded hosts must apply
+their own keyboard insets. Register fonts covering the languages your UI uses;
+the bundled Latin font is not a complete CJK or emoji font collection.
+
 ## Clipboard and links
 
 The standard GPUI clipboard APIs read and write plain text through the Android
@@ -165,6 +191,11 @@ row must not count as a tap. Verify that count and scroll position survive
 rotation, locking/unlocking the device, and switching to another app and back.
 Adding a second finger must not count as a tap or continue synthesized scrolling.
 Repeatedly open and finish the Activity to check teardown.
+
+Tap the text field, type and delete text, move the cursor, and replace a
+selection. With a composing IME, check preedit updates, candidate commitment,
+and deletion around emoji. Dismiss the keyboard with Back, then tap the field
+to reopen it. Check that the visible content resizes when the keyboard opens.
 
 Use Copy count and Paste text to check clipboard round trips, then copy text
 between GPUI and another application. Include multiline text and non-ASCII

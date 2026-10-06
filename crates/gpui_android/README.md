@@ -4,7 +4,7 @@ GPUI interfaces hosted in Android Views, rendered with WGPU. The Rust
 backend is paired with an Android library providing `GpuiSession`, `GpuiView`
 and `GpuiActivity`.
 
-The current backend targets ARM64 devices and x86_64 emulators using Vulkan
+The backend builds for Android's `arm64-v8a` and `x86_64` ABIs using Vulkan
 or OpenGL ES, and supports bundled fonts, raw touch events,
 single-finger taps and inertial scrolling, lifecycle notifications, and Surface replacement while
 retaining the Rust application and GPU atlas. Each session hosts one GPUI window.

@@ -7,8 +7,8 @@ Requirements:
 - JDK 17 or newer, as supported by the bundled Gradle/Android Gradle plugin.
 - Android SDK platform 36.1 and build tools.
 - Android NDK r29 or newer.
-- Rust target `aarch64-linux-android`.
-- An ARM64 Android 8.0/API 26 or newer device with a compatible Vulkan or OpenGL ES driver.
+- The Rust targets for the selected Android ABIs (listed below).
+- Android 8.0/API 26 or newer with a compatible Vulkan or OpenGL ES driver.
 
 Set `ANDROID_HOME` to the SDK and `ANDROID_NDK_HOME` to the NDK. From
 `crates/gpui_android/android`:
@@ -30,8 +30,32 @@ packaged Rust application.
 The packaging helper currently accepts a binary package with `src/main.rs` and
 no companion library or explicit `[[bin]]` targets.
 
+ARM64 is the default. `gpuiAbi` accepts Android ABI names, architecture names,
+or Rust target triples:
+
+| Architecture | Android ABI | Rust target |
+| --- | --- | --- |
+| `aarch64` | `arm64-v8a` | `aarch64-linux-android` |
+| `x86_64` | `x86_64` | `x86_64-linux-android` |
+
+```sh
+./gradlew :example:assembleDebug -PgpuiAbi=aarch64
+```
+
 For an x86_64 emulator, install Rust's `x86_64-linux-android` target and use
-`./gradlew :example:assembleDebug -PgpuiAbi=x86_64`.
+`-PgpuiAbi=x86_64`. To include both architectures in one APK:
+
+```sh
+rustup target add aarch64-linux-android x86_64-linux-android
+./gradlew :example:assembleDebug -PgpuiAbis=aarch64,x86_64
+```
+
+Use either `gpuiAbi` or `gpuiAbis`. A multi-ABI APK is larger; Android loads the
+library matching the device. The APK is written to
+`example/build/outputs/apk/debug/example-debug.apk` for either configuration.
+Native libraries use 16 KB load-segment and RELRO alignment. The APK's native
+library packaging uses the Android Gradle plugin's 16 KB alignment support.
+
 The renderer tries Vulkan first, then OpenGL ES if Vulkan initialization fails
 or no eligible Vulkan adapter is available. Drivers must meet WGPU's device
 requirements; non-conformant Vulkan adapters are not enabled. Use an ABI that

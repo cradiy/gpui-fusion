@@ -15,6 +15,7 @@ import android.os.SystemClock
 import android.view.Surface
 import java.lang.ref.WeakReference
 import java.util.function.Consumer
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Owns a Rust application independently of its current View or Surface. */
 class GpuiSession : AutoCloseable {
@@ -22,6 +23,7 @@ class GpuiSession : AutoCloseable {
     private var view = WeakReference<GpuiView>(null)
     @Volatile private var closed = false
     private var id = 0L
+    private val frameWakePosted = AtomicBoolean(false)
     private val pendingUrls = ArrayList<String>()
     private var phase = BACKGROUND
     private var closeRequested: Runnable? = null
@@ -78,6 +80,7 @@ class GpuiSession : AutoCloseable {
         if (uri.scheme.isNullOrEmpty()) return false
         val url = uri.toString()
         if (id == 0L) pendingUrls.add(url) else nativeOpenUrl(id, url)
+        view.get()?.requestFrame()
         return true
     }
 
@@ -115,9 +118,9 @@ class GpuiSession : AutoCloseable {
         checkThread()
         return !closed && id != 0L && nativeScrollInput(id, epoch, dx, dy)
     }
-    internal fun edit(epoch: Long, operation: Int, text: String, a: Int, b: Int): Boolean {
+    internal fun edit(epoch: Long, operation: Int, text: String, a: Int, b: Int, cursor: Int = 1): Boolean {
         checkThread()
-        return !closed && id != 0L && nativeEdit(id, epoch, operation, text, a, b)
+        return !closed && id != 0L && nativeEdit(id, epoch, operation, text, a, b, cursor)
     }
     internal fun key(name: String, modifiers: Int, down: Boolean): Boolean {
         checkThread()
@@ -220,6 +223,14 @@ class GpuiSession : AutoCloseable {
 
     // JNI callbacks retain their JVM names. Dispatch is asynchronous to avoid
     // re-entering a borrowed GPUI App from foreground or background threads.
+    private fun requestFrame() {
+        if (closed || !frameWakePosted.compareAndSet(false, true)) return
+        handler.postAtTime({
+            frameWakePosted.set(false)
+            if (!closed) view.get()?.requestFrame()
+        }, this, SystemClock.uptimeMillis())
+    }
+
     private fun scheduleTask(token: Long, delayMillis: Long) {
         if (closed) return
         handler.postAtTime({
@@ -340,7 +351,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeInputState(id: Long): TextInputState?
         @JvmStatic private external fun nativeInputIndex(id: Long, epoch: Long, x: Float, y: Float): Int
         @JvmStatic private external fun nativeScrollInput(id: Long, epoch: Long, dx: Float, dy: Float): Boolean
-        @JvmStatic private external fun nativeEdit(id: Long, epoch: Long, operation: Int, text: String, a: Int, b: Int): Boolean
+        @JvmStatic private external fun nativeEdit(id: Long, epoch: Long, operation: Int, text: String, a: Int, b: Int, cursor: Int): Boolean
         @JvmStatic private external fun nativeKey(id: Long, name: String, modifiers: Int, down: Boolean): Boolean
         @JvmStatic private external fun nativeInputAction(id: Long, epoch: Long, action: Int): Boolean
         @JvmStatic private external fun nativeLifecycle(id: Long, phase: Int)

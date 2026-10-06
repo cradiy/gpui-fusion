@@ -99,9 +99,13 @@ In-window overlays remain available.
 
 The application is created on the first nonzero Surface size, not in Activity
 `onCreate`. It uses Android's main Looper. Foreground work is posted through a
-Handler, background work uses Rust workers, and visible, resumed, focused Views
-receive Choreographer ticks. Unchanged UI does not require a new GPU draw.
-If a frame cannot be presented, the next active tick retries it.
+Handler and background work uses Rust workers. Visible, resumed, focused Views
+schedule Choreographer callbacks for invalidations, requested animation frames,
+inertial scrolling and selection-handle dragging. Idle Views stop scheduling frames;
+input, asynchronous updates and resuming the host wake them as needed.
+If a frame cannot be presented, GPUI schedules another frame to retry it.
+Drawing and Surface configuration run on the main Looper; swapchain recreation
+can wait for in-flight GPU work.
 
 `Window::appearance()` follows the hosting View's Android night-mode
 configuration. Theme changes notify GPUI and redraw the window, including when

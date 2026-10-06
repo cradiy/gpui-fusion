@@ -20,7 +20,6 @@ use itertools::Itertools;
 use scheduler::Instant;
 use smallvec::SmallVec;
 use std::any::TypeId;
-use std::cell::RefCell;
 use std::ops::DerefMut;
 use std::ops::Range;
 #[cfg(any(feature = "inspector", debug_assertions))]
@@ -373,6 +372,7 @@ impl Window {
         self.refreshing = false;
         self.invalidator.set_phase(DrawPhase::None);
         self.needs_present.set(true);
+        self.invalidator.request_frame();
 
         if let Some(draw_start) = draw_started_at {
             profiler::record_frame_timing(profiler::FrameTiming {
@@ -1065,7 +1065,13 @@ impl Window {
 
     /// Schedule the given closure to be run directly after the current frame is rendered.
     pub fn on_next_frame(&self, callback: impl FnOnce(&mut Window, &mut App) + 'static) {
-        RefCell::borrow_mut(&self.next_frame_callbacks).push(Box::new(callback));
+        let mut callbacks = self.next_frame_callbacks.borrow_mut();
+        let needs_frame = callbacks.is_empty();
+        callbacks.push(Box::new(callback));
+        drop(callbacks);
+        if needs_frame {
+            self.invalidator.request_frame();
+        }
     }
 
     /// Schedule a frame to be drawn on the next animation frame.

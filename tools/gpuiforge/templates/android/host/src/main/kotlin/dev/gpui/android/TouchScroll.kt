@@ -87,6 +87,8 @@ internal class TouchScroll(context: Context, private val session: GpuiSession) {
         return dragging
     }
 
+    fun needsFrame() = scrolling && !dragging
+
     fun frame() {
         if (!scrolling || dragging) return
         if (scroller.computeScrollOffset()) {

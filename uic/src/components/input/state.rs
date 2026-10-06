@@ -3118,6 +3118,43 @@ mod tests {
     }
 
     #[gpui::test]
+    fn ime_remarking_and_surrounding_edits_do_not_commit_candidates(cx: &mut TestAppContext) {
+        let window = open_input(cx, |cx| TextInput::new(cx).initial_value("A😀Z"));
+        let mut visual = draw_and_focus(&window, cx);
+
+        window
+            .update(&mut visual.cx, |view, window, cx| {
+                view.state.update(cx, |input, cx| {
+                    input.replace_and_mark_text_in_range(Some(1..1), "ni", None, window, cx);
+                    // Moving the composing span must not finish the previous one.
+                    input.replace_and_mark_text_in_range(Some(1..2), "n", None, window, cx);
+                    input.replace_and_mark_text_in_range(Some(1..3), "ni", None, window, cx);
+                    // Delete A and the emoji while retaining the candidate between them.
+                    input.replace_and_mark_text_in_range(Some(0..5), "ni", None, window, cx);
+                    input.replace_and_mark_text_in_range(Some(0..2), "ni", None, window, cx);
+                });
+            })
+            .unwrap();
+        visual.run_until_parked();
+        window
+            .update(&mut visual.cx, |view, window, cx| {
+                assert!(view.changes.borrow().is_empty());
+                assert_eq!(view.state.read(cx).value().as_ref(), "niZ");
+                view.state.update(cx, |input, cx| {
+                    input.replace_text_in_range(None, "", window, cx);
+                });
+            })
+            .unwrap();
+        visual.run_until_parked();
+        window
+            .update(&mut visual.cx, |view, _, cx| {
+                assert_eq!(view.state.read(cx).value().as_ref(), "Z");
+                assert_eq!(view.changes.borrow().as_slice(), &[SharedString::from("Z")]);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
     fn cancelling_ime_preedit_does_not_emit_a_change(cx: &mut TestAppContext) {
         let window = open_input(cx, |cx| TextInput::new(cx).initial_value("prefix "));
         let mut visual = draw_and_focus(&window, cx);

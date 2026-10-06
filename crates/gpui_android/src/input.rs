@@ -176,7 +176,15 @@ impl AndroidWindow {
         handled
     }
 
-    pub(crate) fn edit(&self, epoch: u64, operation: i32, text: &str, a: i32, b: i32) -> bool {
+    pub(crate) fn edit(
+        &self,
+        epoch: u64,
+        operation: i32,
+        text: &str,
+        a: i32,
+        b: i32,
+        cursor: i32,
+    ) -> bool {
         let edited = self
             .with_input(|handler, current| {
                 if epoch != current {
@@ -186,9 +194,21 @@ impl AndroidWindow {
                     return false;
                 };
                 match operation {
-                    0 | 1 => {
-                        let range = handler.marked_text_range().unwrap_or(selection.range);
-                        if operation == 1 {
+                    0 | 1 | 7 => {
+                        let range = if operation == 7 {
+                            if a < 0 || b < 0 {
+                                return false;
+                            }
+                            let range = a.min(b) as usize..a.max(b) as usize;
+                            let mut actual = None;
+                            if handler.text_for_range(range.clone(), &mut actual).is_none() {
+                                return false;
+                            }
+                            actual.unwrap_or(range)
+                        } else {
+                            handler.marked_text_range().unwrap_or(selection.range)
+                        };
+                        if operation == 1 && !text.is_empty() {
                             let end = text.encode_utf16().count();
                             handler.replace_and_mark_text_in_range(
                                 Some(range.clone()),
@@ -201,10 +221,11 @@ impl AndroidWindow {
                         let end = handler
                             .selected_text_range(false)
                             .map_or(range.start, |s| s.range.end);
-                        let cursor = if a > 0 {
-                            end.saturating_add(a as usize - 1)
+                        let cursor = if operation == 7 { cursor } else { a };
+                        let cursor = if cursor > 0 {
+                            end.saturating_add(cursor as usize - 1)
                         } else {
-                            range.start.saturating_sub(a.unsigned_abs() as usize)
+                            range.start.saturating_sub(cursor.unsigned_abs() as usize)
                         };
                         handler.set_selected_text_range(cursor..cursor);
                     }
@@ -218,12 +239,12 @@ impl AndroidWindow {
                         let Some(text) = handler.text_for_range(range.clone(), &mut actual) else {
                             return false;
                         };
-                        handler.unmark_text();
-                        handler.replace_and_mark_text_in_range(
-                            Some(actual.unwrap_or(range)),
-                            &text,
-                            None,
-                        );
+                        let range = actual.unwrap_or(range);
+                        if range.is_empty() {
+                            handler.unmark_text();
+                        } else {
+                            handler.replace_and_mark_text_in_range(Some(range), &text, None);
+                        }
                         let range = selection.range;
                         handler.set_selected_text_range(if selection.reversed {
                             range.end..range.start
@@ -305,17 +326,20 @@ fn delete_surrounding(
     if before > start {
         return false;
     }
-    if after > 0 {
-        handler.replace_text_in_range(Some(end..end + after), "");
-    }
-    if before > 0 {
-        handler.replace_text_in_range(Some(start - before..start), "");
-    }
+    let Some(retained) = handler.text_for_range(start..end, &mut None) else {
+        return false;
+    };
+    let replacement = Some(start - before..end + after);
     if let Some(marked) = marked {
+        // Both deletions belong to the active composition. Keep provisional text
+        // out of committed-change notifications, then restore its precise span.
+        handler.replace_and_mark_text_in_range(replacement, &retained, None);
         let range = marked.start - before..marked.end - before;
         if let Some(text) = handler.text_for_range(range.clone(), &mut None) {
             handler.replace_and_mark_text_in_range(Some(range), &text, None);
         }
+    } else {
+        handler.replace_text_in_range(replacement, &retained);
     }
     let range = selection.range.start - before..selection.range.end - before;
     handler.set_selected_text_range(if selection.reversed {

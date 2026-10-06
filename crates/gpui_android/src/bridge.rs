@@ -85,6 +85,15 @@ pub(crate) struct Host {
     object: GlobalRef,
 }
 impl Host {
+    pub fn request_frame(&self) {
+        if let Err(error) = self.with_env(|env| {
+            env.call_method(self.object.as_obj(), "requestFrame", "()V", &[])?;
+            Ok(())
+        }) {
+            log::error!("Android frame scheduling failed: {error}");
+        }
+    }
+
     pub fn set_cursor(&self, style: i32) -> Result<()> {
         self.with_env(|env| {
             env.call_method(
@@ -312,7 +321,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         ),
         method(
             "nativeEdit",
-            "(JJILjava/lang/String;II)Z",
+            "(JJILjava/lang/String;III)Z",
             edit as *mut c_void,
         ),
         method("nativeKey", "(JLjava/lang/String;IZ)Z", key as *mut c_void),
@@ -646,13 +655,14 @@ extern "system" fn edit(
     text: JString,
     a: jint,
     b: jint,
+    cursor: jint,
 ) -> jboolean {
     call(&mut env, |env| {
         let text: String = env.get_string(&text)?.into();
         Ok(session(id)?
             .platform
             .window
-            .edit(epoch as u64, operation, &text, a, b) as u8)
+            .edit(epoch as u64, operation, &text, a, b, cursor) as u8)
     })
 }
 

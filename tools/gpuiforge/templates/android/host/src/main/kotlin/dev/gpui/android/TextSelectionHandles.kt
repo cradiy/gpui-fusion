@@ -24,6 +24,7 @@ internal class TextSelectionHandles(
     private var moving: Handle? = null
 
     fun beforeFrame(time: Long) { moving?.scrollFrame(time) }
+    fun needsFrame() = moving != null
 
     fun update(input: TextInputState) {
         if (!view.isAttachedToWindow || !view.hasWindowFocus()) { close(); return }
@@ -139,6 +140,7 @@ internal class TextSelectionHandles(
                     pointerX = sourceX
                     pointerY = sourceY
                     lastFrame = 0
+                    view.requestFrame()
                     dragging(true)
                     showMagnifier(input, sourceX, sourceY)
                 }

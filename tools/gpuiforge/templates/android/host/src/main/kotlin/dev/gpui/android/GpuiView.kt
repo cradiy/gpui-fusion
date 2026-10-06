@@ -34,6 +34,8 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     private var surfaceHeight = 0
     private var bottomInset = 0
     private var framePosted = false
+    private var frameRequested = true
+    private var framesActive = false
     private var tapCandidate = false
     private var downX = 0f
     private var downY = 0f
@@ -90,7 +92,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
             return
         }
         surfaceReady = true
-        updateFrameScheduling()
+        requestFrame()
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) = releaseSurface()
@@ -124,6 +126,8 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         closeInput()
         choreographer.removeFrameCallback(this)
         framePosted = false
+        framesActive = false
+        frameRequested = true
         cancelTouches()
         if (surfaceReady) {
             surfaceReady = false
@@ -148,10 +152,17 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         if (initialized) updateFrameScheduling()
     }
 
+    internal fun requestFrame() {
+        frameRequested = true
+        updateFrameScheduling()
+    }
+
     internal fun updateFrameScheduling() {
         val active = surfaceReady && session.active() && hasWindowFocus() && isShown
+        if (active && !framesActive) frameRequested = true
+        framesActive = active
         session.focus(active)
-        if (active && !framePosted) {
+        if (active && !framePosted && (frameRequested || scroll.needsFrame() || textMenu.needsFrame())) {
             framePosted = true
             choreographer.postFrameCallback(this)
         } else if (!active) {
@@ -164,6 +175,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
 
     override fun doFrame(frameTimeNanos: Long) {
         framePosted = false
+        frameRequested = false
         if (surfaceReady && session.active() && hasWindowFocus() && isShown) {
             try {
                 scroll.frame()
@@ -260,6 +272,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
             }
         }
         textMenu.touch(event, tapCandidate)
+        if (scroll.needsFrame()) requestFrame()
         return true
     }
 
@@ -292,6 +305,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         inputConnection?.finishComposingText()
         keyboardRequest = KeyboardRequest.TAP
         session.tap(tapX, tapY)
+        requestFrame()
         return true
     }
 
@@ -299,6 +313,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         if (!surfaceReady || !session.active() || !hasWindowFocus() || !isShown) return
         if (visible && !requestFocus()) return
         keyboardRequest = if (visible) KeyboardRequest.SHOW else KeyboardRequest.HIDE
+        requestFrame()
     }
 
     internal fun inputManager(): InputMethodManager = context.getSystemService(InputMethodManager::class.java)

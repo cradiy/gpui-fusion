@@ -38,25 +38,21 @@ internal open class GpuiInputConnection(
     private class Api34Connection(view: GpuiView, session: GpuiSession, epoch: Long) :
         GpuiInputConnection(view, session, epoch) {
         override fun replaceText(start: Int, end: Int, text: CharSequence, cursor: Int, attributes: TextAttribute?): Boolean {
-            if (start < 0 || end < 0 || !beginBatchEdit()) return false
-            try {
-                return finishComposingText() && setSelection(minOf(start, end), maxOf(start, end)) && commitText(text, cursor)
-            } finally {
-                endBatchEdit()
-            }
+            if (start < 0 || end < 0) return false
+            return edit(7, text.toString(), start, end, cursor)
         }
     }
 
     private fun state(): TextInputState? =
         if (closed) null else session.inputState()?.takeIf { it.epoch == epoch }
 
-    private fun edit(operation: Int, text: String, a: Int, b: Int): Boolean {
+    protected fun edit(operation: Int, text: String, a: Int, b: Int, cursor: Int = 1): Boolean {
         if (closed) {
             inputDiagnostic { "edit connection=$connectionId op=$operation closed" }
             return false
         }
         return try {
-            val result = session.edit(epoch, operation, text, a, b)
+            val result = session.edit(epoch, operation, text, a, b, cursor)
             inputDiagnostic { "edit connection=$connectionId epoch=$epoch op=$operation batch=$batches accepted=$result" }
             if (batches == 0) view.syncInput(false)
             result

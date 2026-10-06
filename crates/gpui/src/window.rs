@@ -132,11 +132,13 @@ struct FrameDirtyAccumulator {
 #[derive(Clone)]
 pub(crate) struct WindowInvalidator {
     inner: Rc<RefCell<WindowInvalidatorInner>>,
+    request_frame: Option<Rc<dyn Fn()>>,
 }
 
 impl WindowInvalidator {
-    pub fn new() -> Self {
+    pub fn new(request_frame: Option<Rc<dyn Fn()>>) -> Self {
         WindowInvalidator {
+            request_frame,
             inner: Rc::new(RefCell::new(WindowInvalidatorInner {
                 dirty: true,
                 draw_phase: DrawPhase::None,
@@ -152,9 +154,14 @@ impl WindowInvalidator {
         inner.update_count += 1;
         inner.dirty_views.insert(entity);
         if inner.draw_phase == DrawPhase::None {
+            let needs_frame = !inner.dirty;
             Self::record_frame_dirty(&mut inner);
             inner.dirty = true;
             cx.push_effect(Effect::Notify { emitter: entity });
+            drop(inner);
+            if needs_frame {
+                self.request_frame();
+            }
             true
         } else {
             false
@@ -167,10 +174,21 @@ impl WindowInvalidator {
 
     pub fn set_dirty(&self, dirty: bool) {
         let mut inner = self.inner.borrow_mut();
+        let needs_frame = dirty && !inner.dirty;
         inner.dirty = dirty;
         if dirty {
             inner.update_count += 1;
             Self::record_frame_dirty(&mut inner);
+        }
+        drop(inner);
+        if needs_frame {
+            self.request_frame();
+        }
+    }
+
+    pub fn request_frame(&self) {
+        if let Some(request) = &self.request_frame {
+            request();
         }
     }
 
@@ -832,7 +850,7 @@ impl Window {
         let scale_factor = platform_window.scale_factor();
         let appearance = platform_window.appearance();
         let text_system = Arc::new(WindowTextSystem::new(cx.text_system().clone()));
-        let invalidator = WindowInvalidator::new();
+        let invalidator = WindowInvalidator::new(platform_window.frame_requester());
         let active = Rc::new(Cell::new(platform_window.is_active()));
         let hovered = Rc::new(Cell::new(platform_window.is_hovered()));
         let needs_present = Rc::new(Cell::new(false));
@@ -976,6 +994,7 @@ impl Window {
                         handle
                             .update(&mut cx, |_, window, _| window.complete_frame())
                             .log_err();
+                        invalidator.request_frame();
                         return;
                     }
                 }

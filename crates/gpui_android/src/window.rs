@@ -440,6 +440,11 @@ impl PlatformWindow for AndroidWindowHandle {
     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>) {
         self.callbacks.borrow_mut().frame = Some(callback);
     }
+
+    fn frame_requester(&self) -> Option<Rc<dyn Fn()>> {
+        let host = self.host.clone();
+        Some(Rc::new(move || host.request_frame()))
+    }
     fn on_input(&self, callback: Box<dyn FnMut(PlatformInput) -> DispatchEventResult>) {
         self.callbacks.borrow_mut().input = Some(callback);
     }

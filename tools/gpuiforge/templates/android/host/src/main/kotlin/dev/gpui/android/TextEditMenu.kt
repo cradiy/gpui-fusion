@@ -37,6 +37,7 @@ internal class TextEditMenu(
     }
 
     fun beforeFrame(time: Long) { handles.beforeFrame(time) }
+    fun needsFrame() = handles.needsFrame()
 
     fun touch(event: MotionEvent, eligible: Boolean) {
         when (event.actionMasked) {

@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-/// Options shared by desktop and browser file pickers.
+/// Options shared by platform file pickers.
 #[derive(Clone, Debug, Default)]
 pub struct FilePromptOptions {
     /// Allow more than one file to be selected.
@@ -45,7 +45,7 @@ impl SelectedFile {
     pub fn name(&self) -> &str {
         self.0.name()
     }
-    /// Native path, absent for browser files.
+    /// Native path, when the platform resource exposes one.
     pub fn path(&self) -> Option<&Path> {
         self.0.path()
     }
@@ -53,7 +53,7 @@ impl SelectedFile {
     pub fn url(&self) -> Option<&str> {
         self.0.url()
     }
-    /// Read the contents asynchronously on the platform thread.
+    /// Read the contents asynchronously without blocking the UI thread.
     pub fn read(&self) -> LocalBoxFuture<'static, Result<Vec<u8>>> {
         self.0.read()
     }

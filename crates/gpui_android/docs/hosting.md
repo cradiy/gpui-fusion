@@ -339,6 +339,32 @@ The requesting task should be cancelled with its owning UI when appropriate.
 The example's Request microphone permission button only checks authorization;
 it does not record audio.
 
+## File selection
+
+Use `App::prompt_for_files(FilePromptOptions { multiple })` to open Android's
+system document picker. It returns `Some(files)` after selection and `None`
+after cancellation. Each `SelectedFile` exposes a display name and an asynchronous
+`read()` method. Metadata queries, descriptor opening, and reads run on background
+workers, including documents backed by a pipe or a remote provider.
+
+Android documents do not expose a GPUI filesystem path or browser URL. Use
+`SelectedFile::read()` instead; it loads the complete contents into memory. Each
+read opens a fresh descriptor. Reading can fail if the provider is unavailable or
+access has been revoked. Grants are not persisted for use after application
+restart. The picker requires no broad storage permission. Directory selection,
+save dialogs, and `prompt_for_paths` are not supported.
+
+Only one file selection can be pending per session. Dropping its receiver discards
+the result without dismissing the system picker. Closing the session completes
+pending requests with an error.
+
+`GpuiActivity` connects the picker automatically. Embedded hosts call
+`session.attachFileHost(activity)`, forward `onActivityResult` to the session,
+and call `detachFileHost(activity)` on destruction. Request codes
+`0x8000..0xbfff` are reserved for GPUI. A retained session preserves its pending
+selection across Activity configuration recreation; final host detachment
+completes it with an error. Results from earlier requests are ignored.
+
 ## System Back
 
 Register a window callback with `Window::on_system_back(cx, callback)` and call

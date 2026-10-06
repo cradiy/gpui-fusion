@@ -59,6 +59,8 @@ fn main() {
                 count: 0,
                 scroll: ScrollHandle::new(),
                 clipboard_status: "Copy the counter or paste text from another app.".into(),
+                file_status: "Choose a file to read its contents.".into(),
+                file_pending: false,
                 permission_status: "Microphone permission has not been requested.".into(),
                 #[cfg(target_os = "android")]
                 permissions: gpui_android::current_platform().permissions(),
@@ -147,6 +149,8 @@ struct Counter {
     count: usize,
     scroll: ScrollHandle,
     clipboard_status: String,
+    file_status: String,
+    file_pending: bool,
     permission_status: String,
     #[cfg(target_os = "android")]
     permissions: gpui_android::AndroidPermissions,
@@ -173,6 +177,41 @@ fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
 }
 
 impl Counter {
+    fn choose_files(&mut self, multiple: bool, cx: &mut Context<Self>) {
+        if self.file_pending {
+            return;
+        }
+        self.file_pending = true;
+        self.file_status = "Choosing files...".into();
+        let selection = cx.prompt_for_files(FilePromptOptions { multiple });
+        cx.spawn(async move |this, cx| {
+            let result = async {
+                let Some(files) = selection.await?? else {
+                    return Ok::<_, anyhow::Error>("Selection cancelled.".to_string());
+                };
+                let _ = this.update(cx, |this, cx| {
+                    this.file_status = "Reading files...".into();
+                    cx.notify();
+                });
+                let mut summaries = Vec::new();
+                for file in files {
+                    let bytes = file.read().await?;
+                    summaries.push(format!("{} · {} bytes", file.name(), bytes.len()));
+                }
+                Ok(summaries.join("\n"))
+            }
+            .await;
+            let _ = this.update(cx, |this, cx| {
+                this.file_pending = false;
+                this.file_status =
+                    result.unwrap_or_else(|error| format!("File selection: {error}"));
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
     fn request_microphone(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         #[cfg(target_os = "android")]
         {
@@ -406,6 +445,36 @@ impl Render for Counter {
                         cx.global::<OpenedLinks>().count,
                         cx.global::<OpenedLinks>().last,
                     ))),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .p_5()
+                    .rounded_xl()
+                    .bg(rgb(surface))
+                    .flex()
+                    .flex_col()
+                    .gap_4()
+                    .child(div().text_xl().child("Files"))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap_3()
+                            .child(button("choose-file", "Choose file").on_click(
+                                cx.listener(|this, _, _, cx| this.choose_files(false, cx)),
+                            ))
+                            .child(button("choose-files", "Choose files").on_click(
+                                cx.listener(|this, _, _, cx| this.choose_files(true, cx)),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .whitespace_normal()
+                            .text_color(rgb(muted))
+                            .child(self.file_status.clone()),
+                    ),
             )
             .child(div().text_xl().child("Swipe to explore"))
             .children((1usize..=20).map(|index| {

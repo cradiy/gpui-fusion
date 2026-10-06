@@ -85,6 +85,17 @@ pub(crate) struct Host {
     object: GlobalRef,
 }
 impl Host {
+    pub fn request_files(&self, token: u64, multiple: bool) -> Result<()> {
+        self.with_env(|env| {
+            env.call_method(
+                self.object.as_obj(),
+                "requestFiles",
+                "(JZ)V",
+                &[JValue::Long(token as i64), JValue::Bool(multiple as u8)],
+            )?;
+            Ok(())
+        })
+    }
     pub fn request_frame(&self) {
         if let Err(error) = self.with_env(|env| {
             env.call_method(self.object.as_obj(), "requestFrame", "()V", &[])?;
@@ -354,6 +365,11 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
             "(JJI)V",
             permission_result as *mut c_void,
         ),
+        method(
+            "nativeFileResult",
+            "(JJ[Ldev/gpui/android/SelectedDocument;Ljava/lang/String;)V",
+            file_result as *mut c_void,
+        ),
     ];
     if let Err(error) = env.register_native_methods("dev/gpui/android/GpuiSession", &methods) {
         if env.exception_check()? {
@@ -378,6 +394,39 @@ fn method(name: &str, signature: &str, pointer: *mut c_void) -> NativeMethod {
         sig: signature.into(),
         fn_ptr: pointer,
     }
+}
+
+extern "system" fn file_result(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    token: jlong,
+    documents: JObjectArray,
+    error: JString,
+) {
+    call(&mut env, |env| {
+        let result = (|| -> Result<Option<Vec<GlobalRef>>> {
+            if !error.is_null() {
+                anyhow::bail!(String::from(env.get_string(&error)?));
+            }
+            if documents.is_null() {
+                return Ok(None);
+            }
+            let mut files = Vec::new();
+            for index in 0..env.get_array_length(&documents)? {
+                let object = env.get_object_array_element(&documents, index)?;
+                files.push(env.new_global_ref(&object)?);
+                env.delete_local_ref(object)?;
+            }
+            Ok(Some(files))
+        })();
+        session(id)?.platform.files.complete(
+            token as u64,
+            VM.get().context("Android VM unavailable")?.clone(),
+            result,
+        );
+        Ok(())
+    });
 }
 
 fn session(id: i64) -> Result<Rc<Session>> {

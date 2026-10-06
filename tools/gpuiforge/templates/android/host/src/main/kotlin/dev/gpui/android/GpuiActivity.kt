@@ -33,6 +33,7 @@ abstract class GpuiActivity : Activity() {
         session = retained ?: GpuiSession()
         if (retained == null) session.onOpenIntent(intent)
         session.attachPermissionHost(this)
+        session.attachFileHost(this)
         session.setOnBackEnabledChanged { enabled ->
             backEnabled = enabled
             updateBackRegistration()
@@ -97,6 +98,7 @@ abstract class GpuiActivity : Activity() {
     }
     override fun onStop() { session.setLifecycle(GpuiSession.BACKGROUND); super.onStop() }
     override fun onDestroy() {
+        session.detachFileHost(this)
         session.detachPermissionHost(this)
         backRegistration?.close()
         backRegistration = null
@@ -115,6 +117,13 @@ abstract class GpuiActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         if (!session.onRequestPermissionsResult(this, requestCode, permissions, grantResults)) {
             super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        }
+    }
+
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (!session.onActivityResult(this, requestCode, resultCode, data)) {
+            super.onActivityResult(requestCode, resultCode, data)
         }
     }
 

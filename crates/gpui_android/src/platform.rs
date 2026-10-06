@@ -25,6 +25,7 @@ pub struct AndroidPlatform {
     pub(crate) context: GpuContext,
     pub(crate) window: Rc<AndroidWindow>,
     pub(crate) permissions: Rc<crate::permissions::PermissionState>,
+    pub(crate) files: Rc<crate::file_dialog::FileDialog>,
     handle: Cell<Option<AnyWindowHandle>>,
     lifecycle: RefCell<Option<Box<dyn FnMut(AppLifecyclePhase)>>>,
     quit: RefCell<Option<Box<dyn FnMut()>>>,
@@ -72,6 +73,11 @@ impl AndroidPlatform {
             appearance,
         ));
         Ok(Rc::new(Self {
+            files: crate::file_dialog::FileDialog::new(
+                host.clone(),
+                BackgroundExecutor::new(dispatcher.clone()),
+                ForegroundExecutor::new(dispatcher.clone()),
+            ),
             dispatcher,
             permissions: crate::permissions::PermissionState::new(host.clone()),
             host,
@@ -98,6 +104,7 @@ impl AndroidPlatform {
         self.open_urls.borrow_mut().take();
         self.pending_urls.borrow_mut().clear();
         self.permissions.close();
+        self.files.close();
         self.window.detach();
         let callback = self.quit.borrow_mut().take();
         if let Some(mut callback) = callback {
@@ -231,6 +238,12 @@ impl Platform for AndroidPlatform {
         _: Option<&str>,
     ) -> oneshot::Receiver<Result<Option<PathBuf>>> {
         unsupported()
+    }
+    fn prompt_for_files(
+        &self,
+        options: FilePromptOptions,
+    ) -> oneshot::Receiver<Result<Option<Vec<SelectedFile>>>> {
+        self.files.prompt(options)
     }
     fn can_select_mixed_files_and_dirs(&self) -> bool {
         false

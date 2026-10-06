@@ -3,6 +3,7 @@
 
 mod bridge;
 mod dispatcher;
+mod file_dialog;
 mod input;
 mod logging;
 mod permissions;

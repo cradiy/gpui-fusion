@@ -37,6 +37,29 @@ class GpuiSession : AutoCloseable {
             if (!closed && id != 0L) nativePermissionResult(id, token, status)
         }, this, SystemClock.uptimeMillis())
     }
+    private val files = FilePickerHost { token, documents, error ->
+        handler.postAtTime({
+            if (!closed && id != 0L) nativeFileResult(id, token, documents, error)
+        }, this, SystemClock.uptimeMillis())
+    }
+
+    /** Attach the Activity used by the system document picker. */
+    fun attachFileHost(activity: Activity) { checkThread(); check(!closed); files.attach(activity) }
+
+    /** Retained configuration changes keep the pending picker; other detachments cancel it. */
+    fun detachFileHost(activity: Activity) { checkThread(); files.detach(activity) }
+
+    /** Returns true for a file result owned by this session. Codes 0x8000..0xbfff are reserved. */
+    fun onActivityResult(activity: Activity, code: Int, result: Int, data: Intent?): Boolean {
+        checkThread()
+        return !closed && files.result(activity, code, result, data)
+    }
+
+    private fun requestFiles(token: Long, multiple: Boolean) {
+        handler.postAtTime({
+            if (!closed) files.request(token, multiple, active())
+        }, this, SystemClock.uptimeMillis())
+    }
 
     init { checkThread() }
 
@@ -313,6 +336,7 @@ class GpuiSession : AutoCloseable {
         closed = true
         pendingUrls.clear()
         permissions.close()
+        files.close()
         try {
             view.get()?.releaseSurface()
         } finally {
@@ -368,6 +392,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeRunTask(id: Long, token: Long)
         @JvmStatic private external fun nativeClose(id: Long)
         @JvmStatic private external fun nativePermissionResult(id: Long, token: Long, status: Int)
+        @JvmStatic private external fun nativeFileResult(id: Long, token: Long, documents: Array<SelectedDocument>?, error: String?)
         @JvmStatic private external fun nativeRedraw(id: Long)
         @JvmStatic private external fun nativeViewport(id: Long, width: Int, height: Int, density: Float)
     }

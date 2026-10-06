@@ -1,6 +1,7 @@
 mod android;
 mod android_tools;
 mod config;
+mod devices;
 mod execute;
 mod generate;
 include!(concat!(env!("OUT_DIR"), "/android_files.rs"));
@@ -40,6 +41,9 @@ enum Action {
         platform: Option<String>,
         #[arg(long)]
         release: bool,
+        /// Build one enabled Android ABI instead of all configured ABIs.
+        #[arg(long, value_parser = ["arm64-v8a", "x86_64"])]
+        abi: Option<String>,
     },
     /// Build and run on a platform and device (prompts when omitted).
     Run {
@@ -51,6 +55,8 @@ enum Action {
     },
     /// Check local build tools and configured project paths.
     Doctor,
+    /// List Android devices, architectures and connection status.
+    Devices,
     #[command(hide = true)]
     PrepareAndroid {
         #[arg(long)]
@@ -85,6 +91,9 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<()> {
+    if matches!(cli.command, Action::Devices) {
+        return devices::print();
+    }
     if let Action::PrepareAndroid {
         manifest_path,
         workspace,
@@ -107,15 +116,21 @@ fn run(cli: Cli) -> Result<()> {
         Action::Generate { platform } => {
             println!("{}", generate::generate(&project, &platform)?.display())
         }
-        Action::Build { platform, release } => {
+        Action::Build {
+            platform,
+            release,
+            abi,
+        } => {
+            let platform = platform.or_else(|| abi.as_ref().map(|_| "android".into()));
             let name = execute::platform(&project, platform)?;
-            execute::build(&project, &name, release, None)?;
+            execute::build(&project, &name, release, abi.as_deref())?;
         }
         Action::Run {
             platform,
             device,
             release,
         } => {
+            let platform = platform.or_else(|| device.as_ref().map(|_| "android".into()));
             let name = execute::platform(&project, platform)?;
             execute::run(&project, &name, release, device.as_deref())?;
         }
@@ -130,7 +145,7 @@ fn run(cli: Cli) -> Result<()> {
                 generate::eject(&project, &platform, &destination)?.display()
             );
         }
-        Action::Init { .. } | Action::PrepareAndroid { .. } => unreachable!(),
+        Action::Init { .. } | Action::PrepareAndroid { .. } | Action::Devices => unreachable!(),
     }
     Ok(())
 }

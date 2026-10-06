@@ -105,6 +105,14 @@ pub fn steps(project: &Project, steps: &[Step], vars: &Variables) -> Result<()> 
 
 pub fn build(project: &Project, name: &str, release: bool, abi: Option<&str>) -> Result<Variables> {
     let platform = project.platform(name)?;
+    if let Some(abi) = abi {
+        ensure!(name == "android", "--abi is only valid for Android");
+        ensure!(
+            platform.abis.iter().any(|enabled| enabled == abi),
+            "Android ABI {abi} is not enabled; configured ABIs: {}",
+            platform.abis.join(", ")
+        );
+    }
     ensure!(
         !platform.build.is_empty(),
         "no build steps configured for {name}"
@@ -137,47 +145,6 @@ pub fn build(project: &Project, name: &str, release: bool, abi: Option<&str>) ->
     Ok(vars)
 }
 
-fn adb() -> PathBuf {
-    std::env::var_os("ANDROID_HOME")
-        .or_else(|| std::env::var_os("ANDROID_SDK_ROOT"))
-        .map(|sdk| {
-            PathBuf::from(sdk)
-                .join("platform-tools")
-                .join(if cfg!(windows) { "adb.exe" } else { "adb" })
-        })
-        .unwrap_or_else(|| PathBuf::from("adb"))
-}
-
-fn adb_output(args: &[&str]) -> Result<String> {
-    let output = Command::new(adb())
-        .args(args)
-        .output()
-        .context("starting adb; set ANDROID_HOME or add adb to PATH")?;
-    ensure!(
-        output.status.success(),
-        "adb failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    Ok(String::from_utf8(output.stdout)?)
-}
-
-pub fn devices() -> Result<Vec<String>> {
-    Ok(adb_output(&["devices"])?
-        .lines()
-        .skip(1)
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let serial = fields.next()?;
-            let state = fields.next()?;
-            if state != "device" {
-                eprintln!("Skipping {serial}: {state}");
-                return None;
-            }
-            Some(serial.to_owned())
-        })
-        .collect())
-}
-
 pub fn run(project: &Project, name: &str, release: bool, device: Option<&str>) -> Result<()> {
     let platform = project.platform(name)?;
     if name != "android" {
@@ -193,27 +160,8 @@ pub fn run(project: &Project, name: &str, release: bool, device: Option<&str>) -
         !platform.run.is_empty(),
         "no run steps configured for android"
     );
-    let devices = devices()?;
-    ensure!(
-        !devices.is_empty(),
-        "no authorized Android device; connect a device or start an emulator"
-    );
-    let device = if let Some(device) = device {
-        ensure!(
-            devices.iter().any(|d| d == device),
-            "device {device} is not connected and authorized"
-        );
-        device.to_owned()
-    } else {
-        devices[choose("Choose an Android device", &devices)?].clone()
-    };
-    let supported = adb_output(&["-s", &device, "shell", "getprop", "ro.product.cpu.abilist"])?;
-    let abi = supported
-        .trim()
-        .split(',')
-        .find(|abi| platform.abis.iter().any(|a| a == abi))
-        .context("device has no ABI enabled in this project")?;
-    let mut vars = build(project, name, release, Some(abi))?;
+    let (device, abi) = crate::devices::select(&platform.abis, device)?;
+    let mut vars = build(project, name, release, Some(&abi))?;
     let artifact = platform
         .artifact
         .as_ref()
@@ -226,7 +174,10 @@ pub fn run(project: &Project, name: &str, release: bool, device: Option<&str>) -
     vars.insert("device".into(), device);
     vars.insert(
         "adb".into(),
-        adb().to_str().context("ADB path must be UTF-8")?.into(),
+        crate::devices::adb()
+            .to_str()
+            .context("ADB path must be UTF-8")?
+            .into(),
     );
     steps(project, &platform.run, &vars)
 }
@@ -274,8 +225,15 @@ pub fn doctor(project: &Project) -> Result<()> {
                 missing |= !available;
             }
         }
-        match devices() {
-            Ok(devices) => println!("Android devices: {}", devices.join(", ")),
+        match crate::devices::list() {
+            Ok(devices) => println!(
+                "Android devices: {}",
+                devices
+                    .iter()
+                    .map(crate::devices::Device::label)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
             Err(error) => {
                 println!("adb: {error}");
                 missing = true;

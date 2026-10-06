@@ -262,8 +262,11 @@ fn android_run_obeys_configured_steps_and_stops_on_adb_errors() {
         r#"#!/bin/sh
 printf '%s\n' "$*" >> "$FORGE_LOG"
 case "$*" in
-  devices) printf 'List of devices attached\nfake-device\tdevice\n' ;;
-  *getprop*) printf 'x86_64\n' ;;
+  'devices -l')
+    printf 'List of devices attached\nfake-device\tdevice model:Test_Phone\nlocked\tunauthorized\nsleeping\toffline\n'
+    if [ "$FORGE_DEVICES" = multiple ]; then printf 'second\tdevice model:Second_Phone\n'; fi ;;
+  *getprop*)
+    if [ "$FORGE_DEVICES" = incompatible ]; then printf 'armeabi-v7a\n'; else printf 'x86_64\n'; fi ;;
   *install*) if [ "$FORGE_FAILURE" = install ]; then exit 1; fi ;;
   *start*) if [ "$FORGE_FAILURE" = launch ]; then printf 'Error: launch failed\n'; fi ;;
 esac
@@ -302,6 +305,22 @@ args = ["-c", "printf apk > \"$1\"", "sh", "{{project_dir}}/fixture.apk"]"#,
         .push("-S");
     fs::write(app.0.join("gpuiforge.toml"), config.to_string()).unwrap();
     let log = app.0.join("adb.log");
+    let listed = Command::new(env!("CARGO_BIN_EXE_gpuiforge"))
+        .args(["--config", "missing.toml", "devices"])
+        .env("ANDROID_HOME", app.0.join("sdk"))
+        .env("FORGE_LOG", &log)
+        .current_dir(&app.0)
+        .output()
+        .unwrap();
+    assert!(listed.status.success());
+    let listing = String::from_utf8_lossy(&listed.stdout);
+    assert!(
+        listing.contains("Test Phone | x86_64 | ready")
+            && listing.contains("unauthorized")
+            && listing.contains("offline")
+    );
+    let calls = fs::read_to_string(&log).unwrap();
+    assert!(!calls.contains("-s locked") && !calls.contains("-s sleeping"));
     for failure in ["", "install", "launch"] {
         fs::write(&log, "").unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_gpuiforge"))
@@ -324,5 +343,35 @@ args = ["-c", "printf apk > \"$1\"", "sh", "{{project_dir}}/fixture.apk"]"#,
             calls.contains("dev.example.app/dev.example.MainActivity -S"),
             failure != "install"
         );
+    }
+    for (state, device, succeeds, diagnostic) in [
+        ("", None, true, ""),
+        ("multiple", None, false, "--device SERIAL"),
+        ("", Some("locked"), false, "unauthorized"),
+        ("", Some("sleeping"), false, "offline"),
+        ("incompatible", None, false, "no available Android device"),
+    ] {
+        fs::write(&log, "").unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_gpuiforge"));
+        command.args(["run", "android"]);
+        if let Some(device) = device {
+            command.args(["--device", device]);
+        }
+        let output = command
+            .env("ANDROID_HOME", app.0.join("sdk"))
+            .env("FORGE_LOG", &log)
+            .env("FORGE_DEVICES", state)
+            .current_dir(&app.0)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.success(),
+            succeeds,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains(diagnostic));
+        let calls = fs::read_to_string(&log).unwrap();
+        assert_eq!(calls.contains(" install -r "), succeeds);
     }
 }

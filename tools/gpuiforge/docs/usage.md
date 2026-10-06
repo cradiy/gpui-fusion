@@ -58,6 +58,12 @@ Rust applications using `src/main.rs` without a companion library or explicit
 for a single-architecture build or both for a multi-ABI APK. Device runs select
 a supported ABI from this list and fail if none matches the device.
 
+Use `gpuiforge build android --abi arm64-v8a` or `--abi x86_64` to build only one
+enabled architecture without changing the configuration. The override also limits
+prerequisite checks to that architecture and can be combined with `--release`.
+With `--abi`, an omitted platform defaults to Android. Disabled ABIs and use with
+another platform are rejected before generation or build steps begin.
+
 Optional Android settings can override the defaults:
 
 ```toml
@@ -68,10 +74,20 @@ version_code = "1"
 version_name = "0.1.0"
 ```
 
-`gpuiforge run` prompts for a configured platform, then for an authorized Android
-device. It builds only a compatible device ABI. `gpuiforge build android` builds
-all configured ABIs. Non-interactive runs require explicit platform/device
-arguments, for example `gpuiforge run android --device emulator-5554`.
+`gpuiforge devices` lists connected Android devices with their model, ABI and
+connection status. It works without a project configuration and does not query
+device properties on unauthorized or offline devices.
+
+`gpuiforge run` prompts for a configured platform. Android runs automatically use
+a sole authorized device whose ABI is enabled in the project. Multiple compatible
+devices produce a selection menu; non-interactive runs require `--device SERIAL`
+in that case. Offline, unauthorized and incompatible devices are not candidates.
+An explicitly selected unavailable device produces an error, without substituting
+another device. Passing `--device` defaults an omitted platform to Android.
+
+Android runs build only the selected device ABI. `gpuiforge build android` builds
+all configured ABIs. For an explicit selection, use
+`gpuiforge run android --device emulator-5554`.
 Android `run` selects the device and ABI, executes the configured build steps,
 then executes the configured run steps in order. Installation and launch are
 performed only by those run steps.

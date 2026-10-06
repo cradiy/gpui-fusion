@@ -103,6 +103,14 @@ Handler, background work uses Rust workers, and visible, resumed, focused Views
 receive Choreographer ticks. Unchanged UI does not require a new GPU draw.
 If a frame cannot be presented, the next active tick retries it.
 
+`Window::appearance()` follows the hosting View's Android night-mode
+configuration. Theme changes notify GPUI and redraw the window, including when
+an Activity recreates its View around a retained session. Embedded hosts that
+handle configuration changes receive updates through the View as well.
+The generated application supplies light and dark Android themes. Applications
+choose their GPUI colors from the reported appearance; custom colors are not
+automatically recolored.
+
 ## Host ownership
 
 The host library is written in Kotlin and can also be called from Java. A
@@ -252,12 +260,8 @@ it. Personalized learning is disabled for all modes. Changing mode restarts the
 input connection, completes composition, and invalidates callbacks from the old
 connection. Missing surrounding text alone does not change the keyboard type.
 Custom action labels, native selection handles,
-cursor-anchor updates, rich IME content, and hardware dead-key composition are
+rich IME content, and hardware dead-key composition are
 not implemented.
-
-`GpuiActivity` resizes its content for the keyboard. Embedded hosts must apply
-their own keyboard insets. Register fonts covering the languages your UI uses;
-the bundled Latin font is not a complete CJK or emoji font collection.
 
 ## Permissions
 

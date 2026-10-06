@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -63,6 +64,15 @@ class GpuiSession : AutoCloseable {
         } else {
             nativeAttach(id, surface, width, height, density)
         }
+        updateAppearance()
+    }
+
+    private fun darkAppearance(): Boolean =
+        view.get()?.resources?.configuration?.uiMode?.and(Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+
+    internal fun updateAppearance() {
+        checkThread()
+        if (!closed && id != 0L) nativeAppearance(id, darkAppearance())
     }
 
     internal fun detachSurface() { checkThread(); if (id != 0L) nativeDetach(id) }
@@ -296,6 +306,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeInputAction(id: Long, epoch: Long, action: Int): Boolean
         @JvmStatic private external fun nativeLifecycle(id: Long, phase: Int)
         @JvmStatic private external fun nativeFocus(id: Long, active: Boolean)
+        @JvmStatic private external fun nativeAppearance(id: Long, dark: Boolean)
         @JvmStatic private external fun nativeBack(id: Long): Boolean
         @JvmStatic private external fun nativeTouch(id: Long, pointer: Int, phase: Int, x: Float, y: Float): Boolean
         @JvmStatic private external fun nativeTap(id: Long, x: Float, y: Float)

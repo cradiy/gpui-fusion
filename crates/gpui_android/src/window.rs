@@ -41,6 +41,7 @@ struct Callbacks {
     frame: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     input: Option<Box<dyn FnMut(PlatformInput) -> DispatchEventResult>>,
     active: Option<Box<dyn FnMut(bool)>>,
+    appearance: Option<Box<dyn FnMut()>>,
     resize: Option<Box<dyn FnMut(Size<Pixels>, f32)>>,
     close: Option<Box<dyn FnOnce()>>,
 }
@@ -53,6 +54,7 @@ pub(crate) struct AndroidWindow {
     native: RefCell<Option<NativeWindow>>,
     pub display: Rc<AndroidDisplay>,
     pub active: Cell<bool>,
+    pub appearance: Cell<WindowAppearance>,
     force_frame: Cell<bool>,
     pub(crate) pointer: Cell<Point<Pixels>>,
     pub(crate) handler: RefCell<Option<PlatformInputHandler>>,
@@ -73,6 +75,7 @@ impl AndroidWindow {
         width: i32,
         height: i32,
         density: f32,
+        appearance: WindowAppearance,
     ) -> Self {
         Self {
             host,
@@ -87,6 +90,7 @@ impl AndroidWindow {
                 scale: Cell::new(density),
             }),
             active: Cell::new(false),
+            appearance: Cell::new(appearance),
             force_frame: Cell::new(true),
             pointer: Cell::default(),
             handler: RefCell::default(),
@@ -199,6 +203,21 @@ impl AndroidWindow {
             return Ok(());
         }
         self.render_frame(false)
+    }
+
+    pub fn set_appearance(&self, appearance: WindowAppearance) {
+        if self.appearance.replace(appearance) == appearance {
+            return;
+        }
+        self.force_frame.set(true);
+        let callback = self.callbacks.borrow_mut().appearance.take();
+        if let Some(mut callback) = callback {
+            callback();
+            self.callbacks
+                .borrow_mut()
+                .appearance
+                .get_or_insert(callback);
+        }
     }
 
     pub fn redraw(&self) -> Result<()> {
@@ -335,7 +354,7 @@ impl PlatformWindow for AndroidWindowHandle {
         self.display.scale.get()
     }
     fn appearance(&self) -> WindowAppearance {
-        WindowAppearance::Dark
+        self.appearance.get()
     }
     fn display(&self) -> Option<Rc<dyn PlatformDisplay>> {
         Some(self.display.clone())
@@ -403,7 +422,9 @@ impl PlatformWindow for AndroidWindowHandle {
     fn on_close(&self, callback: Box<dyn FnOnce()>) {
         self.callbacks.borrow_mut().close = Some(callback);
     }
-    fn on_appearance_changed(&self, _: Box<dyn FnMut()>) {}
+    fn on_appearance_changed(&self, callback: Box<dyn FnMut()>) {
+        self.callbacks.borrow_mut().appearance = Some(callback);
+    }
     fn draw(&self, scene: &Scene) {
         let mut renderer = self.renderer.borrow_mut();
         let presented = renderer.draw(scene);

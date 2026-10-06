@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 {{android_permissions}}
     <uses-feature android:name="android.hardware.vulkan.level" android:version="0" android:required="false" />
-    <application android:label="{{app.name|xml}}" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:supportsRtl="true">
+    <application android:label="{{app.name|xml}}" android:theme="@style/GpuiTheme" android:allowBackup="false" android:supportsRtl="true">
         <activity android:name="dev.gpuiforge.app.MainActivity" android:exported="true" android:enableOnBackInvokedCallback="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

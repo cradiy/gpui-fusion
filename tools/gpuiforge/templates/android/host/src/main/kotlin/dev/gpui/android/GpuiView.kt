@@ -1,6 +1,7 @@
 package dev.gpui.android
 
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.PointF
 import android.os.Build
 import android.util.SparseArray
@@ -55,6 +56,12 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         session.bind(this)
+    }
+
+    override fun onConfigurationChanged(configuration: Configuration) {
+        super.onConfigurationChanged(configuration)
+        try { session.updateAppearance() }
+        catch (error: RuntimeException) { session.fail(error) }
     }
 
     override fun onDetachedFromWindow() {

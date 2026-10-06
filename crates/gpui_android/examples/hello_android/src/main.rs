@@ -143,6 +143,7 @@ fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
         .p_4()
         .rounded_lg()
         .bg(rgb(0x375c91))
+        .text_color(rgb(0xe7edf7))
         .child(label)
 }
 
@@ -174,14 +175,23 @@ impl Counter {
 
 impl Render for Counter {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let dark = matches!(
+            window.appearance(),
+            WindowAppearance::Dark | WindowAppearance::VibrantDark
+        );
+        let (background, foreground, muted, surface) = if dark {
+            (0x101923, 0xe7edf7, 0xa0b1c6, 0x1e2d40)
+        } else {
+            (0xf4f7fb, 0x172033, 0x52647a, 0xe3eaf3)
+        };
         window.set_back_enabled(self.details);
         if self.details {
             return div()
                 .id("details-page")
                 .size_full()
                 .overflow_y_scroll()
-                .bg(rgb(0x101923))
-                .text_color(rgb(0xe7edf7))
+                .bg(rgb(background))
+                .text_color(rgb(foreground))
                 .font_family("IBM Plex Sans")
                 .p_6()
                 .flex()
@@ -230,8 +240,8 @@ impl Render for Counter {
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
-            .bg(rgb(0x101923))
-            .text_color(rgb(0xe7edf7))
+            .bg(rgb(background))
+            .text_color(rgb(foreground))
             .font_family("IBM Plex Sans")
             .p_6()
             .flex()
@@ -249,11 +259,11 @@ impl Render for Counter {
                     cx.notify();
                 })),
             )
-            .child(
-                div()
-                    .text_color(rgb(0xa0b1c6))
-                    .child("A Rust interface inside an Android View."),
-            )
+            .child(div().text_color(rgb(muted)).child(if dark {
+                "Android View · Dark appearance"
+            } else {
+                "Android View · Light appearance"
+            }))
             .child(Input::new(&self.title).text_color(rgb(0x172033)))
             .child(
                 div()
@@ -284,7 +294,7 @@ impl Render for Counter {
                     .flex_shrink_0()
                     .p_6()
                     .rounded_xl()
-                    .bg(rgb(0x1e2d40))
+                    .bg(rgb(surface))
                     .flex()
                     .flex_col()
                     .gap_4()
@@ -299,7 +309,7 @@ impl Render for Counter {
             .child(
                 div()
                     .text_sm()
-                    .text_color(rgb(0xa0b1c6))
+                    .text_color(rgb(muted))
                     .child("Rotate or switch apps. Your count stays here."),
             )
             .child(
@@ -307,7 +317,7 @@ impl Render for Counter {
                     .flex_shrink_0()
                     .p_5()
                     .rounded_xl()
-                    .bg(rgb(0x1e2d40))
+                    .bg(rgb(surface))
                     .flex()
                     .flex_col()
                     .gap_4()
@@ -360,7 +370,7 @@ impl Render for Counter {
                         div()
                             .text_sm()
                             .whitespace_normal()
-                            .text_color(rgb(0xa0b1c6))
+                            .text_color(rgb(muted))
                             .child(self.clipboard_status.clone()),
                     )
                     .child(button("open-link", "Open website").on_click(|_, _, cx| {
@@ -374,7 +384,7 @@ impl Render for Counter {
                     .flex_shrink_0()
                     .p_5()
                     .rounded_lg()
-                    .bg(rgb(0x1e2d40))
+                    .bg(rgb(surface))
                     .child(format!("Item {index:02}"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.count += 1;

@@ -43,6 +43,7 @@ impl AndroidPlatform {
             "invalid Android surface geometry"
         );
         let dispatcher = AndroidDispatcher::new(host.clone());
+        let appearance = host.window_appearance()?;
         let text = Arc::new(CosmicTextSystem::new_without_system_fonts("IBM Plex Sans"));
         text.add_font_files(&host.system_font_paths()?);
         text.add_fonts(vec![Cow::Borrowed(include_bytes!(
@@ -66,6 +67,7 @@ impl AndroidPlatform {
             width,
             height,
             density,
+            appearance,
         ));
         Ok(Rc::new(Self {
             dispatcher,
@@ -180,7 +182,7 @@ impl Platform for AndroidPlatform {
         Ok(Box::new(AndroidWindowHandle(self.window.clone())))
     }
     fn window_appearance(&self) -> WindowAppearance {
-        WindowAppearance::Dark
+        self.window.appearance.get()
     }
     fn open_url(&self, url: &str) {
         if let Err(error) = self.host.open_url(url) {

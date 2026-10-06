@@ -85,6 +85,19 @@ pub(crate) struct Host {
     object: GlobalRef,
 }
 impl Host {
+    pub fn window_appearance(&self) -> Result<gpui::WindowAppearance> {
+        self.with_env(|env| {
+            let dark = env
+                .call_method(self.object.as_obj(), "darkAppearance", "()Z", &[])?
+                .z()?;
+            Ok(if dark {
+                gpui::WindowAppearance::Dark
+            } else {
+                gpui::WindowAppearance::Light
+            })
+        })
+    }
+
     pub fn system_font_paths(&self) -> Result<Vec<std::path::PathBuf>> {
         self.with_env(|env| {
             let paths = JObjectArray::from(
@@ -295,6 +308,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         method("nativeInputAction", "(JJI)Z", input_action as *mut c_void),
         method("nativeLifecycle", "(JI)V", lifecycle as *mut c_void),
         method("nativeFocus", "(JZ)V", focus as *mut c_void),
+        method("nativeAppearance", "(JZ)V", appearance as *mut c_void),
         method("nativeBack", "(J)Z", system_back as *mut c_void),
         method("nativeTouch", "(JIIFF)Z", touch as *mut c_void),
         method("nativeTap", "(JFF)V", tap as *mut c_void),
@@ -610,6 +624,17 @@ extern "system" fn lifecycle(mut env: JNIEnv, _: JClass, id: jlong, phase: jint)
         Ok(())
     });
 }
+extern "system" fn appearance(mut env: JNIEnv, _: JClass, id: jlong, dark: jboolean) {
+    call(&mut env, |_| {
+        session(id)?.platform.window.set_appearance(if dark != 0 {
+            gpui::WindowAppearance::Dark
+        } else {
+            gpui::WindowAppearance::Light
+        });
+        Ok(())
+    });
+}
+
 extern "system" fn focus(mut env: JNIEnv, _: JClass, id: jlong, active: jboolean) {
     call(&mut env, |_| {
         session(id)?.platform.window.set_active(active != 0);

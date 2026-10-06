@@ -468,10 +468,32 @@ extern "system" fn input_state(mut env: JNIEnv, _: JClass, id: jlong) -> jobject
             Some(text) => JObject::from(env.new_string(text)?),
             None => JObject::null(),
         };
+        fn bounds_array<'local>(
+            env: &mut JNIEnv<'local>,
+            bounds: Option<gpui::Bounds<gpui::Pixels>>,
+        ) -> Result<JObject<'local>> {
+            let Some(bounds) = bounds else {
+                return Ok(JObject::null());
+            };
+            let array = env.new_float_array(4)?;
+            env.set_float_array_region(
+                &array,
+                0,
+                &[
+                    bounds.left().into(),
+                    bounds.top().into(),
+                    bounds.right().into(),
+                    bounds.bottom().into(),
+                ],
+            )?;
+            Ok(array.into())
+        }
+        let caret = bounds_array(env, state.caret_bounds)?;
+        let editor = bounds_array(env, state.editor_bounds)?;
         Ok(env
             .new_object(
                 "dev/gpui/android/TextInputState",
-                "(JLjava/lang/String;IIIIIZZZIZZI)V",
+                "(JLjava/lang/String;IIIIIZZZIZZI[F[F)V",
                 &[
                     JValue::Long(state.epoch as i64),
                     JValue::Object(&text),
@@ -499,6 +521,8 @@ extern "system" fn input_state(mut env: JNIEnv, _: JClass, id: jlong) -> jobject
                         gpui::TextInputPurpose::Number { signed: true, .. }
                     ) as u8),
                     JValue::Int(crate::input::action_code(state.action)),
+                    JValue::Object(&caret),
+                    JValue::Object(&editor),
                 ],
             )?
             .into_raw())

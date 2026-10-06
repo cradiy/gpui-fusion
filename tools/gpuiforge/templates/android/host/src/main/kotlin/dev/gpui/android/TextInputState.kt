@@ -17,6 +17,8 @@ internal class TextInputState(
     val decimal: Boolean,
     val signed: Boolean,
     val action: Int,
+    val caretBounds: FloatArray?,
+    val editorBounds: FloatArray?,
 ) {
     val inputType: Int
         get() = when {

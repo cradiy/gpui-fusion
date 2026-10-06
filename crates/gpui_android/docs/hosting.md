@@ -183,6 +183,15 @@ to accept cursor and selection changes from Android. UIC's `TextInput` implement
 this contract. Tapping a focused input requests the soft keyboard. Hardware
 text keys and common editing shortcuts are forwarded to GPUI.
 
+Input methods can request immediate or monitored `CursorAnchorInfo` updates.
+GPUI supplies the selection, available composing text, insertion-marker bounds,
+and (on Android 13 and later) editor bounds in screen coordinates. Geometry
+tracks rendered layout and View placement; unchanged reports are suppressed.
+Password fields do not expose composing text. The caret baseline remains
+unspecified because GPUI's input-handler contract supplies a rectangle only.
+Character-bound, visible-line, and text-appearance filters are unsupported and
+return false. Closing the input connection stops its geometry subscription.
+
 Call `Window::show_soft_keyboard()` after focusing a text input to request the
 keyboard without tapping the field. `Window::hide_soft_keyboard()` dismisses
 it without clearing input focus or text. Requests are applied after the next

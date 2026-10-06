@@ -15,6 +15,8 @@ import android.view.ViewConfiguration
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
+import java.util.Collections
+import java.util.WeakHashMap
 import kotlin.math.hypot
 
 /** A GPUI rendering surface. The caller owns and eventually closes its session. */
@@ -37,6 +39,8 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     private var tapY = 0f
     private var inputState: TextInputState? = null
     private var inputConnection: GpuiInputConnection? = null
+    // A connection request does not necessarily replace the connection served by the IME.
+    private val inputConnections = Collections.newSetFromMap(WeakHashMap<GpuiInputConnection, Boolean>())
     private enum class KeyboardRequest { TAP, SHOW, HIDE }
     private var keyboardRequest: KeyboardRequest? = null
 
@@ -95,6 +99,8 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         session.viewport(surfaceWidth, (surfaceHeight - bottomInset).coerceAtLeast(1), resources.displayMetrics.density)
     }
 
+    internal fun viewportHeight() = (height - bottomInset).coerceAtLeast(0)
+
     override fun surfaceRedrawNeeded(holder: SurfaceHolder) {
         if (!surfaceReady) return
         try { session.redraw() }
@@ -116,6 +122,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
 
     override fun onWindowFocusChanged(focused: Boolean) {
         super.onWindowFocusChanged(focused)
+        inputDiagnostic { "window focus=$focused" }
         if (initialized) updateFrameScheduling()
     }
 
@@ -155,11 +162,11 @@ class GpuiView(context: Context, private val session: GpuiSession) :
                     if (changed) syncInput(false)
                     inputManager().hideSoftInputFromWindow(windowToken, 0)
                 } else if (changed || request != null) {
-                    if (inputConnection?.batching() != true) {
-                        keyboardRequest = null
-                        syncInput(request != null, requireHit = request != KeyboardRequest.SHOW)
+                    if (syncInput(request != null, requireHit = request != KeyboardRequest.SHOW)) {
+                        if (keyboardRequest == request) keyboardRequest = null
                     }
                 }
+                for (connection in inputConnections.toList()) connection.updateCursorAnchor(inputState)
             } catch (error: RuntimeException) {
                 session.fail(error)
                 return
@@ -240,6 +247,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
 
     override fun performClick(): Boolean {
         super.performClick()
+        inputDiagnostic { "tap epoch=${inputState?.epoch}" }
         inputConnection?.finishComposingText()
         keyboardRequest = KeyboardRequest.TAP
         session.tap(tapX, tapY)
@@ -255,33 +263,45 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     internal fun inputManager(): InputMethodManager = context.getSystemService(InputMethodManager::class.java)
 
     private fun closeInput() {
-        val previous = inputConnection
+        val previous = inputConnections.toList()
+        inputConnections.clear()
         inputConnection = null
-        previous?.closeConnection()
+        for (connection in previous) connection.closeConnection()
         inputState = null
     }
 
-    internal fun syncInput(show: Boolean, requireHit: Boolean = true) {
-        if (!surfaceReady || !hasWindowFocus() || inputConnection?.batching() == true) return
+    internal fun inputConnectionClosed(connection: GpuiInputConnection) {
+        inputConnections.remove(connection)
+        if (inputConnection === connection) inputConnection = inputConnections.firstOrNull()
+    }
+
+    internal fun syncInput(show: Boolean, requireHit: Boolean = true): Boolean {
+        if (!surfaceReady || !hasWindowFocus()) return false
         val next = session.inputState()
         if (next?.epoch != inputState?.epoch) {
+            inputDiagnostic { "restart old=${inputState?.epoch} new=${next?.epoch} show=$show batch=${inputConnection?.batching()}" }
             closeInput()
             inputState = next
             inputManager().restartInput(this)
             if (next == null) inputManager().hideSoftInputFromWindow(windowToken, 0)
-        } else inputState = next
+        } else {
+            // Batches defer updates within one editor, never a change of editor.
+            if (inputConnections.any { it.batching() }) return false
+            inputState = next
+        }
         if (next != null) {
             inputManager().updateSelection(this, next.anchor, next.head, next.composingStart, next.composingEnd)
-            inputConnection?.updateExtracted(next)
+            for (connection in inputConnections.toList()) connection.updateExtracted(next)
             if (show && (!requireHit || next.hit)) inputManager().showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
         }
+        return true
     }
 
     override fun onCheckIsTextEditor() = inputState != null
 
     override fun onCreateInputConnection(info: EditorInfo): InputConnection? {
+        inputDiagnostic { "onCreateInputConnection epoch=${inputState?.epoch} surface=$surfaceReady" }
         if (inputState == null || !surfaceReady) return null
-        inputConnection?.closeConnection()
         val state = session.inputState()
         inputState = state
         if (state == null) return null
@@ -293,7 +313,10 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         if (Build.VERSION.SDK_INT >= 30 && state.text != null) {
             info.setInitialSurroundingSubText(state.text, state.offset)
         }
-        return GpuiInputConnection.create(this, session, state.epoch).also { inputConnection = it }
+        return GpuiInputConnection.create(this, session, state.epoch).also {
+            inputConnections.add(it)
+            inputConnection = it
+        }
     }
 
     override fun onKeyDown(code: Int, event: KeyEvent) = handleKey(code, event, true) || super.onKeyDown(code, event)

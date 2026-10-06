@@ -21,6 +21,10 @@ internal open class GpuiInputConnection(
     private var batches = 0
     private var extractedToken = 0
     private var monitorExtracted = false
+    private val cursorAnchor = CursorAnchorUpdates(view, epoch) { state() }
+    private val connectionId = System.identityHashCode(this)
+
+    init { inputDiagnostic { "create connection=$connectionId epoch=$epoch" } }
 
     override fun getEditable(): Editable? = null
 
@@ -47,9 +51,13 @@ internal open class GpuiInputConnection(
         if (closed) null else session.inputState()?.takeIf { it.epoch == epoch }
 
     private fun edit(operation: Int, text: String, a: Int, b: Int): Boolean {
-        if (closed) return false
+        if (closed) {
+            inputDiagnostic { "edit connection=$connectionId op=$operation closed" }
+            return false
+        }
         return try {
             val result = session.edit(epoch, operation, text, a, b)
+            inputDiagnostic { "edit connection=$connectionId epoch=$epoch op=$operation batch=$batches accepted=$result" }
             if (batches == 0) view.syncInput(false)
             result
         } catch (error: RuntimeException) {
@@ -69,20 +77,30 @@ internal open class GpuiInputConnection(
     override fun beginBatchEdit(): Boolean {
         if (closed) return false
         batches++
+        inputDiagnostic { "begin connection=$connectionId batch=$batches" }
         return true
     }
     override fun endBatchEdit(): Boolean {
         if (closed || batches == 0) return false
-        if (--batches == 0) view.syncInput(false)
+        --batches
+        inputDiagnostic { "end connection=$connectionId batch=$batches" }
+        if (batches == 0) view.syncInput(false)
         return batches > 0
     }
     fun batching() = batches > 0
 
+    override fun requestCursorUpdates(mode: Int) = cursorAnchor.request(mode)
+    override fun requestCursorUpdates(mode: Int, filter: Int) = cursorAnchor.request(mode or filter)
+    fun updateCursorAnchor(state: TextInputState?) = cursorAnchor.update(state)
+
     override fun closeConnection() {
         if (closed) return
+        inputDiagnostic { "close connection=$connectionId epoch=$epoch batch=$batches" }
         // Invalidate first: finishing composition can cause a focus refresh.
         closed = true
+        cursorAnchor.close()
         batches = 0
+        view.inputConnectionClosed(this)
         try { session.edit(epoch, 2, "", 0, 0) }
         finally { super.closeConnection() }
     }

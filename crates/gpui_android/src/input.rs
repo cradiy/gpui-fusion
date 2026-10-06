@@ -1,5 +1,7 @@
 use crate::window::AndroidWindow;
-use gpui::{PlatformInputHandler, TextInputAction, TextInputMode, TextInputPurpose};
+use gpui::{
+    Bounds, Pixels, PlatformInputHandler, TextInputAction, TextInputMode, TextInputPurpose,
+};
 use std::ops::Range;
 
 pub(crate) struct InputState {
@@ -13,6 +15,8 @@ pub(crate) struct InputState {
     pub head: usize,
     pub marked: Option<Range<usize>>,
     pub hit: bool,
+    pub caret_bounds: Option<Bounds<Pixels>>,
+    pub editor_bounds: Option<Bounds<Pixels>>,
 }
 
 impl AndroidWindow {
@@ -99,6 +103,10 @@ impl AndroidWindow {
             } else {
                 (selection.range.start, selection.range.end)
             };
+            let editor_bounds = handler.element_bounds();
+            let caret_bounds = (anchor == head)
+                .then(|| handler.bounds_for_range(head..head))
+                .flatten();
             Some(InputState {
                 epoch,
                 mode,
@@ -109,9 +117,9 @@ impl AndroidWindow {
                 anchor,
                 head,
                 marked,
-                hit: handler
-                    .element_bounds()
-                    .is_some_and(|bounds| bounds.contains(&self.pointer.get())),
+                hit: editor_bounds.is_some_and(|bounds| bounds.contains(&self.pointer.get())),
+                caret_bounds,
+                editor_bounds,
             })
         })
         .flatten()

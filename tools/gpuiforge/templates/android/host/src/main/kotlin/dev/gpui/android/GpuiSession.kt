@@ -22,6 +22,7 @@ class GpuiSession : AutoCloseable {
     private var view = WeakReference<GpuiView>(null)
     @Volatile private var closed = false
     private var id = 0L
+    private val pendingUrls = ArrayList<String>()
     private var phase = BACKGROUND
     private var closeRequested: Runnable? = null
     private var errorHandler: Consumer<RuntimeException>? = null
@@ -65,6 +66,19 @@ class GpuiSession : AutoCloseable {
             nativeAttach(id, surface, width, height, density)
         }
         updateAppearance()
+        for (url in pendingUrls) nativeOpenUrl(id, url)
+        pendingUrls.clear()
+    }
+
+    /** Forwards ACTION_VIEW data to Application.on_open_urls, including before the first Surface. */
+    fun onOpenIntent(intent: Intent): Boolean {
+        checkThread()
+        if (closed || intent.action != Intent.ACTION_VIEW) return false
+        val uri = intent.data ?: return false
+        if (uri.scheme.isNullOrEmpty()) return false
+        val url = uri.toString()
+        if (id == 0L) pendingUrls.add(url) else nativeOpenUrl(id, url)
+        return true
     }
 
     private fun darkAppearance(): Boolean =
@@ -276,6 +290,7 @@ class GpuiSession : AutoCloseable {
         checkThread()
         if (closed) return
         closed = true
+        pendingUrls.clear()
         permissions.close()
         try {
             view.get()?.releaseSurface()
@@ -324,6 +339,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeBack(id: Long): Boolean
         @JvmStatic private external fun nativeTouch(id: Long, pointer: Int, phase: Int, x: Float, y: Float): Boolean
         @JvmStatic private external fun nativeTap(id: Long, x: Float, y: Float)
+        @JvmStatic private external fun nativeOpenUrl(id: Long, url: String)
         @JvmStatic private external fun nativeFocusTextInput(id: Long, x: Float, y: Float): Boolean
         @JvmStatic private external fun nativeScroll(id: Long, phase: Int, x: Float, y: Float, dx: Float, dy: Float)
         @JvmStatic private external fun nativeRunTask(id: Long, token: Long)

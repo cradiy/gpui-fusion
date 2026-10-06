@@ -57,6 +57,8 @@ pub struct Platform {
     pub abis: Vec<String>,
     #[serde(default)]
     pub permissions: Vec<String>,
+    #[serde(default)]
+    pub url_schemes: Vec<String>,
     pub signing: Option<Signing>,
 }
 
@@ -236,6 +238,19 @@ impl Project {
                 }
                 platform.permissions.sort();
                 platform.permissions.dedup();
+                for scheme in &platform.url_schemes {
+                    let mut chars = scheme.chars();
+                    ensure!(
+                        chars.next().is_some_and(|c| c.is_ascii_lowercase())
+                            && chars.all(|c| c.is_ascii_lowercase()
+                                || c.is_ascii_digit()
+                                || matches!(c, '+' | '-' | '.'))
+                            && !matches!(scheme.as_str(), "http" | "https" | "file" | "content"),
+                        "url-schemes requires lowercase custom URI schemes; configure web and file links in a custom manifest: {scheme}"
+                    );
+                }
+                platform.url_schemes.sort();
+                platform.url_schemes.dedup();
                 if let Some(signing) = &platform.signing {
                     ensure!(
                         !signing.key_alias.trim().is_empty(),
@@ -275,8 +290,10 @@ impl Project {
                 );
             } else {
                 ensure!(
-                    platform.permissions.is_empty() && platform.signing.is_none(),
-                    "permissions and signing are Android-only settings"
+                    platform.permissions.is_empty()
+                        && platform.signing.is_none()
+                        && platform.url_schemes.is_empty(),
+                    "permissions, signing and url-schemes are Android-only settings"
                 );
             }
             platforms.insert(name, platform);
@@ -355,6 +372,9 @@ impl Project {
         if let Some(id) = &p.application_id {
             vars.insert("application_id".into(), id.clone());
         }
+        vars.insert("android_url_filters".into(), p.url_schemes.iter().map(|scheme| format!(
+            "            <intent-filter>\n                <action android:name=\"android.intent.action.VIEW\" />\n                <category android:name=\"android.intent.category.DEFAULT\" />\n                <category android:name=\"android.intent.category.BROWSABLE\" />\n                <data android:scheme=\"{scheme}\" />\n            </intent-filter>\n"
+        )).collect());
         if let Some(activity) = &p.activity {
             vars.insert("activity".into(), activity.clone());
         }

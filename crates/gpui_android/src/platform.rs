@@ -28,6 +28,8 @@ pub struct AndroidPlatform {
     handle: Cell<Option<AnyWindowHandle>>,
     lifecycle: RefCell<Option<Box<dyn FnMut(AppLifecyclePhase)>>>,
     quit: RefCell<Option<Box<dyn FnMut()>>>,
+    open_urls: RefCell<Option<Box<dyn FnMut(Vec<String>)>>>,
+    pending_urls: RefCell<Vec<String>>,
 }
 
 impl AndroidPlatform {
@@ -79,6 +81,8 @@ impl AndroidPlatform {
             handle: Cell::new(None),
             lifecycle: RefCell::default(),
             quit: RefCell::default(),
+            open_urls: RefCell::default(),
+            pending_urls: RefCell::default(),
         }))
     }
 
@@ -91,6 +95,8 @@ impl AndroidPlatform {
     }
 
     pub(crate) fn close(&self) {
+        self.open_urls.borrow_mut().take();
+        self.pending_urls.borrow_mut().clear();
         self.permissions.close();
         self.window.detach();
         let callback = self.quit.borrow_mut().take();
@@ -102,6 +108,22 @@ impl AndroidPlatform {
 
     fn read_clipboard(&self) -> Result<Option<ClipboardItem>> {
         Ok(self.host.read_clipboard()?.map(ClipboardItem::new_string))
+    }
+
+    pub(crate) fn receive_url(&self, url: String) {
+        self.pending_urls.borrow_mut().push(url);
+    }
+
+    pub(crate) fn dispatch_open_urls(&self) {
+        if self.pending_urls.borrow().is_empty() {
+            return;
+        }
+        let Some(mut callback) = self.open_urls.borrow_mut().take() else {
+            return;
+        };
+        let urls = std::mem::take(&mut *self.pending_urls.borrow_mut());
+        callback(urls);
+        self.open_urls.borrow_mut().get_or_insert(callback);
     }
 
     /// Returns the session's main-thread Android permission interface.
@@ -189,7 +211,9 @@ impl Platform for AndroidPlatform {
             log::error!("Failed to open Android URL: {error:#}");
         }
     }
-    fn on_open_urls(&self, _: Box<dyn FnMut(Vec<String>)>) {}
+    fn on_open_urls(&self, callback: Box<dyn FnMut(Vec<String>)>) {
+        *self.open_urls.borrow_mut() = Some(callback);
+    }
     fn register_url_scheme(&self, _: &str) -> Task<Result<()>> {
         Task::ready(Err(anyhow::anyhow!(
             "declare Android URL schemes in the manifest"

@@ -220,6 +220,25 @@ Manifest yourself. Runtime permissions still require application authorization
 requests; configuration does not show dialogs or grant access. GPUI's Android
 backend provides `AndroidPermissions` for these requests.
 
+## Android links
+
+```toml
+[platforms.android]
+application-id = "dev.example.app"
+url-schemes = ["myapp"]
+```
+
+The bundled template generates `VIEW`, `DEFAULT`, and `BROWSABLE` intent filters
+for lowercase custom URI schemes. Each scheme has its own filter; duplicates
+are removed. The Activity uses `singleTop`, so a link targeting the top Activity
+arrives through `onNewIntent`. GPUI applications receive URLs through
+`Application::on_open_urls`.
+
+Custom templates can use `{{android_url_filters}}`. With manual management,
+maintain the filters and Activity launch mode in your manifest. HTTP(S) App Links
+need host-specific filters and website verification, so they are configured in
+a custom manifest instead of `url-schemes`.
+
 ## Android release signing
 
 ```toml

@@ -315,6 +315,11 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         method("nativeTouch", "(JIIFF)Z", touch as *mut c_void),
         method("nativeTap", "(JFF)V", tap as *mut c_void),
         method(
+            "nativeOpenUrl",
+            "(JLjava/lang/String;)V",
+            receive_url as *mut c_void,
+        ),
+        method(
             "nativeFocusTextInput",
             "(JFF)Z",
             focus_text_input as *mut c_void,
@@ -463,9 +468,18 @@ extern "system" fn detach(mut env: JNIEnv, _: JClass, id: jlong) {
 extern "system" fn frame(mut env: JNIEnv, _: JClass, id: jlong) -> jboolean {
     call(&mut env, |_| {
         let session = session(id)?;
+        session.platform.dispatch_open_urls();
         session.platform.window.frame()?;
         Ok(session.platform.window.input_dirty.replace(false) as u8)
     })
+}
+
+extern "system" fn receive_url(mut env: JNIEnv, _: JClass, id: jlong, url: JString) {
+    call(&mut env, |env| {
+        let url: String = env.get_string(&url)?.into();
+        session(id)?.platform.receive_url(url);
+        Ok(())
+    });
 }
 
 extern "system" fn redraw(mut env: JNIEnv, _: JClass, id: jlong) {

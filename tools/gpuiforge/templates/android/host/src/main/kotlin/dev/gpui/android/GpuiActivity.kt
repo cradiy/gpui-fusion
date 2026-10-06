@@ -1,6 +1,7 @@
 package dev.gpui.android
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -28,7 +29,9 @@ abstract class GpuiActivity : Activity() {
         } else {
             window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         }
-        session = lastNonConfigurationInstance as? GpuiSession ?: GpuiSession()
+        val retained = lastNonConfigurationInstance as? GpuiSession
+        session = retained ?: GpuiSession()
+        if (retained == null) session.onOpenIntent(intent)
         session.attachPermissionHost(this)
         session.setOnBackEnabledChanged { enabled ->
             backEnabled = enabled
@@ -72,6 +75,13 @@ abstract class GpuiActivity : Activity() {
     }
 
     override fun onRetainNonConfigurationInstance(): Any? = if (session.isClosed()) null else session
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        try { session.onOpenIntent(intent) }
+        catch (error: RuntimeException) { session.fail(error) }
+    }
     override fun onStart() { super.onStart(); session.setLifecycle(GpuiSession.FOREGROUND) }
     override fun onResume() {
         super.onResume()

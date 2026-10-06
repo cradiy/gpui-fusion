@@ -365,8 +365,24 @@ items are not resolved to text.
 
 `App::open_url` sends an Android `ACTION_VIEW` intent using the attached View's
 context. The URL must include a scheme, and an installed application must handle
-it. Failures are logged without closing the GPUI session. Inbound deep links
-and URL scheme registration are not implemented by the backend.
+it. Failures are logged without closing the GPUI session.
+
+Register `Application::on_open_urls` to receive inbound `ACTION_VIEW` URLs.
+`GpuiActivity` forwards the launch intent and `onNewIntent`; a retained session
+does not replay the launch URL when the Activity is recreated. URLs received
+before the first Surface or before callback registration are queued and delivered
+in order on the main thread before a frame. Repeated intents with the same URL
+remain separate requests. Closing the session discards pending requests.
+
+Custom hosts call `GpuiSession.onOpenIntent(intent)` once for each incoming intent.
+It accepts `ACTION_VIEW` with a URI scheme and returns false for other intents;
+it does not import shared files or process `ACTION_SEND`. Applications validate
+the URL and decide which page or document to open.
+
+Declare custom schemes through GPUiForge's `platforms.android.url-schemes`.
+Custom manifests can provide narrower filters or verified HTTPS App Links.
+Android scheme registration is a build-time manifest setting;
+`register_url_scheme` does not change the installed manifest.
 
 ## Device verification
 

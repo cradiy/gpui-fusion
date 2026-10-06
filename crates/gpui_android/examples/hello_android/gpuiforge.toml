@@ -13,6 +13,7 @@ args = ["run", "-p", "hello_android", "--profile", "{{cargo_profile}}"]
 application-id = "dev.gpui.example"
 abis = ["arm64-v8a", "x86_64"]
 permissions = ["android.permission.RECORD_AUDIO"]
+url-schemes = ["gpui-example"]
 
 [[platforms.android.build]]
 program = "bash"

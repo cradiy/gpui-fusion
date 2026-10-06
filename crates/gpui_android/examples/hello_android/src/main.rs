@@ -1,4 +1,5 @@
 use gpui::{prelude::*, *};
+use std::{cell::RefCell, rc::Rc};
 use uic::components::input::{Input, InputActionEvent, InputEvent, InputMode, TextInput};
 
 const INPUT_ACTIONS: [TextInputAction; 6] = [
@@ -33,7 +34,24 @@ const KEYBOARDS: [(&str, TextInputPurpose); 6] = [
 
 #[gpui_platform::main]
 fn main() {
-    gpui_platform::application().run(|cx| {
+    let application = gpui_platform::application();
+    let link_context = Rc::new(RefCell::new(None::<AsyncApp>));
+    let receiver = link_context.clone();
+    application.on_open_urls(move |urls| {
+        if let Some(cx) = receiver.borrow().as_ref() {
+            cx.update(|cx| {
+                let links = cx.global_mut::<OpenedLinks>();
+                links.count += urls.len();
+                if let Some(url) = urls.last() {
+                    links.last = url.clone();
+                }
+                cx.refresh_windows();
+            });
+        }
+    });
+    application.run(move |cx| {
+        cx.set_global(OpenedLinks::default());
+        *link_context.borrow_mut() = Some(cx.to_async());
         uic::init(cx);
         cx.open_window(WindowOptions::default(), |window, cx| {
             let view = cx.new(|cx| Counter {
@@ -116,6 +134,13 @@ fn main() {
         .expect("failed to open the GPUI window");
     });
 }
+
+#[derive(Default)]
+struct OpenedLinks {
+    count: usize,
+    last: String,
+}
+impl Global for OpenedLinks {}
 
 struct Counter {
     details: bool,
@@ -375,7 +400,12 @@ impl Render for Counter {
                     )
                     .child(button("open-link", "Open website").on_click(|_, _, cx| {
                         cx.open_url("https://www.rust-lang.org/");
-                    })),
+                    }))
+                    .child(div().text_sm().whitespace_normal().child(format!(
+                        "Opened links: {} · {}",
+                        cx.global::<OpenedLinks>().count,
+                        cx.global::<OpenedLinks>().last,
+                    ))),
             )
             .child(div().text_xl().child("Swipe to explore"))
             .children((1usize..=20).map(|index| {

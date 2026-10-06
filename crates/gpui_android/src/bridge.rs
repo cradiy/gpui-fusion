@@ -307,6 +307,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         method("nativeKey", "(JLjava/lang/String;IZ)Z", key as *mut c_void),
         method("nativeInputAction", "(JJI)Z", input_action as *mut c_void),
         method("nativeInputIndex", "(JJFF)I", input_index as *mut c_void),
+        method("nativeScrollInput", "(JJFF)Z", scroll_input as *mut c_void),
         method("nativeLifecycle", "(JI)V", lifecycle as *mut c_void),
         method("nativeFocus", "(JZ)V", focus as *mut c_void),
         method("nativeAppearance", "(JZ)V", appearance as *mut c_void),
@@ -571,6 +572,22 @@ extern "system" fn input_index(
             .input_index(epoch as u64, x, y)
             .and_then(|index| i32::try_from(index).ok())
             .unwrap_or(-1))
+    })
+}
+
+extern "system" fn scroll_input(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    epoch: jlong,
+    dx: jfloat,
+    dy: jfloat,
+) -> jboolean {
+    call(&mut env, |_| {
+        Ok(session(id)?
+            .platform
+            .window
+            .scroll_input(epoch as u64, dx, dy) as u8)
     })
 }
 

@@ -206,8 +206,13 @@ indices come from GPUI's input handler; text and selection remain GPUI-rendered.
 Dragging a handle shows Android's magnifier on API 28 and later and temporarily
 hides the toolbar. Password fields expose cursor movement without magnifying text.
 Handles are dismissed on focus loss, surface detachment, or a new gesture in the
-content. Selection dragging is limited to the visible editor; edge autoscroll
-and semantic actions such as text classification are not provided.
+content. Holding a handle at an editor edge scrolls its text while extending the
+selection. Single-line fields scroll horizontally; multiline fields scroll
+vertically. Scrolling stops on release or cancellation and does not propagate
+to parent containers. Input components provide their visible viewport through
+`EntityInputHandler::element_bounds` and opt into scrolling through
+`EntityInputHandler::scroll_text_input`. UIC's `TextInput` implements both.
+Semantic actions such as text classification are not provided.
 
 Input methods can request immediate or monitored `CursorAnchorInfo` updates.
 GPUI supplies the selection, available composing text, insertion-marker bounds,

@@ -1765,6 +1765,17 @@ impl PlatformInputHandler {
             .map(|bounds| self.display_bounds(bounds))
     }
 
+    /// Scrolls the focused editor's content by a delta in displayed logical pixels.
+    pub fn scroll_text_input(&mut self, delta: Point<Pixels>) -> bool {
+        let origin = self
+            .element_bounds()
+            .map_or_default(|bounds| bounds.center());
+        let delta = self.pointer_mapping.map(origin + delta) - self.pointer_mapping.map(origin);
+        self.cx
+            .update(|window, cx| self.handler.scroll_text_input(delta, window, cx))
+            .unwrap_or(false)
+    }
+
     /// See [`InputHandler::text_length_utf16`].
     pub fn text_length_utf16(&mut self) -> Option<usize> {
         self.cx
@@ -2038,6 +2049,20 @@ pub trait InputHandler: 'static {
     /// element).
     fn element_bounds(&mut self, _window: &mut Window, _cx: &mut App) -> Option<Bounds<Pixels>> {
         None
+    }
+
+    /// Scrolls only this editor's content, without changing the selection or scrolling ancestors.
+    /// The delta is content motion in source logical pixels: positive values move content right/down.
+    /// Returns whether the viewport moved. Layout and hit testing must reflect the new offset
+    /// after the next frame. Editors without scrolling support return false.
+    /// An explicit scroll, including a zero delta, cancels pending automatic selection reveal.
+    fn scroll_text_input(
+        &mut self,
+        _delta: Point<Pixels>,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> bool {
+        false
     }
 
     /// Get the length of the document in UTF-16 characters, if known.

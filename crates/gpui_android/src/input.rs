@@ -146,6 +146,22 @@ impl AndroidWindow {
         .flatten()
     }
 
+    pub(crate) fn scroll_input(&self, epoch: u64, dx: f32, dy: f32) -> bool {
+        if !dx.is_finite() || !dy.is_finite() {
+            return false;
+        }
+        let changed = self
+            .with_input(|handler, current| {
+                epoch == current
+                    && handler.scroll_text_input(gpui::point(gpui::px(dx), gpui::px(dy)))
+            })
+            .unwrap_or(false);
+        if changed {
+            self.input_dirty.set(true);
+        }
+        changed
+    }
+
     pub(crate) fn perform_input_action(&self, epoch: u64, code: i32) -> bool {
         let handled = self
             .with_input(|handler, current| {

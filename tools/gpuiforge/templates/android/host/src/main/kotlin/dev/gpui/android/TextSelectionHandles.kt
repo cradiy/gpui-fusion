@@ -23,12 +23,18 @@ internal class TextSelectionHandles(
     private var magnifier: Magnifier? = null
     private var moving: Handle? = null
 
+    fun beforeFrame(time: Long) { moving?.scrollFrame(time) }
+
     fun update(input: TextInputState) {
         if (!view.isAttachedToWindow || !view.hasWindowFocus()) { close(); return }
         if (input.anchor != input.head) anchor.show(input, input.anchorBounds)
         else anchor.hide()
         head.show(input, input.headBounds)
-        moving?.let { dragging(true); it.refreshMagnifier(input) }
+        moving?.let {
+            it.afterFrame(input)
+            dragging(true)
+            it.refreshMagnifier(current() ?: input)
+        }
     }
 
     fun close() {
@@ -63,6 +69,10 @@ internal class TextSelectionHandles(
         private var bounds: FloatArray? = null
         private var active = false
         private var insertion = false
+        private var pointerX = 0f
+        private var pointerY = 0f
+        private var lastFrame = 0L
+        private var selectionPending = false
 
         init { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
 
@@ -102,7 +112,7 @@ internal class TextSelectionHandles(
             else popup.showAtLocation(view, Gravity.TOP or Gravity.LEFT, px, py)
         }
 
-        fun hide() { active = false; popup.dismiss() }
+        fun hide() { active = false; selectionPending = false; lastFrame = 0; popup.dismiss() }
 
         override fun onDraw(canvas: Canvas) {
             val width = drawable.intrinsicWidth.coerceIn(1, extent)
@@ -126,26 +136,24 @@ internal class TextSelectionHandles(
                     startY = event.rawY
                     sourceX = caret[0] * density
                     sourceY = (caret[1] + caret[3]) * density / 2
+                    pointerX = sourceX
+                    pointerY = sourceY
+                    lastFrame = 0
                     dragging(true)
                     showMagnifier(input, sourceX, sourceY)
                 }
                 MotionEvent.ACTION_MOVE -> {
                     if (!active || input.epoch != epoch || event.pointerCount != 1) return true
-                    val editor = input.editorBounds ?: return true
-                    val left = editor[0] * density
-                    val top = editor[1] * density
-                    val x = (sourceX + event.rawX - startX).coerceIn(left, maxOf(left, editor[2] * density - 1f))
-                    val y = (sourceY + event.rawY - startY).coerceIn(top, maxOf(top, editor[3] * density - 1f))
-                    val index = view.inputIndex(epoch, x, y)
-                    if (index >= 0 && (insertion || index != fixed)) {
-                        if (view.selectText(epoch, if (insertion || isAnchor) index else fixed,
-                                if (insertion || !isAnchor) index else fixed)) changed()
-                    }
+                    pointerX = sourceX + event.rawX - startX
+                    pointerY = sourceY + event.rawY - startY
+                    selectAtPointer(input)
                     dragging(true)
                     refreshMagnifier(input)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN -> {
                     active = false
+                    selectionPending = false
+                    lastFrame = 0
                     moving = null
                     dismissMagnifier()
                     dragging(false)
@@ -153,6 +161,50 @@ internal class TextSelectionHandles(
                 }
             }
             return true
+        }
+
+        private fun selectAtPointer(input: TextInputState) {
+            val editor = input.editorBounds ?: return
+            val left = editor[0] * density
+            val top = editor[1] * density
+            val x = pointerX.coerceIn(left, maxOf(left, editor[2] * density - 1f))
+            val y = pointerY.coerceIn(top, maxOf(top, minOf(view.viewportHeight().toFloat(), editor[3] * density) - 1f))
+            val index = view.inputIndex(epoch, x, y)
+            if (index >= 0 && (insertion || index != fixed)) {
+                val anchor = if (insertion || isAnchor) index else fixed
+                val head = if (insertion || !isAnchor) index else fixed
+                if ((anchor != input.anchor || head != input.head) && view.selectText(epoch, anchor, head)) changed()
+            }
+        }
+
+        fun scrollFrame(time: Long) {
+            val input = current() ?: return
+            if (!active || input.epoch != epoch) return
+            val previous = lastFrame
+            lastFrame = time
+            if (previous == 0L) return
+            val editor = input.editorBounds ?: return
+            val elapsed = ((time - previous) / 1_000_000_000f).coerceIn(0f, .05f)
+            fun speed(position: Float, start: Float, end: Float): Float {
+                val edge = minOf(24f * density, (end - start) / 4).coerceAtLeast(0f)
+                if (edge <= 0f) return 0f
+                val amount = when {
+                    position < start + edge -> (start + edge - position) / edge
+                    position > end - edge -> (end - edge - position) / edge
+                    else -> 0f
+                }
+                return amount.coerceIn(-1f, 1f) * 480f * density * elapsed
+            }
+            val dx = if (input.multiline) 0f else speed(pointerX, editor[0] * density, editor[2] * density)
+            val dy = if (!input.multiline) 0f else speed(pointerY, editor[1] * density,
+                minOf(editor[3] * density, view.viewportHeight().toFloat()))
+            if ((dx != 0f || dy != 0f) && view.scrollInput(epoch, dx, dy)) selectionPending = true
+        }
+
+        fun afterFrame(input: TextInputState) {
+            if (!selectionPending) return
+            selectionPending = false
+            if (active && input.epoch == epoch) selectAtPointer(input)
         }
 
         fun refreshMagnifier(input: TextInputState) {

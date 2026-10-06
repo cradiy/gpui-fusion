@@ -166,6 +166,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         if (surfaceReady && session.active() && hasWindowFocus() && isShown) {
             try {
                 scroll.frame()
+                textMenu.beforeFrame(frameTimeNanos)
                 val changed = session.frame()
                 val request = keyboardRequest
                 if (request == KeyboardRequest.HIDE) {
@@ -282,10 +283,16 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         return session.inputIndex(epoch, x / density, y / density)
     }
 
+    internal fun scrollInput(epoch: Long, dx: Float, dy: Float): Boolean {
+        val density = resources.displayMetrics.density
+        return session.scrollInput(epoch, dx / density, dy / density)
+    }
+
     internal fun selectText(epoch: Long, anchor: Int, head: Int): Boolean {
         val input = session.inputState()?.takeIf { it.epoch == epoch } ?: return false
         if (input.composingStart >= 0 && !session.edit(epoch, 2, "", 0, 0)) return false
         if (!session.edit(epoch, 3, "", anchor, head)) return false
+        session.scrollInput(epoch, 0f, 0f)
         syncInput(false)
         return true
     }

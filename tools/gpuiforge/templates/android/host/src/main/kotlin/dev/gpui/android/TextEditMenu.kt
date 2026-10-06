@@ -36,6 +36,8 @@ internal class TextEditMenu(
         handles.update(input)
     }
 
+    fun beforeFrame(time: Long) { handles.beforeFrame(time) }
+
     fun touch(event: MotionEvent, eligible: Boolean) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -110,7 +112,7 @@ internal class TextEditMenu(
         state = next
         handles.update(next)
         if (next.anchor != previous.anchor || next.head != previous.head) mode?.invalidate()
-        if (!next.caretBounds.contentEquals(previous.caretBounds) ||
+        if (!next.headBounds.contentEquals(previous.headBounds) ||
             !next.editorBounds.contentEquals(previous.editorBounds)) mode?.invalidateContentRect()
     }
 

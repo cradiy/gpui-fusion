@@ -202,6 +202,26 @@ pub trait EntityInputHandler: 'static + Sized {
     ) {
     }
 
+    /// Returns the visible editor viewport in window-relative source coordinates.
+    fn element_bounds(
+        &mut self,
+        element_bounds: Bounds<Pixels>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
+        Some(element_bounds)
+    }
+
+    /// See [`InputHandler::scroll_text_input`] for details.
+    fn scroll_text_input(
+        &mut self,
+        _delta: crate::Point<Pixels>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> bool {
+        false
+    }
+
     /// See [`InputHandler::text_length_utf16`] for details
     fn text_length_utf16(
         &mut self,
@@ -395,8 +415,20 @@ impl<V: EntityInputHandler> InputHandler for ElementInputHandler<V> {
         })
     }
 
-    fn element_bounds(&mut self, _window: &mut Window, _cx: &mut App) -> Option<Bounds<Pixels>> {
-        Some(self.element_bounds)
+    fn element_bounds(&mut self, window: &mut Window, cx: &mut App) -> Option<Bounds<Pixels>> {
+        self.view.update(cx, |view, cx| {
+            view.element_bounds(self.element_bounds, window, cx)
+        })
+    }
+
+    fn scroll_text_input(
+        &mut self,
+        delta: crate::Point<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> bool {
+        self.view
+            .update(cx, |view, cx| view.scroll_text_input(delta, window, cx))
     }
 
     fn text_length_utf16(&mut self, window: &mut Window, cx: &mut App) -> Option<usize> {

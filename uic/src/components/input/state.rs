@@ -1210,6 +1210,53 @@ impl EntityInputHandler for TextInput {
         cx.notify();
     }
 
+    fn element_bounds(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
+        Some(if self.mode == InputMode::Multiline {
+            self.scroll_handle.bounds()
+        } else {
+            self.last_viewport_bounds.unwrap_or(bounds)
+        })
+    }
+
+    fn scroll_text_input(
+        &mut self,
+        delta: Point<Pixels>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.disabled || !f32::from(delta.x).is_finite() || !f32::from(delta.y).is_finite() {
+            return false;
+        }
+        self.scroll_cursor_pending = false;
+        if self.mode == InputMode::Multiline {
+            let mut offset = self.scroll_handle.offset();
+            let next = (offset.y + delta.y).clamp(-self.scroll_handle.max_offset().y, px(0.));
+            if next == offset.y {
+                return false;
+            }
+            offset.y = next;
+            self.scroll_handle.set_offset(offset);
+        } else {
+            let (Some(bounds), Some(viewport)) = (self.last_bounds, self.last_viewport_bounds)
+            else {
+                return false;
+            };
+            let max_scroll = (bounds.size.width - viewport.size.width).max(px(0.));
+            let next = (self.single_line_scroll_offset + delta.x).clamp(-max_scroll, px(0.));
+            if next == self.single_line_scroll_offset {
+                return false;
+            }
+            self.single_line_scroll_offset = next;
+        }
+        cx.notify();
+        true
+    }
+
     fn surrounding_text(
         &mut self,
         max_bytes: usize,

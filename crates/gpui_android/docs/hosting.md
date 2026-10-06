@@ -138,6 +138,25 @@ Configuration changes and Surface recreation preserve in-process state.
 Process death starts a new application; persistent document restoration is the
 application's responsibility. A lost GPU device requires recreating the session.
 
+## Clipboard and links
+
+The standard GPUI clipboard APIs read and write plain text through the Android
+system clipboard. The asynchronous variants report host errors. Synchronous
+variants log errors and return no item on a failed read. Access requires an
+attached View and follows Android's clipboard access restrictions; a read can
+return no item when the application lacks focus.
+
+Text entries are concatenated when writing. Reading multiple Android text items
+joins them with newlines. Empty strings are supported. Text metadata and spans
+are not preserved. Image and file writes, mixed text/non-text writes, and items
+without entries are rejected without replacing the clipboard. URI and Intent
+items are not resolved to text.
+
+`App::open_url` sends an Android `ACTION_VIEW` intent using the attached View's
+context. The URL must include a scheme, and an installed application must handle
+it. Failures are logged without closing the GPUI session. Inbound deep links
+and URL scheme registration are not implemented by the backend.
+
 ## Device verification
 
 Open GPUI Android and tap the counter. Swipe through the list, release a fast
@@ -146,6 +165,11 @@ row must not count as a tap. Verify that count and scroll position survive
 rotation, locking/unlocking the device, and switching to another app and back.
 Adding a second finger must not count as a tap or continue synthesized scrolling.
 Repeatedly open and finish the Activity to check teardown.
+
+Use Copy count and Paste text to check clipboard round trips, then copy text
+between GPUI and another application. Include multiline text and non-ASCII
+characters. Open website should launch a browser or Android's app chooser;
+returning to GPUI must preserve the counter and scroll position.
 
 These checks require an Android device or a compatible emulator.
 Cross-compilation and APK assembly do not establish driver or lifecycle

@@ -86,6 +86,22 @@ impl AndroidPlatform {
         }
         self.dispatcher.close();
     }
+
+    fn read_clipboard(&self) -> Result<Option<ClipboardItem>> {
+        Ok(self.host.read_clipboard()?.map(ClipboardItem::new_string))
+    }
+
+    fn write_clipboard(&self, item: ClipboardItem) -> Result<()> {
+        anyhow::ensure!(!item.entries().is_empty(), "clipboard item is empty");
+        let mut text = String::new();
+        for entry in item.entries() {
+            let ClipboardEntry::String(entry) = entry else {
+                bail!("Android clipboard supports text only");
+            };
+            text.push_str(entry.text());
+        }
+        self.host.write_clipboard(&text)
+    }
 }
 
 fn unsupported<T>() -> oneshot::Receiver<Result<T>> {
@@ -150,7 +166,11 @@ impl Platform for AndroidPlatform {
     fn window_appearance(&self) -> WindowAppearance {
         WindowAppearance::Dark
     }
-    fn open_url(&self, _: &str) {}
+    fn open_url(&self, url: &str) {
+        if let Err(error) = self.host.open_url(url) {
+            log::error!("Failed to open Android URL: {error:#}");
+        }
+    }
     fn on_open_urls(&self, _: Box<dyn FnMut(Vec<String>)>) {}
     fn register_url_scheme(&self, _: &str) -> Task<Result<()>> {
         Task::ready(Err(anyhow::anyhow!(
@@ -210,14 +230,24 @@ impl Platform for AndroidPlatform {
         true
     }
     fn read_from_clipboard(&self) -> Option<ClipboardItem> {
-        None
+        match self.read_clipboard() {
+            Ok(item) => item,
+            Err(error) => {
+                log::error!("Failed to read Android clipboard: {error:#}");
+                None
+            }
+        }
     }
-    fn write_to_clipboard(&self, _: ClipboardItem) {}
+    fn write_to_clipboard(&self, item: ClipboardItem) {
+        if let Err(error) = self.write_clipboard(item) {
+            log::error!("Failed to write Android clipboard: {error:#}");
+        }
+    }
     fn read_from_clipboard_async(&self) -> Task<Result<Option<ClipboardItem>>> {
-        Task::ready(Err(anyhow::anyhow!("Android clipboard is not implemented")))
+        Task::ready(self.read_clipboard())
     }
-    fn write_to_clipboard_async(&self, _: ClipboardItem) -> Task<Result<()>> {
-        Task::ready(Err(anyhow::anyhow!("Android clipboard is not implemented")))
+    fn write_to_clipboard_async(&self, item: ClipboardItem) -> Task<Result<()>> {
+        Task::ready(self.write_clipboard(item))
     }
     fn write_credentials(&self, _: &str, _: &str, _: &[u8]) -> Task<Result<()>> {
         Task::ready(Err(anyhow::anyhow!(

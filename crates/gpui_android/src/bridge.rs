@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use gpui::{AppLifecyclePhase, ApplicationHandle, TouchPhase};
 use jni::{
     JNIEnv, JavaVM, NativeMethod,
-    objects::{GlobalRef, JClass, JObject, JValue},
+    objects::{GlobalRef, JClass, JObject, JString, JValue},
     sys::{jboolean, jfloat, jint, jlong},
 };
 use std::{
@@ -85,6 +85,65 @@ pub(crate) struct Host {
     object: GlobalRef,
 }
 impl Host {
+    fn with_env<T>(&self, call: impl FnOnce(&mut JNIEnv) -> Result<T>) -> Result<T> {
+        let mut env = self.vm.attach_current_thread()?;
+        env.with_local_frame(16, |env| {
+            let result = call(env);
+            if env.exception_check()? {
+                env.exception_describe()?;
+                env.exception_clear()?;
+                anyhow::bail!(
+                    "Android system service rejected the request; see logcat for details"
+                );
+            }
+            result
+        })
+    }
+
+    pub fn read_clipboard(&self) -> Result<Option<String>> {
+        self.with_env(|env| {
+            let value = env
+                .call_method(
+                    self.object.as_obj(),
+                    "readClipboard",
+                    "()Ljava/lang/String;",
+                    &[],
+                )?
+                .l()?;
+            if value.is_null() {
+                return Ok(None);
+            }
+            let text: String = env.get_string(&JString::from(value))?.into();
+            Ok(Some(text))
+        })
+    }
+
+    pub fn write_clipboard(&self, text: &str) -> Result<()> {
+        self.with_env(|env| {
+            let text = env.new_string(text)?;
+            env.call_method(
+                self.object.as_obj(),
+                "writeClipboard",
+                "(Ljava/lang/String;)V",
+                &[JValue::Object(text.as_ref())],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn open_url(&self, url: &str) -> Result<()> {
+        self.with_env(|env| {
+            let url = env.new_string(url)?;
+            env.call_method(
+                self.object.as_obj(),
+                "openUrl",
+                "(Ljava/lang/String;)V",
+                &[JValue::Object(url.as_ref())],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn schedule(&self, token: u64, delay: Duration) {
         let result = (|| -> jni::errors::Result<()> {
             let mut env = self.vm.attach_current_thread()?;

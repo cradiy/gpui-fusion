@@ -1,5 +1,12 @@
 package dev.gpui.android;
 
+import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.ContextWrapper;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -108,6 +115,51 @@ public final class GpuiSession implements AutoCloseable {
         handler.postAtTime(() -> {
             if (!closed && closeRequested != null) closeRequested.run();
         }, this, SystemClock.uptimeMillis());
+    }
+
+    private Context requireContext() {
+        checkThread();
+        GpuiView current = view.get();
+        if (closed || current == null) {
+            throw new IllegalStateException("Android system services require an attached GpuiView");
+        }
+        return current.getContext();
+    }
+
+    private String readClipboard() {
+        ClipboardManager clipboard = requireContext().getSystemService(ClipboardManager.class);
+        ClipData clip = clipboard.getPrimaryClip();
+        if (clip == null) return null;
+        StringBuilder text = new StringBuilder();
+        boolean found = false;
+        for (int index = 0; index < clip.getItemCount(); index++) {
+            CharSequence item = clip.getItemAt(index).getText();
+            if (item == null) continue;
+            if (found) text.append('\n');
+            text.append(item);
+            found = true;
+        }
+        return found ? text.toString() : null;
+    }
+
+    private void writeClipboard(String text) {
+        ClipboardManager clipboard = requireContext().getSystemService(ClipboardManager.class);
+        clipboard.setPrimaryClip(ClipData.newPlainText("", text));
+    }
+
+    private void openUrl(String url) {
+        Context context = requireContext();
+        Uri uri = Uri.parse(url);
+        if (uri.getScheme() == null) throw new IllegalArgumentException("URL must have a scheme");
+        Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+        Context owner = context;
+        while (!(owner instanceof Activity) && owner instanceof ContextWrapper) {
+            Context base = ((ContextWrapper) owner).getBaseContext();
+            if (base == owner) break;
+            owner = base;
+        }
+        if (!(owner instanceof Activity)) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        context.startActivity(intent);
     }
 
     /** Releases the Rust application. Do not close during a retained Activity recreation. */

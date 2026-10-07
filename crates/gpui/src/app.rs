@@ -1550,6 +1550,20 @@ impl App {
         self.platform.open_file_with_system(file)
     }
 
+    /// Shows the system share interface. Currently supported on Android.
+    /// Requires nonempty text or at least one file. Success reports dispatch only;
+    /// it does not indicate target selection, delivery, or cancellation.
+    pub fn share(&self, options: crate::ShareOptions) -> Task<Result<()>> {
+        if options.files.is_empty() && options.text.as_ref().is_none_or(String::is_empty) {
+            return Task::ready(Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "sharing requires text or files",
+            )
+            .into()));
+        }
+        self.platform.share(options)
+    }
+
     /// Returns whether the user has configured scrollbars to auto-hide at the platform level.
     pub fn should_auto_hide_scrollbars(&self) -> bool {
         self.platform.should_auto_hide_scrollbars()

@@ -341,6 +341,44 @@ impl Host {
         })
     }
 
+    pub fn share(
+        &self,
+        text: Option<&str>,
+        title: Option<&str>,
+        files: &[GlobalRef],
+    ) -> Result<()> {
+        self.with_env(|env| {
+            let text = match text {
+                Some(text) => env.new_string(text)?.into(),
+                None => JObject::null(),
+            };
+            let title = match title {
+                Some(title) => env.new_string(title)?.into(),
+                None => JObject::null(),
+            };
+            let intents = env.new_object_array(
+                i32::try_from(files.len())?,
+                "android/content/Intent",
+                JObject::null(),
+            )?;
+            for (index, file) in files.iter().enumerate() {
+                env.set_object_array_element(&intents, index as i32, file.as_obj())?;
+            }
+            let error = env
+                .call_method(
+                    self.object.as_obj(),
+                    "share",
+                    "(Ljava/lang/String;Ljava/lang/String;[Landroid/content/Intent;)Ljava/lang/String;",
+                    &[JValue::Object(&text), JValue::Object(&title), JValue::Object(intents.as_ref())],
+                )?
+                .l()?;
+            if !error.is_null() {
+                anyhow::bail!(String::from(env.get_string(&JString::from(error))?));
+            }
+            Ok(())
+        })
+    }
+
     pub fn schedule(&self, token: u64, delay: Duration) {
         let result = (|| -> jni::errors::Result<()> {
             let mut env = self.vm.attach_current_thread()?;

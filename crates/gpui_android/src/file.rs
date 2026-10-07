@@ -1,3 +1,4 @@
+use crate::bridge::Host;
 use anyhow::{Result, anyhow, ensure};
 use futures::future::LocalBoxFuture;
 use gpui::gpui_io::{
@@ -50,7 +51,13 @@ impl Document {
     }
 }
 
-pub(crate) fn view_intent(file: &FileHandle) -> LocalBoxFuture<'static, Result<GlobalRef>> {
+pub(crate) fn view_intent(
+    host: &Host,
+    file: &FileHandle,
+) -> LocalBoxFuture<'static, Result<GlobalRef>> {
+    if let Some(path) = file.path() {
+        return crate::file_system::view_path_intent(host, path);
+    }
     let Some(file) = file.downcast_ref::<AndroidFile>() else {
         return Box::pin(async {
             Err(io::Error::new(

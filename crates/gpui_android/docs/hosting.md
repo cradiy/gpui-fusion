@@ -428,6 +428,35 @@ AndroidX Core dependency, and `gpui_file_paths.xml`. An application can override
 that XML resource with narrower directories. URI grants do not provide persistent
 bookmarks or report when a viewer has finished reading.
 
+### System sharing
+
+`App::share(ShareOptions)` opens the Android Sharesheet for plain text, URLs,
+files, or files accompanied by text. Other platform backends currently return
+`Unsupported`. Empty requests return `InvalidInput`.
+
+```rust
+let request = cx.share(ShareOptions {
+    text: Some("A note to accompany the document".into()),
+    files: vec![file.clone()],
+    ..Default::default()
+});
+// In a foreground task:
+request.await?;
+```
+
+File preparation follows the same provider, directory, and write-completion
+requirements as `open_file_with_system`. Files are not copied or loaded into
+memory. Single-file requests use `ACTION_SEND`; multiple files use
+`ACTION_SEND_MULTIPLE`. The MIME type is the files' common type, their shared
+top-level type such as `image/*`, or `*/*` for unrelated types. Text-only requests
+use `text/plain`. Receivers decide whether to use accompanying text.
+
+All file URIs are included in the intent's clip data with temporary read-only
+grants. Keep the source files available for the receiving application. Any file
+preparation failure prevents the entire share request. Success only reports that
+the Sharesheet was requested; choosing a target, cancelling the sheet, and
+delivery completion are not reported. The optional title is a system UI hint.
+
 ### Persistent file access
 
 Call `file.persist().await?` while a picked document's access is valid, then save

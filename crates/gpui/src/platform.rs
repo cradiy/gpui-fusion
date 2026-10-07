@@ -4,6 +4,7 @@ mod atlas_memory;
 pub use atlas_memory::AtlasImageLifetimes;
 mod keyboard;
 mod keystroke;
+mod share;
 mod tray;
 
 #[cfg(all(target_os = "linux", feature = "wayland"))]
@@ -83,6 +84,7 @@ use uuid::Uuid;
 pub use app_menu::*;
 pub use keyboard::*;
 pub use keystroke::*;
+pub use share::*;
 pub use tray::*;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -287,6 +289,13 @@ pub trait Platform: 'static {
     fn can_select_mixed_files_and_dirs(&self) -> bool;
     fn reveal_path(&self, path: &Path);
     fn open_with_system(&self, path: &Path);
+    fn share(&self, _options: ShareOptions) -> Task<Result<()>> {
+        Task::ready(Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "system sharing is unavailable on this platform",
+        )
+        .into()))
+    }
     fn open_file_with_system(&self, file: &crate::SelectedFile) -> Task<Result<()>> {
         if let Some(path) = file.path() {
             self.open_with_system(path);

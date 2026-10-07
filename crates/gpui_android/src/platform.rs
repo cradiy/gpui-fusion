@@ -271,17 +271,30 @@ impl Platform for AndroidPlatform {
     fn reveal_path(&self, _: &Path) {}
     fn open_with_system(&self, _: &Path) {}
     fn open_file_with_system(&self, file: &SelectedFile) -> Task<Result<()>> {
-        let intent = if let Some(path) = file.path() {
-            crate::file_system::view_path_intent(&self.host, path)
-        } else {
-            crate::file::view_intent(file)
-        };
+        let intent = crate::file::view_intent(&self.host, file);
         let file = file.clone();
         let host = self.host.clone();
         self.foreground.spawn(async move {
             let intent = intent.await?;
             let result = host.open_file_intent(&intent);
             drop(file);
+            result
+        })
+    }
+    fn share(&self, options: ShareOptions) -> Task<Result<()>> {
+        let requests: Vec<_> = options
+            .files
+            .iter()
+            .map(|file| crate::file::view_intent(&self.host, file))
+            .collect();
+        let host = self.host.clone();
+        self.foreground.spawn(async move {
+            let mut intents = Vec::with_capacity(requests.len());
+            for request in requests {
+                intents.push(request.await?);
+            }
+            let result = host.share(options.text.as_deref(), options.title.as_deref(), &intents);
+            drop(options);
             result
         })
     }

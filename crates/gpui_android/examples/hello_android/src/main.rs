@@ -185,6 +185,12 @@ enum BookmarkAction {
     Release,
 }
 
+enum ShareAction {
+    Text,
+    Document,
+    ChooseFiles,
+}
+
 fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
     div()
         .id(id)
@@ -196,6 +202,59 @@ fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
 }
 
 impl Counter {
+    fn share_content(&mut self, action: ShareAction, cx: &mut Context<Self>) {
+        if self.file_pending {
+            return;
+        }
+        let mut options = ShareOptions::default();
+        let selection = match action {
+            ShareAction::Text => {
+                options.text = Some(self.file_text.read(cx).value().to_string());
+                None
+            }
+            ShareAction::Document => {
+                let Some(file) = self.document.clone() else {
+                    self.file_status = "Open or save a document first.".into();
+                    cx.notify();
+                    return;
+                };
+                options.files.push(file);
+                None
+            }
+            ShareAction::ChooseFiles => Some(cx.prompt_for_files(FilePromptOptions {
+                multiple: true,
+                ..Default::default()
+            })),
+        };
+        self.file_pending = true;
+        self.file_status = "Preparing share...".into();
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result: anyhow::Result<Option<()>> = async {
+                if let Some(selection) = selection {
+                    let Some(files) = selection.await?? else {
+                        return Ok(None);
+                    };
+                    options.files = files;
+                }
+                let request = cx.update(|cx| cx.share(options));
+                request.await?;
+                Ok(Some(()))
+            }
+            .await;
+            let _ = this.update(cx, |this, cx| {
+                this.file_pending = false;
+                this.file_status = match result {
+                    Ok(Some(())) => "Share sheet requested.".into(),
+                    Ok(None) => "Selection cancelled.".into(),
+                    Err(error) => format!("Share: {error}"),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn open_document_with_system(&mut self, cx: &mut Context<Self>) {
         if self.file_pending {
             return;
@@ -866,6 +925,15 @@ impl Render for Counter {
                             .child(button("open-with-system", "Open with system").on_click(
                                 cx.listener(|this, _, _, cx| this.open_document_with_system(cx)),
                             ))
+                            .child(button("share-text", "Share text").on_click(cx.listener(
+                                |this, _, _, cx| this.share_content(ShareAction::Text, cx),
+                            )))
+                            .child(button("share-file", "Share file").on_click(cx.listener(
+                                |this, _, _, cx| this.share_content(ShareAction::Document, cx),
+                            )))
+                            .child(button("share-files", "Share files").on_click(cx.listener(
+                                |this, _, _, cx| this.share_content(ShareAction::ChooseFiles, cx),
+                            )))
                             .child(
                                 button("save-app-data", "Save app data").on_click(cx.listener(
                                     |this, _, _, cx| {

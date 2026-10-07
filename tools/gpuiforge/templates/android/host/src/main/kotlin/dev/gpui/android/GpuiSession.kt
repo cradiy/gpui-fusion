@@ -348,6 +348,13 @@ class GpuiSession : AutoCloseable {
         error.toString()
     }
 
+    private fun share(text: String?, title: String?, files: Array<Intent>): String? = try {
+        startIntent(ShareIntent.create(text, title, files))
+        null
+    } catch (error: Exception) {
+        error.toString()
+    }
+
     /** Releases the Rust application. Do not close during a retained Activity recreation. */
     override fun close() {
         checkThread()

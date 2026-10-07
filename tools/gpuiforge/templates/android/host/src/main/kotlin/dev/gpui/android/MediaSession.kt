@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.HandlerThread
 import androidx.media3.common.C
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -75,6 +76,10 @@ internal class MediaSession(
                     .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(application, http)))
                     .build()
                 player = current
+                if (extractionPosition < 0) {
+                    current.setAudioAttributes(AudioAttributes.DEFAULT, true)
+                    current.setHandleAudioBecomingNoisy(true)
+                }
                 if (extractionPosition >= 0) {
                     current.trackSelectionParameters = current.trackSelectionParameters.buildUpon()
                         .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
@@ -153,6 +158,7 @@ internal class MediaSession(
                         current.playWhenReady = value != 0.0
                         current.prepare()
                     }
+                    7 -> current.setAudioAttributes(AudioAttributes.DEFAULT, value != 0.0)
                 }
                 handler.removeCallbacks(tick)
                 tick.run()
@@ -166,7 +172,8 @@ internal class MediaSession(
             current.duration.takeUnless { it == C.TIME_UNSET } ?: -1L,
             current.isCurrentMediaItemSeekable, current.playbackState,
             frames?.width ?: 0, frames?.height ?: 0,
-            current.currentTracks.isTypeSelected(C.TRACK_TYPE_AUDIO))
+            current.currentTracks.isTypeSelected(C.TRACK_TYPE_AUDIO),
+            current.playWhenReady, current.playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE)
     }
 
     private fun guarded(block: () -> Unit) {
@@ -203,7 +210,8 @@ internal class MediaSession(
     }
 
     private external fun nativeState(id: Long, generation: Long, position: Long, duration: Long,
-        seekable: Boolean, state: Int, width: Int, height: Int, audio: Boolean)
+        seekable: Boolean, state: Int, width: Int, height: Int, audio: Boolean,
+        playWhenReady: Boolean, suppressed: Boolean)
     private external fun nativeFrame(id: Long, generation: Long, pixels: ByteBuffer, width: Int, height: Int, timestamp: Long)
     private external fun nativeError(id: Long, generation: Long, code: Int, message: String)
 }

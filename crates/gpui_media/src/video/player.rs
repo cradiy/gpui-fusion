@@ -235,6 +235,9 @@ impl VideoPlayer {
                             cx.notify();
                         }
                         let is_buffering = player.is_buffering();
+                        if player.playback.manages_playback_state() {
+                            return;
+                        }
                         if is_buffering && !was_buffering && player.play_when_ready {
                             if let Err(error) = player.playback.pause() {
                                 player.set_state(PlaybackState::Error(Arc::new(error)), cx);
@@ -253,6 +256,16 @@ impl VideoPlayer {
                                 player.set_state(state, cx);
                             }
                         }
+                    }
+                    MediaBackendEvent::PlaybackStateChanged(state) => {
+                        player.play_when_ready =
+                            matches!(state, PlaybackState::Playing | PlaybackState::Loading);
+                        if player.state_after_seek.is_some() && player.is_buffering() {
+                            return;
+                        }
+                        player.state_after_seek = None;
+                        player.set_state(state, cx);
+                        player.refresh_timeline(cx);
                     }
                     MediaBackendEvent::MediaInfoChanged(info) => {
                         player.media_info = Some(info.clone());
@@ -440,7 +453,7 @@ impl VideoPlayer {
             self.set_state(PlaybackState::Seeking, cx);
             cx.emit(VideoPlayerEvent::TimelineChanged(self.timeline));
             return Ok(());
-        } else if self.is_buffering() {
+        } else if self.is_buffering() && !self.playback.manages_playback_state() {
             self.playback.pause()?;
         } else {
             self.playback.play()?;
@@ -637,6 +650,12 @@ impl VideoPlayer {
         self.emit_volume(cx);
     }
 
+    /// Enables or disables the backend's system audio-focus management.
+    /// Create with autoplay disabled to configure this before first playback.
+    pub fn set_audio_focus_enabled(&mut self, enabled: bool) -> MediaResult<()> {
+        self.playback.set_audio_focus_enabled(enabled)
+    }
+
     pub fn toggle_muted(&mut self, cx: &mut Context<Self>) {
         self.set_muted(!self.muted, cx);
     }
@@ -702,6 +721,9 @@ impl VideoPlayer {
     }
 
     fn finish_pending_transition(&mut self, cx: &mut Context<Self>) {
+        if self.playback.manages_playback_state() {
+            return;
+        }
         let next_state = self.state_after_seek.take().or_else(|| {
             (self.state == PlaybackState::Loading).then_some(if self.play_when_ready {
                 PlaybackState::Playing
@@ -786,6 +808,138 @@ mod tests {
         PlaybackState, PlaybackTimeline, accept_backend_timeline, multiply_duration,
         normalize_volume, timeline_without_regression,
     };
+
+    #[gpui::test]
+    fn native_playback_state_survives_buffering_and_paused_seek(cx: &mut gpui::TestAppContext) {
+        use super::*;
+        use std::sync::Mutex;
+
+        #[derive(Clone, Default)]
+        struct Backend {
+            output: Arc<Mutex<Option<MediaOutputSink>>>,
+            commands: Arc<Mutex<Vec<&'static str>>>,
+        }
+        impl MediaBackend for Backend {
+            fn name(&self) -> &'static str {
+                "native-state-test"
+            }
+            fn open_playback(
+                &self,
+                _: MediaPlaybackRequest,
+                output: MediaOutputSink,
+            ) -> MediaResult<Box<dyn MediaPlaybackSession>> {
+                *self.output.lock().unwrap() = Some(output);
+                Ok(Box::new(self.clone()))
+            }
+        }
+        impl MediaPlaybackSession for Backend {
+            fn capabilities(&self) -> MediaCapabilities {
+                MediaCapabilities::default()
+            }
+            fn manages_playback_state(&self) -> bool {
+                true
+            }
+            fn play(&mut self) -> MediaResult<()> {
+                self.commands.lock().unwrap().push("play");
+                Ok(())
+            }
+            fn pause(&mut self) -> MediaResult<()> {
+                self.commands.lock().unwrap().push("pause");
+                Ok(())
+            }
+            fn timeline(&self) -> PlaybackTimeline {
+                PlaybackTimeline::default()
+            }
+            fn seek_to(&mut self, _: Duration, _: SeekMode) -> MediaResult<()> {
+                self.commands.lock().unwrap().push("seek");
+                Ok(())
+            }
+        }
+
+        let backend = Backend::default();
+        let player = cx.new(|cx| {
+            VideoPlayer::builder(
+                MediaSource::from_uri("https://example.com/test.mp4").unwrap(),
+                backend.clone(),
+            )
+            .build(cx)
+            .unwrap()
+        });
+        let output = backend.output.lock().unwrap().clone().unwrap();
+        let send = |events: Vec<MediaBackendEvent>, cx: &mut gpui::TestAppContext| {
+            for event in events {
+                assert!(output.emit(event));
+            }
+            cx.run_until_parked();
+        };
+
+        send(
+            vec![MediaBackendEvent::PlaybackStateChanged(
+                PlaybackState::Playing,
+            )],
+            cx,
+        );
+        send(
+            vec![MediaBackendEvent::PlaybackStateChanged(
+                PlaybackState::Paused,
+            )],
+            cx,
+        );
+        send(
+            vec![
+                MediaBackendEvent::Buffering(0),
+                MediaBackendEvent::Buffering(100),
+                MediaBackendEvent::Ready,
+            ],
+            cx,
+        );
+        assert_eq!(
+            player.read_with(cx, |p, _| p.state().clone()),
+            PlaybackState::Paused
+        );
+        assert_eq!(*backend.commands.lock().unwrap(), ["play"]);
+
+        send(
+            vec![MediaBackendEvent::PlaybackStateChanged(
+                PlaybackState::Playing,
+            )],
+            cx,
+        );
+        assert_eq!(
+            player.read_with(cx, |p, _| p.state().clone()),
+            PlaybackState::Playing
+        );
+        player.update(cx, |p, cx| p.pause(cx)).unwrap();
+        player
+            .update(cx, |p, cx| {
+                p.seek_to(Duration::from_secs(5), SeekMode::Accurate, cx)
+            })
+            .unwrap();
+        send(
+            vec![
+                MediaBackendEvent::Buffering(0),
+                MediaBackendEvent::PlaybackStateChanged(PlaybackState::Paused),
+            ],
+            cx,
+        );
+        assert_eq!(
+            player.read_with(cx, |p, _| p.state().clone()),
+            PlaybackState::Seeking
+        );
+        send(
+            vec![
+                MediaBackendEvent::Buffering(100),
+                MediaBackendEvent::Ready,
+                MediaBackendEvent::PlaybackStateChanged(PlaybackState::Paused),
+            ],
+            cx,
+        );
+        assert_eq!(
+            player.read_with(cx, |p, _| p.state().clone()),
+            PlaybackState::Paused
+        );
+        assert_eq!(*backend.commands.lock().unwrap(), ["play", "pause", "seek"]);
+    }
 
     #[test]
     fn backend_timeline_is_suspended_while_seeking() {

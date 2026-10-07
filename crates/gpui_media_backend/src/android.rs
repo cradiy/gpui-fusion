@@ -39,7 +39,11 @@ pub(super) fn initialize() -> MediaResult<()> {
                 env.register_native_methods(
                     class,
                     &[
-                        method("nativeState", "(JJJJZIIIZ)V", state_changed as *mut c_void),
+                        method(
+                            "nativeState",
+                            "(JJJJZIIIZZZ)V",
+                            state_changed as *mut c_void,
+                        ),
                         method(
                             "nativeFrame",
                             "(JJLjava/nio/ByteBuffer;IIJ)V",
@@ -127,6 +131,7 @@ fn open_session(
         generation: 0,
         timeline: PlaybackTimeline::default(),
         playback: 0,
+        reported_state: None,
         info: None,
         width: 0,
         height: 0,
@@ -255,6 +260,7 @@ struct State {
     generation: i64,
     timeline: PlaybackTimeline,
     playback: i32,
+    reported_state: Option<PlaybackState>,
     info: Option<Arc<MediaInfo>>,
     width: i32,
     height: i32,
@@ -307,6 +313,8 @@ extern "system" fn state_changed(
     width: jint,
     height: jint,
     audio: jboolean,
+    play_when_ready: jboolean,
+    suppressed: jboolean,
 ) {
     with_state(id, generation, |state| {
         state.timeline = PlaybackTimeline::new(
@@ -351,7 +359,8 @@ extern "system" fn state_changed(
             state.height = height;
             state.audio = audio != 0;
         }
-        if state.playback != playback {
+        let playback_changed = state.playback != playback;
+        if playback_changed {
             match playback {
                 2 => {
                     state.emit(MediaBackendEvent::Buffering(0));
@@ -366,6 +375,19 @@ extern "system" fn state_changed(
                 _ => {}
             }
             state.playback = playback;
+        }
+        if state.output.is_some() && matches!(playback, 2 | 3) {
+            let actual = if play_when_ready == 0 || suppressed != 0 {
+                PlaybackState::Paused
+            } else if playback == 2 {
+                PlaybackState::Loading
+            } else {
+                PlaybackState::Playing
+            };
+            if playback_changed || state.reported_state.as_ref() != Some(&actual) {
+                state.reported_state = Some(actual.clone());
+                state.emit(MediaBackendEvent::PlaybackStateChanged(actual));
+            }
         }
     });
 }
@@ -481,6 +503,7 @@ impl AndroidSession {
     fn command(&self, operation: i32, value: f64, advance: bool) -> MediaResult<()> {
         let generation = {
             let mut state = self.state.lock().map_err(error)?;
+            state.reported_state = None;
             if advance {
                 state.generation += 1;
                 state.playback = 0;
@@ -515,6 +538,10 @@ impl AndroidSession {
 }
 
 impl MediaPlaybackSession for AndroidSession {
+    fn manages_playback_state(&self) -> bool {
+        true
+    }
+
     fn capabilities(&self) -> MediaCapabilities {
         let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         MediaCapabilities {
@@ -568,6 +595,9 @@ impl MediaPlaybackSession for AndroidSession {
     fn set_muted(&mut self, muted: bool) {
         self.muted = muted;
         self.volume_changed();
+    }
+    fn set_audio_focus_enabled(&mut self, enabled: bool) -> MediaResult<()> {
+        self.command(7, if enabled { 1. } else { 0. }, false)
     }
     fn media_info(&self) -> Option<Arc<MediaInfo>> {
         self.state.lock().ok().and_then(|s| s.info.clone())

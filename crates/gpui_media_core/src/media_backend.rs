@@ -3,8 +3,8 @@ use std::{sync::Arc, time::Duration};
 use crate::FrameOutputCapabilities;
 
 use crate::{
-    MediaError, MediaInfo, MediaResult, MediaSource, MediaStreamId, PlaybackTimeline, SeekMode,
-    SubtitleEvent, VideoFrame,
+    MediaError, MediaInfo, MediaResult, MediaSource, MediaStreamId, PlaybackState,
+    PlaybackTimeline, SeekMode, SubtitleEvent, VideoFrame,
 };
 
 use super::stats::PlaybackCounters;
@@ -22,6 +22,9 @@ pub enum MediaBackendEvent {
     /// seek and the session can continue in its requested play/pause state.
     Ready,
     Buffering(u8),
+    /// Authoritative state from a backend that manages buffering and system
+    /// interruptions. Emit after `Buffering` and `Ready` for the same update.
+    PlaybackStateChanged(PlaybackState),
     MediaInfoChanged(Arc<MediaInfo>),
     Subtitle(SubtitleEvent),
     Ended,
@@ -171,6 +174,13 @@ impl MediaOutputSink {
 pub trait MediaPlaybackSession: Send {
     fn capabilities(&self) -> MediaCapabilities;
 
+    /// Whether playback state is reported through `PlaybackStateChanged`.
+    /// Such sessions handle buffering themselves; consumers must not pause
+    /// and restart them in response to buffering events.
+    fn manages_playback_state(&self) -> bool {
+        false
+    }
+
     fn play(&mut self) -> MediaResult<()>;
     fn pause(&mut self) -> MediaResult<()>;
     fn timeline(&self) -> PlaybackTimeline;
@@ -201,6 +211,13 @@ pub trait MediaPlaybackSession: Send {
 
     fn set_volume(&mut self, _volume: f64) {}
     fn set_muted(&mut self, _muted: bool) {}
+
+    /// Enables system audio-focus management where supported by the backend.
+    fn set_audio_focus_enabled(&mut self, _enabled: bool) -> MediaResult<()> {
+        Err(MediaError::unsupported(
+            "this media backend does not expose audio-focus management",
+        ))
+    }
 
     fn media_info(&self) -> Option<Arc<MediaInfo>> {
         None

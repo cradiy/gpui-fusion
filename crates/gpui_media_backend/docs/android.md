@@ -115,12 +115,38 @@ Retain the player when replacing the Activity's display Surface. Drop the player
 and its subscriptions when the screen no longer needs it. Decide explicitly
 whether application lifecycle changes should pause or resume playback.
 
+## Coordinate audio with other applications
+
+Android playback manages audio focus automatically. Temporary interruptions
+can pause playback or lower its volume; playback can resume when focus returns.
+Permanent focus loss pauses playback until the user starts it again.
+Disconnecting headphones also pauses playback. Observe
+`VideoPlayerEvent::StateChanged` to keep controls synchronized with system pauses
+and resumes. Frame extraction does not request audio focus or produce sound.
+
+If your application manages audio focus itself, create the player with
+`autoplay: false`, then disable automatic focus before playing:
+
+```rust
+player.update(cx, |player, _| player.set_audio_focus_enabled(false))?;
+player.update(cx, |player, cx| player.play(cx))?;
+```
+
+This method returns an unsupported-operation error on backends without this
+control. Disabling focus management does not disable headphone-disconnect
+handling.
+
+For applications targeting Android 15 or later, the system permits focus
+requests only from the top application or an eligible foreground service.
+See [Android audio focus](https://developer.android.com/media/optimize/audio-focus).
+Audio focus alone does not provide background playback or a media notification.
+
 ## Supported media
 
 Use local or HTTP(S) progressive media supported by Media3 and the device's
 decoders. Track selection, subtitles, frame stepping, DRM, adaptive-streaming
 extensions, and HDR output are unsupported.
-Background playback, media notifications, audio focus, and picture-in-picture
+Background playback, media notifications, and picture-in-picture
 require separate system integration.
 
 Video uses CPU frame delivery, including GPU readback and upload. Check device

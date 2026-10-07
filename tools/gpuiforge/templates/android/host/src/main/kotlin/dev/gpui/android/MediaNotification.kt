@@ -7,12 +7,15 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
 import org.json.JSONObject
 
 /** Transport surface; the Rust application owns and executes playback commands. */
@@ -24,6 +27,24 @@ internal class MediaNotification(private val context: Context, private val id: S
     private var canNext = false
     private var canPrevious = false
     private var lastNotification = ""
+    private var artwork: Bitmap? = null
+    private var artworkRevision = 0L
+    private var state: JSONObject? = null
+
+    fun setArtwork(png: String?) {
+        check(!closed)
+        val next = png?.let {
+            require(it.length <= 2 * 1024 * 1024) { "Media artwork is too large" }
+            val bytes = Base64.decode(it, Base64.DEFAULT)
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            require(bounds.outWidth in 1..512 && bounds.outHeight in 1..512) { "Invalid media artwork dimensions" }
+            checkNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size)) { "Invalid media artwork" }
+        }
+        artwork = next
+        artworkRevision++
+        state?.let(::update)
+    }
 // gpuiforge:if background-media
     private var notification: Notification? = null
     internal fun backgroundNotification(): Notification {
@@ -54,6 +75,7 @@ internal class MediaNotification(private val context: Context, private val id: S
     private fun millis(duration: JSONObject): Long = duration.getLong("secs") * 1000 + duration.getLong("nanos") / 1000000
     fun update(state: JSONObject) {
         check(!closed)
+        this.state = state
         val metadata = state.getJSONObject("metadata")
         val playing = state.getString("playback") == "playing"
         val nativeState = when (state.getString("playback")) {
@@ -72,7 +94,8 @@ internal class MediaNotification(private val context: Context, private val id: S
         if (!metadata.isNull("artist")) meta.putString(MediaMetadata.METADATA_KEY_ARTIST, metadata.getString("artist"))
         if (!metadata.isNull("album")) meta.putString(MediaMetadata.METADATA_KEY_ALBUM, metadata.getString("album"))
         if (!state.isNull("duration")) meta.putLong(MediaMetadata.METADATA_KEY_DURATION, millis(state.getJSONObject("duration")))
-        val signature = "${metadata}:${state.optJSONObject("duration")}:$nativeState:$actions:${state.optJSONObject("icon")}"
+        artwork?.let { meta.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it) }
+        val signature = "${metadata}:${state.optJSONObject("duration")}:$nativeState:$actions:${state.optJSONObject("icon")}:$artworkRevision"
         if (signature == lastNotification) return
         session.setMetadata(meta.build())
         val icon = state.optJSONObject("icon")
@@ -83,6 +106,7 @@ internal class MediaNotification(private val context: Context, private val id: S
             .setContentTitle(metadata.getString("title"))
             .setContentText(if (metadata.isNull("artist")) null else metadata.getString("artist"))
             .setOnlyAlertOnce(true).setShowWhen(false).setOngoing(playing)
+        artwork?.let { builder.setLargeIcon(it) }
         context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
             val launch = PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             session.setSessionActivity(launch)
@@ -120,6 +144,8 @@ internal class MediaNotification(private val context: Context, private val id: S
         session.isActive = false
         session.setCallback(null)
         session.release()
+        state = null
+        artwork = null
     }
     companion object {
         private const val CHANNEL = "gpui.media"

@@ -2,7 +2,7 @@ let active = null;
 export function create_media(callback) {
     if (!navigator.mediaSession || !globalThis.MediaMetadata) throw new Error("Browser Media Session API is unavailable");
     if (active) throw new Error("A media session is already active; release it first");
-    const owner = {callback, handlers: new Set(), metadata: ""};
+    const owner = {callback, handlers: new Set(), metadata: "", artwork: null};
     active = owner;
     try {
         for (const action of ["play", "pause", "stop"]) bind(owner, action, () => callback(JSON.stringify({command: action})));
@@ -15,12 +15,30 @@ function bind(owner, name, handler) {
     if (handler) owner.handlers.add(name); else owner.handlers.delete(name);
 }
 function seconds(duration) { return duration.secs + duration.nanos / 1e9; }
+function publish_metadata(owner, metadata) {
+    navigator.mediaSession.metadata = new MediaMetadata({
+        title: metadata.title, artist: metadata.artist || "", album: metadata.album || "",
+        artwork: owner.artwork ? [{src: owner.artwork, type: "image/png"}] : [],
+    });
+}
+export function set_artwork(owner, png) {
+    if (active !== owner) throw new Error("Media session closed");
+    const previous = owner.artwork;
+    owner.artwork = png ? URL.createObjectURL(new Blob([Uint8Array.from(atob(png), c => c.charCodeAt(0))], {type: "image/png"})) : null;
+    try { if (owner.metadata) publish_metadata(owner, JSON.parse(owner.metadata)); }
+    catch (error) {
+        if (owner.artwork) URL.revokeObjectURL(owner.artwork);
+        owner.artwork = previous;
+        throw error;
+    }
+    if (previous) URL.revokeObjectURL(previous);
+}
 export function update_media(owner, json) {
     if (active !== owner) throw new Error("Media session closed");
     const state = JSON.parse(json), session = navigator.mediaSession;
     const metadata = JSON.stringify(state.metadata);
     if (metadata !== owner.metadata) {
-        session.metadata = new MediaMetadata({title: state.metadata.title, artist: state.metadata.artist || "", album: state.metadata.album || ""});
+        publish_metadata(owner, state.metadata);
         owner.metadata = metadata;
     }
     session.playbackState = state.playback === "playing" || state.playback === "buffering" ? "playing" : state.playback === "paused" ? "paused" : "none";
@@ -40,6 +58,8 @@ export function close_media(owner) {
     if (active !== owner) return;
     for (const action of owner.handlers) navigator.mediaSession.setActionHandler(action, null);
     navigator.mediaSession.metadata = null;
+    if (owner.artwork) URL.revokeObjectURL(owner.artwork);
+    owner.artwork = null;
     navigator.mediaSession.playbackState = "none";
     if (navigator.mediaSession.setPositionState) navigator.mediaSession.setPositionState();
     owner.callback = null;

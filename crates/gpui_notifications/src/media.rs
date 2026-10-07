@@ -1,6 +1,9 @@
 use super::*;
 use std::time::Duration;
 
+mod artwork;
+pub use artwork::MediaArtwork;
+
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 #[path = "media/linux.rs"]
 mod linux;
@@ -90,6 +93,9 @@ pub enum MediaCommand {
 
 pub trait MediaSessionBackend {
     fn update(&self, state: MediaSessionState) -> Result<()>;
+    fn set_artwork(&self, _artwork: Option<MediaArtwork>) -> Result<()> {
+        anyhow::bail!("media artwork is unavailable on this platform")
+    }
     /// Requests platform foreground execution using this session's media notification.
     fn start_background_playback(&self) -> LocalBoxFuture<'_, Result<BackgroundPlayback>> {
         Box::pin(async {
@@ -130,8 +136,19 @@ impl BackgroundPlayback {
 pub struct SystemMediaSession {
     backend: Box<dyn MediaSessionBackend>,
     commands: Option<async_channel::Receiver<MediaCommand>>,
+    artwork: RefCell<Option<MediaArtwork>>,
 }
 impl SystemMediaSession {
+    /// Replaces the cover independently of timeline updates. `None` removes it.
+    /// Retained until replaced or the session closes; clear it when changing tracks.
+    pub fn set_artwork(&self, artwork: Option<MediaArtwork>) -> Result<()> {
+        if *self.artwork.borrow() == artwork {
+            return Ok(());
+        }
+        self.backend.set_artwork(artwork.clone())?;
+        *self.artwork.borrow_mut() = artwork;
+        Ok(())
+    }
     /// Requests background execution after a user action. Publish a state snapshot first.
     /// Android requires the `background-media` host module and an active Activity.
     /// Resolves after service promotion; other platforms return an unsupported error.
@@ -146,6 +163,7 @@ impl SystemMediaSession {
         Self {
             backend,
             commands: Some(commands),
+            artwork: RefCell::default(),
         }
     }
     pub async fn new(options: MediaSessionOptions) -> Result<Self> {

@@ -150,6 +150,12 @@ class GpuiSession : AutoCloseable {
                 checkNotNull(mediaNotifications[update.getString("id")]) { "Media session closed" }.update(update.getJSONObject("state"))
                 return ""
             }
+            "media_artwork" -> {
+                val update = org.json.JSONObject(payload)
+                checkNotNull(mediaNotifications[update.getString("id")]) { "Media session closed" }
+                    .setArtwork(if (update.isNull("png")) null else update.getString("png"))
+                return ""
+            }
             "media_close" -> { mediaNotifications.remove(payload)?.close(); return "" }
         }
 // gpuiforge:else

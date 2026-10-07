@@ -56,6 +56,13 @@ struct AndroidMedia {
     id: String,
 }
 impl MediaSessionBackend for AndroidMedia {
+    fn set_artwork(&self, artwork: Option<MediaArtwork>) -> Result<()> {
+        self.host.notification_operation(
+            "media_artwork",
+            &serde_json::json!({"id": self.id, "png": artwork.as_ref().map(MediaArtwork::png_base64)}).to_string(),
+        )?;
+        Ok(())
+    }
     fn start_background_playback(&self) -> LocalBoxFuture<'_, Result<BackgroundPlayback>> {
         Box::pin(async move {
             let lease = self.background.start_media_playback(&self.id).await?;

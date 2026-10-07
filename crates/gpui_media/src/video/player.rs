@@ -19,7 +19,7 @@ use crate::{
 
 use super::surface::VideoSurface;
 use gpui::gpui_notifications::{
-    MediaCommand, MediaMetadata, MediaPlayback, MediaSessionState, NotificationIcon,
+    MediaArtwork, MediaCommand, MediaMetadata, MediaPlayback, MediaSessionState, NotificationIcon,
     SystemMediaSession,
 };
 use gpui_media_core::PlaybackCounters;
@@ -28,6 +28,7 @@ use gpui_media_core::PlaybackCounters;
 #[derive(Clone, Debug, Default)]
 pub struct VideoSystemMediaOptions {
     pub metadata: MediaMetadata,
+    pub artwork: Option<MediaArtwork>,
     pub icon: Option<NotificationIcon>,
     pub can_next: bool,
     pub can_previous: bool,
@@ -728,6 +729,11 @@ impl VideoPlayer {
         cx: &mut Context<Self>,
     ) {
         let _ = self.playback.set_system_media_controls(None);
+        if let Some(session) = &session {
+            if let Err(error) = session.set_artwork(options.artwork.clone()) {
+                cx.emit(VideoPlayerEvent::SystemMediaError(error.to_string().into()));
+            }
+        }
         self.system_commands = None;
         if let Some(commands) = session.as_mut().and_then(SystemMediaSession::take_commands) {
             self.system_commands = Some(cx.spawn(async move |this, cx| {
@@ -787,6 +793,17 @@ impl VideoPlayer {
         self.system_session = session;
         self.system_options = options;
         self.publish_system_media(true, cx);
+    }
+
+    /// Replaces the bound session's cover without re-registering media controls.
+    pub fn set_system_media_artwork(&mut self, artwork: Option<MediaArtwork>) -> MediaResult<()> {
+        if let Some(session) = &self.system_session {
+            session.set_artwork(artwork.clone()).map_err(|error| {
+                crate::MediaError::backend(format!("system media artwork: {error}"))
+            })?;
+        }
+        self.system_options.artwork = artwork;
+        Ok(())
     }
 
     fn publish_system_media(&mut self, force: bool, cx: &mut Context<Self>) {

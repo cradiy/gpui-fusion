@@ -6,6 +6,8 @@ extern "C" {
     fn create_media(callback: &js_sys::Function) -> Result<JsValue, JsValue>;
     #[wasm_bindgen(catch)]
     fn update_media(session: &JsValue, state: &str) -> Result<(), JsValue>;
+    #[wasm_bindgen(catch)]
+    fn set_artwork(session: &JsValue, png: Option<String>) -> Result<(), JsValue>;
     fn close_media(session: &JsValue);
 }
 struct WebMedia {
@@ -35,6 +37,13 @@ pub async fn create(_: MediaSessionOptions) -> Result<SystemMediaSession> {
     ))
 }
 impl MediaSessionBackend for WebMedia {
+    fn set_artwork(&self, artwork: Option<MediaArtwork>) -> Result<()> {
+        set_artwork(
+            &self.session,
+            artwork.as_ref().map(MediaArtwork::png_base64),
+        )
+        .map_err(error)
+    }
     fn update(&self, state: MediaSessionState) -> Result<()> {
         update_media(&self.session, &serde_json::to_string(&state)?).map_err(error)
     }

@@ -187,6 +187,10 @@ For a media notification together with cross-platform system controls, use
 [`App::system_media_session` and `VideoPlayer::set_system_media_session`](../../gpui_notifications/docs/media.md).
 The player owns the session and releases the native controls when dropped.
 Supply the notification drawable through `VideoSystemMediaOptions::icon`.
+Supply a prepared cover through `VideoSystemMediaOptions::artwork`, or update it
+with `VideoPlayer::set_system_media_artwork`. See
+[cover artwork](../../gpui_notifications/docs/media.md#publish-cover-artwork)
+for image preparation and cross-platform behavior.
 
 The backend-only interface below publishes an Android session without a
 notification. Use it when a custom host already owns notification presentation.

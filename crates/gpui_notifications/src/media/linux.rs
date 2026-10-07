@@ -10,6 +10,7 @@ use zbus::{
 const PATH: &str = "/org/mpris/MediaPlayer2";
 struct Shared {
     state: Mutex<MediaSessionState>,
+    artwork: Mutex<Option<MediaArtwork>>,
     commands: async_channel::Sender<MediaCommand>,
     updated: Mutex<std::time::Instant>,
 }
@@ -67,7 +68,10 @@ impl Player {
             .map_err(|_| zbus::fdo::Error::Failed("Media session closed".into()))
     }
 }
-fn metadata(state: &MediaSessionState) -> HashMap<String, OwnedValue> {
+fn metadata(
+    state: &MediaSessionState,
+    artwork: Option<&MediaArtwork>,
+) -> HashMap<String, OwnedValue> {
     let mut info = HashMap::new();
     info.insert(
         "mpris:trackid".into(),
@@ -90,6 +94,12 @@ fn metadata(state: &MediaSessionState) -> HashMap<String, OwnedValue> {
     }
     if let Some(duration) = state.duration {
         info.insert("mpris:length".into(), (duration.as_micros() as i64).into());
+    }
+    if let Some(artwork) = artwork {
+        info.insert(
+            "mpris:artUrl".into(),
+            Str::from(artwork.file_url().to_owned()).into(),
+        );
     }
     info
 }
@@ -166,7 +176,10 @@ impl Player {
     }
     #[zbus(property)]
     fn metadata(&self) -> HashMap<String, OwnedValue> {
-        metadata(&self.0.state.lock().unwrap())
+        metadata(
+            &self.0.state.lock().unwrap(),
+            self.0.artwork.lock().unwrap().as_ref(),
+        )
     }
     #[zbus(property(emits_changed_signal = "false"))]
     fn position(&self) -> i64 {
@@ -245,6 +258,7 @@ pub async fn create(options: MediaSessionOptions) -> Result<SystemMediaSession> 
     let (commands, rx) = async_channel::unbounded();
     let shared = Arc::new(Shared {
         state: Mutex::new(MediaSessionState::default()),
+        artwork: Mutex::default(),
         commands,
         updated: Mutex::new(std::time::Instant::now()),
     });
@@ -280,7 +294,8 @@ pub async fn create(options: MediaSessionOptions) -> Result<SystemMediaSession> 
                     {
                         futures::future::Either::Left((Ok(()), _)) => {
                             let snapshot = state.state.lock().unwrap().clone();
-                            let _ = publish(&connection, &snapshot).await;
+                            let artwork = state.artwork.lock().unwrap().clone();
+                            let _ = publish(&connection, &snapshot, artwork.as_ref()).await;
                         }
                         futures::future::Either::Right((Ok(position), _)) => {
                             let _ = connection
@@ -307,10 +322,14 @@ pub async fn create(options: MediaSessionOptions) -> Result<SystemMediaSession> 
         rx,
     ))
 }
-async fn publish(connection: &Connection, state: &MediaSessionState) -> Result<()> {
+async fn publish(
+    connection: &Connection,
+    state: &MediaSessionState,
+    artwork: Option<&MediaArtwork>,
+) -> Result<()> {
     let mut properties: HashMap<&str, OwnedValue> = HashMap::new();
     properties.insert("PlaybackStatus", Str::from(status(state)).into());
-    properties.insert("Metadata", metadata(state).try_into()?);
+    properties.insert("Metadata", metadata(state, artwork).try_into()?);
     properties.insert("Rate", state.rate.into());
     properties.insert("Volume", state.volume.into());
     properties.insert("MinimumRate", state.rate.min(1.).into());
@@ -334,6 +353,13 @@ async fn publish(connection: &Connection, state: &MediaSessionState) -> Result<(
     Ok(())
 }
 impl MediaSessionBackend for LinuxMedia {
+    fn set_artwork(&self, artwork: Option<MediaArtwork>) -> Result<()> {
+        *self.shared.artwork.lock().unwrap() = artwork;
+        match self.changed.try_send(()) {
+            Ok(()) | Err(async_channel::TrySendError::Full(())) => Ok(()),
+            Err(_) => anyhow::bail!("media session closed"),
+        }
+    }
     fn seeked(&self, position: Duration) -> Result<()> {
         self.seeks.try_send(position)?;
         Ok(())

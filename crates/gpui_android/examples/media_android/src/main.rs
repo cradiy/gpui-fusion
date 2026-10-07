@@ -1,3 +1,4 @@
+use gpui::gpui_notifications::MediaArtwork;
 use gpui::{prelude::*, *};
 use gpui_media::{
     MediaSource, PlaybackWakeMode, SeekMode, VideoFrameExtractor, VideoPlayer, VideoPlayerEvent,
@@ -22,6 +23,8 @@ fn main() {
                 system_controls_pending: false,
                 background_task: None,
                 wake_mode: PlaybackWakeMode::None,
+                artwork: None,
+                artwork_request: 0,
             });
             window.on_system_back(
                 cx,
@@ -52,6 +55,8 @@ struct MediaDemo {
     system_controls_pending: bool,
     background_task: Option<Task<()>>,
     wake_mode: PlaybackWakeMode,
+    artwork: Option<MediaArtwork>,
+    artwork_request: u64,
 }
 
 impl MediaDemo {
@@ -85,6 +90,8 @@ impl MediaDemo {
                     });
                     this.system_controls = false;
                     this.wake_mode = PlaybackWakeMode::None;
+                    this.artwork = None;
+                    this.artwork_request += 1;
                     this.background_task = None;
                     this.subscription = Some(cx.subscribe(&player, |_, _, event, cx| {
                         if let VideoPlayerEvent::StateChanged(state) = event {
@@ -158,6 +165,8 @@ impl MediaDemo {
 
     fn control(&mut self, action: usize, cx: &mut Context<Self>) {
         if action == 5 {
+            self.artwork = None;
+            self.artwork_request += 1;
             self.background_task = None;
             self.system_controls = false;
             self.subscription = None;
@@ -186,6 +195,65 @@ impl MediaDemo {
         });
         if let Err(error) = result {
             self.status = error.to_string();
+        }
+        cx.notify();
+    }
+
+    fn choose_artwork(&mut self, cx: &mut Context<Self>) {
+        let Some(player) = self.player.clone() else {
+            return;
+        };
+        self.artwork_request += 1;
+        let revision = self.artwork_request;
+        let selection = cx.prompt_for_files(FilePromptOptions::default());
+        let executor = cx.background_executor().clone();
+        cx.spawn(async move |this, cx| {
+            let result: anyhow::Result<Option<MediaArtwork>> = async {
+                let Some(file) = selection.await??.and_then(|files| files.into_iter().next())
+                else {
+                    return Ok(None);
+                };
+                let bytes = file.read_limited(16 * 1024 * 1024).await?;
+                executor
+                    .spawn(async move { MediaArtwork::from_encoded(&bytes).map(Some) })
+                    .await
+            }
+            .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.artwork_request != revision || this.player.as_ref() != Some(&player) {
+                    return;
+                }
+                match result {
+                    Ok(Some(artwork)) => {
+                        match player.update(cx, |player, _| {
+                            player.set_system_media_artwork(Some(artwork.clone()))
+                        }) {
+                            Ok(()) => {
+                                this.artwork = Some(artwork);
+                                this.status = "Cover ready for system media controls.".into();
+                            }
+                            Err(error) => this.status = error.to_string(),
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => this.status = error.to_string(),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn clear_artwork(&mut self, cx: &mut Context<Self>) {
+        self.artwork_request += 1;
+        if let Some(player) = &self.player {
+            match player.update(cx, |player, _| player.set_system_media_artwork(None)) {
+                Ok(()) => {
+                    self.artwork = None;
+                    self.status = "Cover cleared.".into();
+                }
+                Err(error) => self.status = error.to_string(),
+            }
         }
         cx.notify();
     }
@@ -230,10 +298,12 @@ impl MediaDemo {
             .as_ref()
             .map_or("Media", |file| file.name())
             .to_owned();
+        let artwork = self.artwork.clone();
         cx.spawn(async move |this, cx| {
             let result: anyhow::Result<_> = async {
                 let session = request.await?;
                 let options = gpui_media::VideoSystemMediaOptions {
+                    artwork,
                     metadata: gpui::gpui_notifications::MediaMetadata {
                         track_id: title.clone(),
                         title,
@@ -262,7 +332,8 @@ impl MediaDemo {
                     return;
                 }
                 match result {
-                    Ok((session, options, background)) => {
+                    Ok((session, mut options, background)) => {
+                        options.artwork = this.artwork.clone();
                         player.update(cx, |player, cx| {
                             player.set_system_media_session(Some(session), options, cx)
                         });
@@ -378,6 +449,29 @@ impl Render for MediaDemo {
                             PlaybackWakeMode::Network => "Wake: CPU + Wi-Fi",
                         })
                         .on_click(cx.listener(|this, _, _, cx| this.cycle_wake_mode(cx))),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(
+                            div()
+                                .id("choose-cover")
+                                .p_3()
+                                .rounded_lg()
+                                .bg(rgb(0x30475c))
+                                .child("Choose cover")
+                                .on_click(cx.listener(|this, _, _, cx| this.choose_artwork(cx))),
+                        )
+                        .child(
+                            div()
+                                .id("clear-cover")
+                                .p_3()
+                                .rounded_lg()
+                                .bg(rgb(0x30475c))
+                                .child("Clear cover")
+                                .on_click(cx.listener(|this, _, _, cx| this.clear_artwork(cx))),
+                        ),
                 )
                 .child(
                     div()

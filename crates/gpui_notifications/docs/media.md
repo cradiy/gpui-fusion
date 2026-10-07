@@ -82,6 +82,47 @@ periodic position updates, and reports next/previous requests through
 surface, bind `None` or drop the player. Avoid registering sessions for incidental
 previews.
 
+## Publish cover artwork
+
+Cover artwork is separate from the notification's small application icon.
+Prepare it on a worker, then update the session independently of its timeline:
+
+```rust
+let artwork = cx.background_executor().spawn(async move {
+    MediaArtwork::from_encoded(&image_bytes)
+}).await?;
+session.set_artwork(Some(artwork))?;
+session.set_artwork(None)?; // Clear when the next item has no cover.
+```
+
+`MediaArtwork::from_encoded` accepts PNG/JPEG. `from_rgba(width, height, pixels)`
+accepts tightly packed RGBA8 pixels, including application-extracted video frames.
+Preparation is synchronous and fits the image within 512 × 512 without upscaling.
+Encoded inputs are limited to 16 MiB, dimensions to 4096 pixels per edge, and
+decoder allocations to 64 MiB. Read files with a corresponding byte limit.
+The application owns file selection, downloads and frame extraction.
+
+For `VideoPlayer`, pass the prepared cover in `VideoSystemMediaOptions::artwork`
+when binding a session, or call `player.set_system_media_artwork(Some(artwork))`
+to replace it later. Passing `None` clears it without resetting playback controls.
+Ordinary metadata and position updates retain the current cover. Clear or replace
+it explicitly when changing tracks.
+
+| Platform | System surface |
+| --- | --- |
+| Android | MediaSession album artwork and MediaStyle large icon, including foreground playback |
+| Linux / FreeBSD | MPRIS `mpris:artUrl` pointing to a session-retained temporary PNG |
+| Windows | System media transport controls thumbnail |
+| macOS | Now Playing `MPMediaItemArtwork` |
+| Web | Media Session artwork backed by a browser object URL |
+
+Cloning a prepared cover shares its data. Position updates do not re-encode or
+re-send the image. Clearing or replacing it releases the session's reference;
+desktop temporary files remain until the last cover reference is dropped.
+Browser object URLs are revoked on replacement or closure. Presentation, cropping
+and whether artwork is visible depend on the OS, desktop shell or browser.
+Web content policies must allow `blob:` images when restricting `img-src`.
+
 ## Platform ownership
 
 On Android, `app_id` must match the package. Supply a monochrome drawable icon

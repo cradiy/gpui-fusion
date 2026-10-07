@@ -1,7 +1,8 @@
 use super::*;
 use block2::RcBlock;
-use objc2::{rc::Retained, runtime::AnyObject};
-use objc2_foundation::{NSDictionary, NSNumber, NSString};
+use objc2::{AnyThread, rc::Retained, runtime::AnyObject};
+use objc2_app_kit::NSImage;
+use objc2_foundation::{NSData, NSDictionary, NSNumber, NSString};
 use objc2_media_player::*;
 use std::{
     ptr::NonNull,
@@ -14,6 +15,8 @@ struct MacMedia {
     remote: Retained<MPRemoteCommandCenter>,
     targets: Vec<(Retained<MPRemoteCommand>, Retained<AnyObject>)>,
     commands: async_channel::Sender<MediaCommand>,
+    artwork: RefCell<Option<Retained<MPMediaItemArtwork>>>,
+    state: RefCell<MediaSessionState>,
 }
 pub async fn create(_: MediaSessionOptions) -> Result<SystemMediaSession> {
     ensure!(
@@ -30,6 +33,8 @@ pub async fn create(_: MediaSessionOptions) -> Result<SystemMediaSession> {
             remote,
             targets: Vec::new(),
             commands,
+            artwork: RefCell::default(),
+            state: RefCell::default(),
         };
         for (command, event) in [
             (native.remote.playCommand(), MediaCommand::Play),
@@ -78,6 +83,25 @@ pub async fn create(_: MediaSessionOptions) -> Result<SystemMediaSession> {
     }
 }
 impl MediaSessionBackend for MacMedia {
+    fn set_artwork(&self, artwork: Option<MediaArtwork>) -> Result<()> {
+        let artwork = artwork
+            .map(|artwork| unsafe {
+                let data = NSData::with_bytes(artwork.png());
+                let image = NSImage::initWithData(NSImage::alloc(), &data)
+                    .ok_or_else(|| anyhow::anyhow!("macOS could not decode media artwork"))?;
+                let size = image.size();
+                let handler = RcBlock::new(move |_| NonNull::from(&*image));
+                Ok::<_, anyhow::Error>(MPMediaItemArtwork::initWithBoundsSize_requestHandler(
+                    MPMediaItemArtwork::alloc(),
+                    size,
+                    &handler,
+                ))
+            })
+            .transpose()?;
+        *self.artwork.borrow_mut() = artwork;
+        let state = self.state.borrow().clone();
+        self.update(state)
+    }
     fn update(&self, state: MediaSessionState) -> Result<()> {
         unsafe {
             let mut keys = vec![
@@ -110,6 +134,10 @@ impl MediaSessionBackend for MacMedia {
                     duration.as_secs_f64(),
                 )));
             }
+            if let Some(artwork) = self.artwork.borrow().as_ref() {
+                keys.push(MPMediaItemPropertyArtwork);
+                values.push(Retained::cast_unchecked(artwork.clone()));
+            }
             self.center
                 .setNowPlayingInfo(Some(&NSDictionary::from_slices(
                     &keys,
@@ -129,6 +157,7 @@ impl MediaSessionBackend for MacMedia {
                 .previousTrackCommand()
                 .setEnabled(state.can_previous);
         }
+        *self.state.borrow_mut() = state;
         Ok(())
     }
 }

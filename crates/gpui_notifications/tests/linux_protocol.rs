@@ -128,6 +128,10 @@ fn notifications_and_media_round_trip_over_private_bus() {
         .await
         .unwrap();
         let commands = media.take_commands().unwrap();
+        let cover = MediaArtwork::from_rgba(1024, 4, vec![255; 1024 * 4 * 4]).unwrap();
+        let normalized = image::load_from_memory(cover.png()).unwrap();
+        assert_eq!((normalized.width(), normalized.height()), (512, 2));
+        media.set_artwork(Some(cover)).unwrap();
         media
             .update(MediaSessionState {
                 metadata: MediaMetadata {
@@ -160,6 +164,10 @@ fn notifications_and_media_round_trip_over_private_bus() {
         let track =
             OwnedObjectPath::try_from(metadata.get("mpris:trackid").unwrap().try_clone().unwrap())
                 .unwrap();
+        let cover_uri =
+            String::try_from(metadata.get("mpris:artUrl").unwrap().try_clone().unwrap()).unwrap();
+        let cover_path = url::Url::parse(&cover_uri).unwrap().to_file_path().unwrap();
+        assert!(cover_path.exists());
         player
             .call::<_, _, ()>("SetPosition", &(track, 5_000_000i64))
             .await
@@ -186,5 +194,11 @@ fn notifications_and_media_round_trip_over_private_bus() {
         );
         drop(media);
         assert!(within(commands.recv()).await.is_err());
+        within(async {
+            while cover_path.exists() {
+                async_io::Timer::after(Duration::from_millis(5)).await;
+            }
+        })
+        .await;
     });
 }

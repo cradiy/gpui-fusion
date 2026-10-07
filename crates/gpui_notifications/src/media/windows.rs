@@ -1,7 +1,8 @@
 use super::*;
 use ::windows::{
-    Foundation::{TimeSpan, TypedEventHandler},
+    Foundation::{TimeSpan, TypedEventHandler, Uri},
     Media::{Playback::MediaPlayer, *},
+    Storage::Streams::RandomAccessStreamReference,
     core::HSTRING,
 };
 struct WindowsMedia {
@@ -79,6 +80,20 @@ fn time(value: Duration) -> TimeSpan {
     }
 }
 impl MediaSessionBackend for WindowsMedia {
+    fn set_artwork(&self, artwork: Option<MediaArtwork>) -> Result<()> {
+        let display = self.controls.DisplayUpdater()?;
+        let thumbnail = artwork
+            .as_ref()
+            .map(|artwork| {
+                RandomAccessStreamReference::CreateFromUri(&Uri::CreateUri(&HSTRING::from(
+                    artwork.file_url(),
+                ))?)
+            })
+            .transpose()?;
+        display.SetThumbnail(thumbnail.as_ref())?;
+        display.Update()?;
+        Ok(())
+    }
     fn update(&self, state: MediaSessionState) -> Result<()> {
         self.controls.SetPlaybackStatus(match state.playback {
             MediaPlayback::Playing => MediaPlaybackStatus::Playing,

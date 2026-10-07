@@ -25,6 +25,17 @@ Seeking past EOF is allowed where supported; subsequent reads return `None` unti
 the cursor is moved back or the file grows. Negative positions return an error.
 Seeking does not change any other reader's position or the file's contents.
 
+`reader.read_exact(&mut buffer)` fills the supplied buffer from the current cursor,
+continuing across short reads. It returns `UnexpectedEof` if the file ends early;
+the buffer can be partially filled and the cursor remains advanced. An empty buffer
+performs no I/O.
+
+`reader.read_to_end_limited(max_bytes)` collects all remaining bytes from the current
+cursor. It returns `FileTooLarge` if they exceed the limit, consuming at most one
+byte beyond the limit to detect overflow. It does not return a truncated result or
+rewind on error. A zero limit accepts only a cursor already at EOF. Both helpers
+work with sequential readers as well as after `seek`.
+
 `write_all()` writes the whole supplied slice. Native and Android adapters submit
 bounded chunks to background workers. `flush()` flushes bytes without finishing
 the session. `close()` consumes the writer and reports provider completion errors.
@@ -42,8 +53,9 @@ requested only after the previous write completes. Input errors stop polling and
 abort the output. Choose bounded chunk sizes in the producer. Errors and cancellation
 can leave existing files partially written; no automatic rollback is promised.
 
-`read_limited(max_bytes)` collects a complete file only if it fits within the
-given byte limit. It reads at most one additional byte to detect overflow and
+`file.read_limited(max_bytes)` opens a separate reader at the beginning and collects
+the complete file only if it fits within the given byte limit. It uses
+`read_to_end_limited`, reading at most one additional byte to detect overflow, and
 returns a `std::io::ErrorKind::FileTooLarge` error rather than truncated contents.
 It does not rely on metadata or allocate the entire limit in advance. A zero limit
 accepts only empty files. The limit applies to file bytes, not later decoding or
@@ -53,7 +65,9 @@ decompression. Use reader sessions for larger files that must be processed in ch
 let text = String::from_utf8(file.read_limited(4 * 1024 * 1024).await?)?;
 let mut reader = file.open_read().await?;
 reader.seek(std::io::SeekFrom::Start(1024)).await?;
-let block = reader.read_chunk_with_limit(4096).await?;
+let mut header = [0; 16];
+reader.read_exact(&mut header).await?;
+let remaining = reader.read_to_end_limited(4096).await?;
 ```
 
 ## Storage locations

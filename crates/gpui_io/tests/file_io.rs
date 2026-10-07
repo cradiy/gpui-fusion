@@ -1,10 +1,10 @@
 use futures::executor::block_on;
 use gpui_io::{
     BlockingWrite, CreateOptions, FileHandle, FileMetadata, FileReader, FileWriter, IoExecutor,
-    LocationHandle, PlatformFile, WriteOptions,
+    LocationHandle, PlatformFile, PlatformReader, WriteOptions,
 };
 use std::{
-    io::{self, Read, SeekFrom, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -134,6 +134,91 @@ fn bounded_reads_stop_an_unknown_length_stream_and_preserve_sequential_access() 
             reader.read_chunk_with_limit(3).await.unwrap().unwrap(),
             [0; 3]
         );
+    });
+}
+
+struct ShortRead(io::Cursor<Vec<u8>>);
+impl Read for ShortRead {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let limit = buffer.len().min(3);
+        self.0.read(&mut buffer[..limit])
+    }
+}
+impl Seek for ShortRead {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        self.0.seek(position)
+    }
+}
+
+#[test]
+fn reader_helpers_follow_the_cursor_across_short_reads_and_errors() {
+    block_on(async {
+        let mut reader = FileReader::from_seekable(
+            ShortRead(io::Cursor::new(b"0123456789abcdef".to_vec())),
+            executor(),
+        );
+        reader.seek(SeekFrom::Start(2)).await.unwrap();
+        reader.read_exact(&mut []).await.unwrap();
+        let mut header = [0; 5];
+        reader.read_exact(&mut header).await.unwrap();
+        assert_eq!(&header, b"23456");
+        assert_eq!(reader.read_to_end_limited(9).await.unwrap(), b"789abcdef");
+        assert_eq!(reader.seek(SeekFrom::Current(0)).await.unwrap(), 16);
+
+        reader.seek(SeekFrom::Start(2)).await.unwrap();
+        let error = reader.read_to_end_limited(4).await.unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<io::Error>().unwrap().kind(),
+            io::ErrorKind::FileTooLarge
+        );
+        let mut next = [0; 3];
+        reader.read_exact(&mut next).await.unwrap();
+        assert_eq!(&next, b"789");
+
+        reader.seek(SeekFrom::End(-2)).await.unwrap();
+        let mut incomplete = [0; 4];
+        let error = reader.read_exact(&mut incomplete).await.unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<io::Error>().unwrap().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+        assert_eq!(&incomplete[..2], b"ef");
+        assert!(reader.read_to_end_limited(0).await.unwrap().is_empty());
+
+        reader.seek(SeekFrom::Start(0)).await.unwrap();
+        assert!(reader.read_to_end_limited(0).await.is_err());
+        let mut byte = [0];
+        reader.read_exact(&mut byte).await.unwrap();
+        assert_eq!(&byte, b"1");
+    });
+}
+
+struct InvalidChunks(Vec<u8>);
+impl PlatformReader for InvalidChunks {
+    fn read_chunk(
+        &mut self,
+        _: usize,
+    ) -> futures::future::LocalBoxFuture<'_, anyhow::Result<Option<Vec<u8>>>> {
+        Box::pin(async { Ok(Some(self.0.clone())) })
+    }
+}
+
+#[test]
+fn reader_helpers_reject_empty_and_oversized_backend_chunks() {
+    block_on(async {
+        for bytes in [vec![], vec![1, 2, 3]] {
+            let mut reader = FileReader::new(InvalidChunks(bytes));
+            let error = reader.read_exact(&mut [0]).await.unwrap_err();
+            assert_eq!(
+                error.downcast_ref::<io::Error>().unwrap().kind(),
+                io::ErrorKind::InvalidData
+            );
+            let error = reader.read_to_end_limited(1).await.unwrap_err();
+            assert_eq!(
+                error.downcast_ref::<io::Error>().unwrap().kind(),
+                io::ErrorKind::InvalidData
+            );
+        }
     });
 }
 

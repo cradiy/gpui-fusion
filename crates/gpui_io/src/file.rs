@@ -106,25 +106,7 @@ impl FileHandle {
     /// Reads at most one extra byte to detect overflow; does not trust provider metadata.
     pub fn read_limited(&self, max_bytes: usize) -> LocalBoxFuture<'static, Result<Vec<u8>>> {
         let open = self.open_read();
-        Box::pin(async move {
-            let mut reader = open.await?;
-            let mut contents = Vec::new();
-            loop {
-                let remaining = max_bytes - contents.len();
-                let limit = remaining.saturating_add(1).min(64 * 1024);
-                let Some(chunk) = reader.read_chunk_with_limit(limit).await? else {
-                    return Ok(contents);
-                };
-                if chunk.len() > remaining {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::FileTooLarge,
-                        format!("file exceeds the read limit of {max_bytes} bytes"),
-                    )
-                    .into());
-                }
-                contents.extend(chunk);
-            }
-        })
+        Box::pin(async move { open.await?.read_to_end_limited(max_bytes).await })
     }
     pub fn write(&self, contents: Vec<u8>) -> LocalBoxFuture<'static, Result<()>> {
         self.write_stream(futures::stream::once(async { Ok(contents) }))

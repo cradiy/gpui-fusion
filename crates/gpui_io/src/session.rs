@@ -8,7 +8,7 @@ use std::{
 
 const CHUNK_SIZE: usize = 64 * 1024;
 
-/// Backend for a read session. `None` represents EOF.
+/// Backend for a read session. Return a nonempty chunk of at most `limit` bytes, or `None` at EOF.
 pub trait PlatformReader: Send {
     fn read_chunk(&mut self, limit: usize) -> LocalBoxFuture<'_, Result<Option<Vec<u8>>>>;
     fn seek(&mut self, _position: SeekFrom) -> LocalBoxFuture<'_, Result<u64>> {
@@ -42,7 +42,56 @@ impl FileReader {
     }
     pub async fn read_chunk_with_limit(&mut self, limit: usize) -> Result<Option<Vec<u8>>> {
         ensure!(limit > 0, "read limit must be nonzero");
-        self.0.read_chunk(limit).await
+        let chunk = self.0.read_chunk(limit).await?;
+        if let Some(bytes) = &chunk
+            && (bytes.is_empty() || bytes.len() > limit)
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "reader returned an invalid chunk size",
+            )
+            .into());
+        }
+        Ok(chunk)
+    }
+    /// Fill the buffer from the current cursor. Early EOF returns `UnexpectedEof`.
+    /// Errors can leave the buffer partially filled and the cursor advanced.
+    pub async fn read_exact(&mut self, mut buffer: &mut [u8]) -> Result<()> {
+        while !buffer.is_empty() {
+            let chunk = self
+                .read_chunk_with_limit(buffer.len().min(CHUNK_SIZE))
+                .await?
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "file ended before the buffer was filled",
+                    )
+                })?;
+            let (filled, remaining) = buffer.split_at_mut(chunk.len());
+            filled.copy_from_slice(&chunk);
+            buffer = remaining;
+        }
+        Ok(())
+    }
+    /// Collect remaining bytes from the current cursor, failing with `FileTooLarge` on overflow.
+    /// The overflow check consumes at most `max_bytes + 1` bytes; errors do not rewind the reader.
+    pub async fn read_to_end_limited(&mut self, max_bytes: usize) -> Result<Vec<u8>> {
+        let mut contents = Vec::new();
+        loop {
+            let remaining = max_bytes - contents.len();
+            let limit = remaining.saturating_add(1).min(CHUNK_SIZE);
+            let Some(chunk) = self.read_chunk_with_limit(limit).await? else {
+                return Ok(contents);
+            };
+            if chunk.len() > remaining {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::FileTooLarge,
+                    format!("file exceeds the read limit of {max_bytes} bytes"),
+                )
+                .into());
+            }
+            contents.extend(chunk);
+        }
     }
 }
 

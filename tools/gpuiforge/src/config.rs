@@ -104,7 +104,7 @@ pub enum AndroidFeature {
     Sharing,
     /// Android-backed credential storage used by GPUI's credential API. Enable when storing or retrieving application credentials.
     Credentials,
-    /// Media playback and frame decoding, including the Media3 dependency. System playback notifications are selected separately with media-notifications.
+    /// Media playback, frame decoding and picture-in-picture windows, including the Media3 dependency. System playback notifications are selected separately with media-notifications.
     Media,
     /// General system notifications, action buttons and inline replies. Declare POST_NOTIFICATIONS and request runtime authorization when required by Android.
     Notifications,

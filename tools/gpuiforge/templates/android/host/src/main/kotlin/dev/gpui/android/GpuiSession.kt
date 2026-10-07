@@ -39,6 +39,66 @@ class GpuiSession : AutoCloseable {
     private var backChanged: Consumer<Boolean>? = null
     private var fullscreen = false
     private var fullscreenChanged: Consumer<Boolean>? = null
+    private var pictureInPicture = false
+// gpuiforge:if media
+    private var pictureInPictureHost: PictureInPictureHost? = null
+
+    /** Attach an Activity declaring supportsPictureInPicture in its manifest. */
+    fun attachPictureInPictureHost(activity: Activity) {
+        checkThread()
+        check(!closed)
+        pictureInPictureHost = PictureInPictureHost(activity)
+        onPictureInPictureModeChanged(activity.isInPictureInPictureMode)
+    }
+
+    /** Detach the Activity before it is destroyed. */
+    fun detachPictureInPictureHost(activity: Activity) {
+        checkThread()
+        if (pictureInPictureHost?.activity === activity) pictureInPictureHost = null
+    }
+// gpuiforge:endif
+
+    /** Forward the Activity's actual picture-in-picture mode changes. */
+    fun onPictureInPictureModeChanged(enabled: Boolean) {
+        checkThread()
+        if (closed || pictureInPicture == enabled) return
+        pictureInPicture = enabled
+        if (id != 0L) nativePictureInPictureChanged(id, enabled)
+        view.get()?.requestFrame()
+    }
+
+    internal fun inPictureInPicture() = !closed && pictureInPicture && phase != BACKGROUND
+
+    private fun supportsPictureInPicture(): Boolean {
+// gpuiforge:if media
+        return !closed && pictureInPictureHost?.supported() == true
+// gpuiforge:else
+        return false
+// gpuiforge:endif
+    }
+
+    private fun enterPictureInPicture(width: Int, height: Int) {
+        checkThread()
+        // Activity transitions may synchronously resize the Rust window.
+        handler.postAtTime({
+            if (!closed && id != 0L) {
+                val error = try {
+// gpuiforge:if media
+                    check(active()) { "Picture-in-picture requires an active Activity" }
+                    val host = checkNotNull(pictureInPictureHost) { "No picture-in-picture host attached" }
+                    hideSoftKeyboard()
+                    host.enter(width, height)
+                    null
+// gpuiforge:else
+                    "Enable the Android media feature for picture-in-picture"
+// gpuiforge:endif
+                } catch (error: RuntimeException) {
+                    error.message ?: "Unable to enter picture-in-picture"
+                }
+                nativePictureInPictureResult(id, error)
+            }
+        }, this, SystemClock.uptimeMillis())
+    }
     private var keyboardRequestVersion = 0L
     private var permissionHostVersion = 0L
     private val permissions = PermissionHost { token, status ->
@@ -199,6 +259,7 @@ class GpuiSession : AutoCloseable {
         if (id == 0L) {
             id = nativeCreate(this, surface, width, height, density)
             nativeLifecycle(id, phase)
+            nativePictureInPictureChanged(id, pictureInPicture)
         } else {
             nativeAttach(id, surface, width, height, density)
         }
@@ -615,6 +676,10 @@ class GpuiSession : AutoCloseable {
                 fullscreen = false
                 fullscreenChanged?.accept(false)
                 fullscreenChanged = null
+                pictureInPicture = false
+// gpuiforge:if media
+                pictureInPictureHost = null
+// gpuiforge:endif
                 closeRequested = null
                 errorHandler = null
                 view.clear()
@@ -645,6 +710,8 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeKey(id: Long, name: String, modifiers: Int, down: Boolean): Boolean
         @JvmStatic private external fun nativeInputAction(id: Long, epoch: Long, action: Int): Boolean
         @JvmStatic private external fun nativeLifecycle(id: Long, phase: Int)
+        @JvmStatic private external fun nativePictureInPictureChanged(id: Long, enabled: Boolean)
+        @JvmStatic private external fun nativePictureInPictureResult(id: Long, error: String?)
         @JvmStatic private external fun nativeFocus(id: Long, active: Boolean)
         @JvmStatic private external fun nativeAppearance(id: Long, dark: Boolean)
         @JvmStatic private external fun nativeBack(id: Long): Boolean

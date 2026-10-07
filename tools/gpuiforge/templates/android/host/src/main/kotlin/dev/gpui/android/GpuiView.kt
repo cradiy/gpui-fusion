@@ -179,10 +179,11 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     }
 
     internal fun updateFrameScheduling() {
-        val active = surfaceReady && session.active() && hasWindowFocus() && isShown
+        val focused = surfaceReady && session.active() && hasWindowFocus() && isShown
+        val active = surfaceReady && isShown && (focused || session.inPictureInPicture())
         if (active && !framesActive) frameRequested = true
         framesActive = active
-        session.focus(active)
+        session.focus(focused)
         if (active && !framePosted && (frameRequested || scroll.needsFrame() || textMenu.needsFrame())) {
             framePosted = true
             choreographer.postFrameCallback(this)
@@ -197,7 +198,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     override fun doFrame(frameTimeNanos: Long) {
         framePosted = false
         frameRequested = false
-        if (surfaceReady && session.active() && hasWindowFocus() && isShown) {
+        if (surfaceReady && isShown && ((session.active() && hasWindowFocus()) || session.inPictureInPicture())) {
             try {
                 scroll.frame()
                 textMenu.beforeFrame(frameTimeNanos)

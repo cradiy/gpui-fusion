@@ -37,6 +37,7 @@ impl PlatformDisplay for AndroidDisplay {
 
 #[derive(Default)]
 struct Callbacks {
+    picture_in_picture: Option<Box<dyn FnMut(bool)>>,
     back: Option<Box<dyn FnMut()>>,
     back_gesture: Option<Box<dyn FnMut(BackGestureEvent)>>,
     frame: Option<Box<dyn FnMut(RequestFrameOptions)>>,
@@ -53,6 +54,8 @@ pub(crate) struct AndroidWindow {
     host: Arc<crate::bridge::Host>,
     back_enabled: Cell<bool>,
     fullscreen: Cell<bool>,
+    picture_in_picture: Cell<bool>,
+    picture_in_picture_request: RefCell<Option<oneshot::Sender<Result<()>>>>,
     insets: RefCell<WindowInsets>,
     // Renderer must be dropped before the last native window reference.
     renderer: RefCell<WgpuRenderer>,
@@ -88,6 +91,8 @@ impl AndroidWindow {
             host,
             back_enabled: Cell::new(false),
             fullscreen: Cell::new(false),
+            picture_in_picture: Cell::new(false),
+            picture_in_picture_request: RefCell::default(),
             insets: RefCell::default(),
             renderer: RefCell::new(renderer),
             native: RefCell::new(Some(native)),
@@ -240,10 +245,32 @@ impl AndroidWindow {
     }
 
     pub fn frame(&self) -> Result<()> {
-        if !self.active.get() {
+        if !self.active.get() && !self.picture_in_picture.get() {
             return Ok(());
         }
         self.render_frame(false)
+    }
+
+    pub fn picture_in_picture_changed(&self, enabled: bool) {
+        if self.picture_in_picture.replace(enabled) == enabled {
+            return;
+        }
+        self.force_frame.set(true);
+        let callback = self.callbacks.borrow_mut().picture_in_picture.take();
+        if let Some(mut callback) = callback {
+            callback(enabled);
+            self.callbacks
+                .borrow_mut()
+                .picture_in_picture
+                .get_or_insert(callback);
+        }
+        self.host.request_frame();
+    }
+
+    pub fn picture_in_picture_result(&self, result: Result<()>) {
+        if let Some(sender) = self.picture_in_picture_request.borrow_mut().take() {
+            let _ = sender.send(result);
+        }
     }
 
     pub fn set_appearance(&self, appearance: WindowAppearance) {
@@ -499,6 +526,29 @@ impl PlatformWindow for AndroidWindowHandle {
     }
     fn is_fullscreen(&self) -> bool {
         self.fullscreen.get()
+    }
+    fn supports_picture_in_picture(&self) -> bool {
+        self.host.supports_picture_in_picture().unwrap_or(false)
+    }
+    fn is_picture_in_picture(&self) -> bool {
+        self.picture_in_picture.get()
+    }
+    fn enter_picture_in_picture(&self, aspect_ratio: Size<u32>) -> oneshot::Receiver<Result<()>> {
+        let (sender, receiver) = oneshot::channel();
+        if self.picture_in_picture_request.borrow().is_some() {
+            let _ = sender.send(Err(anyhow::anyhow!(
+                "picture-in-picture request already pending"
+            )));
+            return receiver;
+        }
+        *self.picture_in_picture_request.borrow_mut() = Some(sender);
+        if let Err(error) = self.host.enter_picture_in_picture(aspect_ratio) {
+            self.picture_in_picture_result(Err(error));
+        }
+        receiver
+    }
+    fn on_picture_in_picture_changed(&self, callback: Box<dyn FnMut(bool)>) {
+        self.callbacks.borrow_mut().picture_in_picture = Some(callback);
     }
     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>) {
         self.callbacks.borrow_mut().frame = Some(callback);

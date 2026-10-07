@@ -26,6 +26,7 @@ fn main() {
                 artwork: None,
                 artwork_request: 0,
                 subtitles: Vec::new(),
+                picture_in_picture_pending: false,
             });
             window.on_system_back(
                 cx,
@@ -37,6 +38,11 @@ fn main() {
                     cx.notify();
                 }),
             );
+            let weak = view.downgrade();
+            window.on_picture_in_picture_changed(cx, move |enabled, _, cx| {
+                eprintln!("picture-in-picture: {enabled}");
+                let _ = weak.update(cx, |_, cx| cx.notify());
+            });
             view
         })
         .expect("open media window");
@@ -59,9 +65,39 @@ struct MediaDemo {
     artwork: Option<MediaArtwork>,
     artwork_request: u64,
     subtitles: Vec<(MediaStreamId, Arc<SubtitleCue>)>,
+    picture_in_picture_pending: bool,
 }
 
 impl MediaDemo {
+    fn enter_picture_in_picture(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if self.picture_in_picture_pending {
+            return;
+        }
+        let ratio = self
+            .player
+            .as_ref()
+            .and_then(|player| player.read(cx).media_info())
+            .and_then(|info| info.video_streams.iter().find(|stream| stream.selected))
+            .and_then(|stream| stream.display_size.or(stream.coded_size))
+            .filter(|size| size.width > 0 && size.height > 0)
+            .map(|size| gpui::size(size.width as u32, size.height as u32))
+            .unwrap_or(size(16, 9));
+        let request = window.enter_picture_in_picture(ratio, cx);
+        self.picture_in_picture_pending = true;
+        cx.spawn(async move |this, cx| {
+            let result = request.await;
+            let _ = this.update(cx, |this, cx| {
+                this.picture_in_picture_pending = false;
+                if let Err(error) = result {
+                    this.status = format!("Picture-in-picture: {error:#}");
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
     fn choose(&mut self, cx: &mut Context<Self>) {
         let selection = cx.prompt_for_files(FilePromptOptions::default());
         cx.spawn(async move |this, cx| {
@@ -481,6 +517,30 @@ impl Render for MediaDemo {
                 .map(|(_, cue)| cue.text.as_ref())
                 .collect::<Vec<_>>()
                 .join("\n");
+            if window.is_picture_in_picture() {
+                return div()
+                    .size_full()
+                    .bg(rgb(0x000000))
+                    .child(video_with_subtitles(player.clone(), subtitle_text))
+                    .into_any_element();
+            }
+            if window.supports_picture_in_picture() {
+                column = column.child(
+                    div()
+                        .id("picture-in-picture")
+                        .p_3()
+                        .rounded_lg()
+                        .bg(rgb(0x30475c))
+                        .child(if self.picture_in_picture_pending {
+                            "Opening picture-in-picture…"
+                        } else {
+                            "Picture-in-picture"
+                        })
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.enter_picture_in_picture(window, cx)
+                        })),
+                );
+            }
             if player
                 .read(cx)
                 .media_info()
@@ -590,24 +650,7 @@ impl Render for MediaDemo {
                         .w_full()
                         .flex_shrink_0()
                         .bg(rgb(0x000000))
-                        .child(video_container(player.clone()).when(
-                            !subtitle_text.is_empty(),
-                            |video| {
-                                video.child(
-                                    div()
-                                        .absolute()
-                                        .bottom_4()
-                                        .left_4()
-                                        .right_4()
-                                        .p_2()
-                                        .rounded_md()
-                                        .bg(rgba(0x000000b0))
-                                        .text_color(rgb(0xffffff))
-                                        .text_center()
-                                        .child(subtitle_text),
-                                )
-                            },
-                        )),
+                        .child(video_with_subtitles(player.clone(), subtitle_text)),
                 )
                 .child(format!(
                     "{:.1}s / {:.1}s · {:?}",
@@ -663,6 +706,25 @@ impl Render for MediaDemo {
                     .child(surface(frame.clone()).absolute().size_full()),
             );
         }
-        column
+        column.into_any_element()
     }
+}
+
+fn video_with_subtitles(player: Entity<VideoPlayer>, text: String) -> impl IntoElement {
+    video_container(player).when(!text.is_empty(), |video| {
+        video.child(
+            div()
+                .absolute()
+                .bottom_2()
+                .left_2()
+                .right_2()
+                .p_1()
+                .rounded_md()
+                .bg(rgba(0x000000b0))
+                .text_sm()
+                .text_color(rgb(0xffffff))
+                .text_center()
+                .child(text),
+        )
+    })
 }

@@ -116,6 +116,7 @@ Handler and background work uses Rust workers. Visible, resumed, focused Views
 schedule Choreographer callbacks for invalidations, requested animation frames,
 inertial scrolling and selection-handle dragging. Idle Views stop scheduling frames;
 input, asynchronous updates and resuming the host wake them as needed.
+Visible picture-in-picture Views also schedule frames without taking input focus.
 If a frame cannot be presented, GPUI schedules another frame to retry it.
 Drawing and Surface configuration run on the main Looper; swapchain recreation
 can wait for in-flight GPU work.
@@ -127,6 +128,20 @@ handle configuration changes receive updates through the View as well.
 The generated application supplies light and dark Android themes. Applications
 choose their GPUI colors from the reported appearance; custom colors are not
 automatically recolored.
+
+## Picture-in-picture host
+
+The GPUiForge `media` feature enables picture-in-picture in the generated
+Activity and Manifest. Applications use the shared
+[window and playback API](../../gpui_media/docs/playback-lifecycle.md#picture-in-picture).
+
+An embedded host calls `session.attachPictureInPictureHost(activity)` and
+`session.detachPictureInPictureHost(activity)` with its Activity lifecycle,
+and forwards `onPictureInPictureModeChanged` to the session. Its Activity must
+declare `android:supportsPictureInPicture="true"` and handle
+`screenSize|smallestScreenSize|screenLayout|orientation` configuration changes.
+Android applies picture-in-picture to the whole Activity; embedded applications
+must also hide any surrounding native UI during that mode.
 
 ## Fullscreen
 

@@ -70,3 +70,29 @@ Where foreground execution is required, retain a
 Creating a player or a media notification does not itself start a foreground
 service. A lease does not supply playlist persistence or resume playback after
 process death.
+
+## Picture-in-picture
+
+Use the window API when `window.supports_picture_in_picture()` is true:
+
+```rust,ignore
+let request = window.enter_picture_in_picture(gpui::size(16, 9), cx);
+cx.spawn(async move |_, _| {
+    if let Err(error) = request.await {
+        log::warn!("Picture-in-picture request failed: {error:#}");
+    }
+}).detach();
+```
+
+The ratio describes the content width and height; the system may limit its
+range or reject entry. Register `Window::on_picture_in_picture_changed` to
+refresh the view, and render a compact video surface and subtitles when
+`Window::is_picture_in_picture()` is true. Keep the same player entity alive
+across both layouts. The system provides controls for returning to the full
+window or closing it. Entry is explicit; going Home does not request it.
+
+Android requires the GPUiForge `media` host feature. A visible picture-in-picture
+window continues rendering while the Activity is paused. Do not pause playback
+solely because it loses input focus. Bind a `SystemMediaSession` for system
+play/pause controls; picture-in-picture does not create a separate media session
+or background service. Other window backends currently report unsupported.

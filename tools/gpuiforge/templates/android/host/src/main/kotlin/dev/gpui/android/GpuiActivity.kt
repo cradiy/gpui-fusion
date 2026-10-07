@@ -41,6 +41,9 @@ abstract class GpuiActivity : Activity() {
         session.setOnFullscreenChanged { fullscreen.setEnabled(it) }
         if (retained == null) session.onOpenIntent(intent)
         session.attachPermissionHost(this)
+// gpuiforge:if media
+        session.attachPictureInPictureHost(this)
+// gpuiforge:endif
 // gpuiforge:if files
         session.attachFileHost(this)
 // gpuiforge:endif
@@ -115,7 +118,16 @@ abstract class GpuiActivity : Activity() {
         super.onPause()
     }
     override fun onStop() { session.setLifecycle(GpuiSession.BACKGROUND); super.onStop() }
+// gpuiforge:if media
+    override fun onPictureInPictureModeChanged(enabled: Boolean, configuration: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(enabled, configuration)
+        session.onPictureInPictureModeChanged(enabled)
+    }
+// gpuiforge:endif
     override fun onDestroy() {
+// gpuiforge:if media
+        session.detachPictureInPictureHost(this)
+// gpuiforge:endif
 // gpuiforge:if files
         session.detachFileHost(this)
 // gpuiforge:endif

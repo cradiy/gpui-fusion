@@ -171,7 +171,7 @@ Optional modules are:
 | `files` | Document pickers, persistent document grants, private/public storage and file provider |
 | `sharing` | Sending and receiving shares; automatically includes `files` |
 | `credentials` | Android credential storage |
-| `media` | Media playback and decoding, including the Media3 dependency |
+| `media` | Media playback, decoding and picture-in-picture windows, including the Media3 dependency |
 | `notifications` | General notifications, actions and inline replies |
 | `media-notifications` | System media session and playback notification; independent of `media` |
 | `background-media` | Explicit foreground playback leases; includes `media-notifications`; requires `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_MEDIA_PLAYBACK` in `permissions` |

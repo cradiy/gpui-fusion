@@ -19,7 +19,7 @@
         },
         {
           "const": "media",
-          "description": "Media playback and frame decoding, including the Media3 dependency. System playback notifications are selected separately with media-notifications.",
+          "description": "Media playback, frame decoding and picture-in-picture windows, including the Media3 dependency. System playback notifications are selected separately with media-notifications.",
           "type": "string"
         },
         {

@@ -213,6 +213,12 @@ fn sync_prunes_disabled_modules_and_icons() {
     );
     assert!(!host.join("MediaSession.kt").exists());
     assert!(!host.join("MediaTracks.kt").exists());
+    assert!(!host.join("PictureInPictureHost.kt").exists());
+    assert!(
+        !fs::read_to_string(output.join("app/src/main/AndroidManifest.xml"))
+            .unwrap()
+            .contains("supportsPictureInPicture")
+    );
     assert!(
         !fs::read_to_string(output.join("host/build.gradle.kts"))
             .unwrap()

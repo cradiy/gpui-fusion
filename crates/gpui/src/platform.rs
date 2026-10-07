@@ -925,6 +925,18 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn zoom(&self);
     fn toggle_fullscreen(&self);
     fn is_fullscreen(&self) -> bool;
+    fn supports_picture_in_picture(&self) -> bool {
+        false
+    }
+    fn is_picture_in_picture(&self) -> bool {
+        false
+    }
+    fn enter_picture_in_picture(&self, _aspect_ratio: Size<u32>) -> oneshot::Receiver<Result<()>> {
+        let (sender, receiver) = oneshot::channel();
+        let _ = sender.send(Err(anyhow::anyhow!("picture-in-picture is not supported")));
+        receiver
+    }
+    fn on_picture_in_picture_changed(&self, _callback: Box<dyn FnMut(bool)>) {}
     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>);
     /// Returns a non-reentrant wakeup for platforms that schedule frames on demand.
     /// Multiple requests may be coalesced; the callback must not render synchronously.

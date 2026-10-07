@@ -2727,6 +2727,48 @@ impl Window {
         self.platform_window.toggle_fullscreen();
     }
 
+    /// Whether the current host supports system picture-in-picture windows.
+    pub fn supports_picture_in_picture(&self) -> bool {
+        self.platform_window.supports_picture_in_picture()
+    }
+
+    /// Whether the system currently presents this window in picture-in-picture.
+    pub fn is_picture_in_picture(&self) -> bool {
+        self.platform_window.is_picture_in_picture()
+    }
+
+    /// Requests picture-in-picture using the content's width-to-height ratio.
+    /// The system may reject the request or restrict the supported ratio. Success
+    /// means the request was accepted; observe mode changes for the actual state.
+    /// The application supplies the compact UI and the system controls returning
+    /// to the full window. Unsupported platforms return an error.
+    pub fn enter_picture_in_picture(
+        &self,
+        aspect_ratio: Size<u32>,
+        cx: &App,
+    ) -> Task<anyhow::Result<()>> {
+        if aspect_ratio.width == 0 || aspect_ratio.height == 0 {
+            return Task::ready(Err(anyhow::anyhow!(
+                "picture-in-picture aspect ratio must be positive"
+            )));
+        }
+        let result = self.platform_window.enter_picture_in_picture(aspect_ratio);
+        cx.foreground_executor().spawn(async move { result.await? })
+    }
+
+    /// Replaces the listener for system picture-in-picture mode changes.
+    pub fn on_picture_in_picture_changed(
+        &self,
+        cx: &App,
+        mut callback: impl FnMut(bool, &mut Window, &mut App) + 'static,
+    ) {
+        let mut cx = self.to_async(cx);
+        self.platform_window
+            .on_picture_in_picture_changed(Box::new(move |enabled| {
+                let _ = cx.update(|window, cx| callback(enabled, window, cx));
+            }));
+    }
+
     /// Updates the IME panel position suggestions for languages like japanese, chinese.
     pub fn invalidate_character_coordinates(&self) {
         self.on_next_frame(|window, cx| {

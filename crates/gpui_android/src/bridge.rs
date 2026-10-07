@@ -215,6 +215,32 @@ impl Host {
                 .z()?)
         })
     }
+    pub fn supports_picture_in_picture(&self) -> Result<bool> {
+        self.with_env(|env| {
+            Ok(env
+                .call_method(self.object.as_obj(), "supportsPictureInPicture", "()Z", &[])?
+                .z()?)
+        })
+    }
+
+    pub fn enter_picture_in_picture(&self, ratio: gpui::Size<u32>) -> Result<()> {
+        let width = i32::try_from(ratio.width)?;
+        let height = i32::try_from(ratio.height)?;
+        anyhow::ensure!(
+            width > 0 && height > 0,
+            "invalid picture-in-picture aspect ratio"
+        );
+        self.with_env(|env| {
+            env.call_method(
+                self.object.as_obj(),
+                "enterPictureInPicture",
+                "(II)V",
+                &[JValue::Int(width), JValue::Int(height)],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn window_appearance(&self) -> Result<gpui::WindowAppearance> {
         self.with_env(|env| {
             let dark = env
@@ -530,6 +556,16 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         method("nativeInputIndex", "(JJFF)I", input_index as *mut c_void),
         method("nativeScrollInput", "(JJFF)Z", scroll_input as *mut c_void),
         method("nativeLifecycle", "(JI)V", lifecycle as *mut c_void),
+        method(
+            "nativePictureInPictureChanged",
+            "(JZ)V",
+            picture_in_picture_changed as *mut c_void,
+        ),
+        method(
+            "nativePictureInPictureResult",
+            "(JLjava/lang/String;)V",
+            picture_in_picture_result as *mut c_void,
+        ),
         method("nativeFocus", "(JZ)V", focus as *mut c_void),
         method("nativeAppearance", "(JZ)V", appearance as *mut c_void),
         method("nativeBack", "(J)Z", system_back as *mut c_void),
@@ -1030,6 +1066,41 @@ extern "system" fn lifecycle(mut env: JNIEnv, _: JClass, id: jlong, phase: jint)
         Ok(())
     });
 }
+extern "system" fn picture_in_picture_changed(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    enabled: jboolean,
+) {
+    call(&mut env, |_| {
+        session(id)?
+            .platform
+            .window
+            .picture_in_picture_changed(enabled != 0);
+        Ok(())
+    });
+}
+
+extern "system" fn picture_in_picture_result(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    error: JString,
+) {
+    call(&mut env, |env| {
+        let result = if error.is_null() {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(String::from(env.get_string(&error)?)))
+        };
+        session(id)?
+            .platform
+            .window
+            .picture_in_picture_result(result);
+        Ok(())
+    });
+}
+
 extern "system" fn appearance(mut env: JNIEnv, _: JClass, id: jlong, dark: jboolean) {
     call(&mut env, |_| {
         session(id)?.platform.window.set_appearance(if dark != 0 {

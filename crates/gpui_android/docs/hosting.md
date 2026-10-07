@@ -398,6 +398,25 @@ and call `detachFileHost(activity)` on destruction. Request codes
 selection across Activity configuration recreation; final host detachment
 completes it with an error. Results from earlier requests are ignored.
 
+## Credentials
+
+`App::write_credentials`, `read_credentials` and `delete_credentials` store one
+username and binary secret per exact URL string. Writing replaces that entry;
+reading a missing entry returns `None`, and deleting it succeeds. The UTF-8
+username and secret together may occupy at most 1 MiB minus four bytes.
+
+Android uses an application-scoped Android Keystore AES-GCM key. Encrypted
+records live in private, backup-excluded storage; credential storage requires no
+runtime permission or biometric prompt. Hardware protection depends on the
+device's Keystore implementation. See [Android Keystore](https://developer.android.com/privacy-and-security/keystore).
+
+Operations run on background workers. Await a write or deletion before issuing
+a dependent operation. Dropping its task does not roll back an operation already
+dispatched. Authentication failures, malformed records and unavailable keys
+return errors without deleting records or silently replacing the key. Explicit
+deletion remains available for an unreadable entry. Credentials are not portable
+between installations or devices.
+
 ## System Back
 
 Register a window callback with `Window::on_system_back(cx, callback)` and call

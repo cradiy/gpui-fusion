@@ -111,7 +111,7 @@ impl FileDialog {
                 return;
             }
         };
-        let executor = crate::file::io_executor();
+        let executor = crate::dispatcher::io_executor();
         let task = self.background.spawn(async move {
             objects
                 .into_iter()

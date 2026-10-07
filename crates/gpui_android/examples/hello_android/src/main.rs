@@ -61,6 +61,8 @@ fn main() {
                 clipboard_status: "Copy the counter or paste text from another app.".into(),
                 file_status: "Choose a file to read its contents.".into(),
                 file_pending: false,
+                credential_pending: false,
+                credential_status: "Check encrypted storage with disposable sample data.".into(),
                 document: None,
                 file_text: cx.new(|cx| {
                     TextInput::new(cx)
@@ -157,6 +159,8 @@ struct Counter {
     clipboard_status: String,
     file_status: String,
     file_pending: bool,
+    credential_pending: bool,
+    credential_status: String,
     document: Option<SelectedFile>,
     file_text: Entity<TextInput>,
     permission_status: String,
@@ -185,6 +189,63 @@ fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
 }
 
 impl Counter {
+    fn check_credentials(&mut self, cx: &mut Context<Self>) {
+        if self.credential_pending {
+            return;
+        }
+        self.credential_pending = true;
+        self.credential_status = "Checking credential storage...".into();
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let url = format!(
+                "gpui-example://credentials/{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            );
+            let result: anyhow::Result<()> = async {
+                anyhow::ensure!(
+                    cx.update(|cx| cx.read_credentials(&url)).await?.is_none(),
+                    "Expected an empty sample entry"
+                );
+                for (username, password) in [("示例用户", &[0, 255, 128, 42][..]), ("", &[][..])]
+                {
+                    cx.update(|cx| cx.write_credentials(&url, username, password))
+                        .await?;
+                    let stored = cx.update(|cx| cx.read_credentials(&url)).await?;
+                    anyhow::ensure!(
+                        stored == Some((username.to_owned(), password.to_vec())),
+                        "Credential round trip failed"
+                    );
+                }
+                Ok(())
+            }
+            .await;
+            let cleanup = cx.update(|cx| cx.delete_credentials(&url)).await;
+            let result = result.and(cleanup);
+            let result = match result {
+                Ok(()) => cx
+                    .update(|cx| cx.read_credentials(&url))
+                    .await
+                    .and_then(|value| {
+                        anyhow::ensure!(value.is_none(), "Sample entry was not removed");
+                        Ok(())
+                    }),
+                error => error,
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.credential_pending = false;
+                this.credential_status = match result {
+                    Ok(()) => "Credential write, read, overwrite and delete passed.".into(),
+                    Err(error) => format!("Credential storage: {error}"),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn save_in_location(
         &mut self,
         location: gpui::gpui_io::SystemLocation,
@@ -556,6 +617,16 @@ impl Render for Counter {
                     .flex_col()
                     .gap_4()
                     .child(div().text_xl().child("Clipboard & links"))
+                    .child(
+                        button("check-credentials", "Check credential storage")
+                            .on_click(cx.listener(|this, _, _, cx| this.check_credentials(cx))),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .whitespace_normal()
+                            .child(self.credential_status.clone()),
+                    )
                     .child(
                         div()
                             .flex()

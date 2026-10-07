@@ -2,6 +2,7 @@
 #![cfg(target_os = "android")]
 
 mod bridge;
+mod credentials;
 mod dispatcher;
 mod file;
 mod file_dialog;

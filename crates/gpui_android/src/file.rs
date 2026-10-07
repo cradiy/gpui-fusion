@@ -12,37 +12,8 @@ use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
     os::fd::FromRawFd,
-    sync::{Arc, Mutex, OnceLock, mpsc},
+    sync::Arc,
 };
-
-pub(crate) fn io_executor() -> IoExecutor {
-    static EXECUTOR: OnceLock<IoExecutor> = OnceLock::new();
-    EXECUTOR
-        .get_or_init(|| {
-            // Document sessions and their cleanup may outlive an Activity's dispatcher.
-            let (sender, receiver) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
-            let receiver = Arc::new(Mutex::new(receiver));
-            for index in 0..2 {
-                let receiver = receiver.clone();
-                std::thread::Builder::new()
-                    .name(format!("gpui-file-{index}"))
-                    .spawn(move || {
-                        loop {
-                            let work = receiver.lock().unwrap().recv();
-                            match work {
-                                Ok(work) => work(),
-                                Err(_) => break,
-                            }
-                        }
-                    })
-                    .expect("failed to start file worker");
-            }
-            IoExecutor::new(move |work| {
-                sender.send(work).expect("file workers stopped");
-            })
-        })
-        .clone()
-}
 
 pub(crate) struct Document {
     pub vm: Arc<JavaVM>,

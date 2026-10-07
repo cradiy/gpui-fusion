@@ -3,3 +3,5 @@
 -keep class dev.gpui.android.SelectedDocument { *; }
 -keep class dev.gpui.android.DocumentOutput { *; }
 -keep class dev.gpui.android.FileStore { *; }
+-keep class dev.gpui.android.CredentialStore { *; }
+-keep class dev.gpui.android.StoredCredential { *; }

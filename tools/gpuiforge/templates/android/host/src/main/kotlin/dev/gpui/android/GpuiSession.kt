@@ -68,6 +68,7 @@ class GpuiSession : AutoCloseable {
     }
 
     private fun fileStore(): FileStore = FileStore(requireContext())
+    private fun credentialStore(): CredentialStore = CredentialStore(requireContext())
 
     init { checkThread() }
 

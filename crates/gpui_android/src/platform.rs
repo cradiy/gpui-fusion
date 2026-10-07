@@ -20,6 +20,7 @@ use std::{
 /// Surface replacement until the session is explicitly closed.
 pub struct AndroidPlatform {
     pub(crate) dispatcher: Arc<AndroidDispatcher>,
+    foreground: ForegroundExecutor,
     pub(crate) host: Arc<Host>,
     text: Arc<CosmicTextSystem>,
     pub(crate) context: GpuContext,
@@ -38,7 +39,7 @@ impl AndroidPlatform {
     pub fn no_backup_directory(
         &self,
     ) -> futures::future::LocalBoxFuture<'static, Result<gpui_io::LocationHandle>> {
-        let request = crate::file_system::no_backup(&self.host, crate::file::io_executor());
+        let request = crate::file_system::no_backup(&self.host, crate::dispatcher::io_executor());
         Box::pin(async move { request?.await })
     }
     pub(crate) fn new(
@@ -53,6 +54,7 @@ impl AndroidPlatform {
             "invalid Android surface geometry"
         );
         let dispatcher = AndroidDispatcher::new(host.clone());
+        let foreground = ForegroundExecutor::new(dispatcher.clone());
         let appearance = host.window_appearance()?;
         let text = Arc::new(CosmicTextSystem::new_without_system_fonts("IBM Plex Sans"));
         text.add_font_files(&host.system_font_paths()?);
@@ -83,8 +85,9 @@ impl AndroidPlatform {
             files: crate::file_dialog::FileDialog::new(
                 host.clone(),
                 BackgroundExecutor::new(dispatcher.clone()),
-                ForegroundExecutor::new(dispatcher.clone()),
+                foreground.clone(),
             ),
+            foreground,
             dispatcher,
             permissions: crate::permissions::PermissionState::new(host.clone()),
             host,
@@ -171,7 +174,7 @@ impl Platform for AndroidPlatform {
         BackgroundExecutor::new(self.dispatcher.clone())
     }
     fn foreground_executor(&self) -> ForegroundExecutor {
-        ForegroundExecutor::new(self.dispatcher.clone())
+        self.foreground.clone()
     }
     fn text_system(&self) -> Arc<dyn PlatformTextSystem> {
         self.text.clone()
@@ -254,7 +257,7 @@ impl Platform for AndroidPlatform {
     }
     fn file_system(&self, app_id: &str) -> Result<gpui_io::FileSystem> {
         gpui_io::validate_app_id(app_id)?;
-        crate::file_system::file_system(&self.host, crate::file::io_executor())
+        crate::file_system::file_system(&self.host, crate::dispatcher::io_executor())
     }
     fn can_select_mixed_files_and_dirs(&self) -> bool {
         false
@@ -349,20 +352,20 @@ impl Platform for AndroidPlatform {
     fn write_to_clipboard_async(&self, item: ClipboardItem) -> Task<Result<()>> {
         Task::ready(self.write_clipboard(item))
     }
-    fn write_credentials(&self, _: &str, _: &str, _: &[u8]) -> Task<Result<()>> {
-        Task::ready(Err(anyhow::anyhow!(
-            "Android credential storage is not implemented"
-        )))
+    fn write_credentials(&self, url: &str, username: &str, password: &[u8]) -> Task<Result<()>> {
+        crate::credentials::write(
+            &self.host,
+            self.foreground_executor(),
+            url,
+            username,
+            password,
+        )
     }
-    fn read_credentials(&self, _: &str) -> Task<Result<Option<(String, Vec<u8>)>>> {
-        Task::ready(Err(anyhow::anyhow!(
-            "Android credential storage is not implemented"
-        )))
+    fn read_credentials(&self, url: &str) -> Task<Result<Option<(String, Vec<u8>)>>> {
+        crate::credentials::read(&self.host, self.foreground_executor(), url)
     }
-    fn delete_credentials(&self, _: &str) -> Task<Result<()>> {
-        Task::ready(Err(anyhow::anyhow!(
-            "Android credential storage is not implemented"
-        )))
+    fn delete_credentials(&self, url: &str) -> Task<Result<()>> {
+        crate::credentials::delete(&self.host, self.foreground_executor(), url)
     }
     fn keyboard_layout(&self) -> Box<dyn PlatformKeyboardLayout> {
         Box::new(AndroidKeyboardLayout)

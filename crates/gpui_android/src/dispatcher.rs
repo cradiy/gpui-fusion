@@ -1,15 +1,48 @@
 use crate::bridge::Host;
-use gpui::{PlatformDispatcher, Priority, RunnableVariant, queue::PriorityQueueReceiver};
+use gpui::{
+    PlatformDispatcher, Priority, RunnableVariant, gpui_io::IoExecutor,
+    queue::PriorityQueueReceiver,
+};
 use parking_lot::Mutex;
 use std::{
     collections::HashMap,
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc,
     },
     thread::{self, ThreadId},
     time::Duration,
 };
+
+pub(crate) fn io_executor() -> IoExecutor {
+    static EXECUTOR: OnceLock<IoExecutor> = OnceLock::new();
+    EXECUTOR
+        .get_or_init(|| {
+            // File and credential operations may outlive an Activity's dispatcher.
+            let (sender, receiver) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
+            let receiver = Arc::new(Mutex::new(receiver));
+            for index in 0..2 {
+                let receiver = receiver.clone();
+                std::thread::Builder::new()
+                    .name(format!("gpui-io-{index}"))
+                    .spawn(move || {
+                        loop {
+                            let work = receiver.lock().recv();
+                            match work {
+                                Ok(work) => work(),
+                                Err(_) => break,
+                            }
+                        }
+                    })
+                    .expect("failed to start I/O worker");
+            }
+            IoExecutor::new(move |work| {
+                sender.send(work).expect("I/O workers stopped");
+            })
+        })
+        .clone()
+}
 
 pub(crate) struct AndroidDispatcher {
     owner: ThreadId,

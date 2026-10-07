@@ -85,6 +85,19 @@ pub(crate) struct Host {
     object: GlobalRef,
 }
 impl Host {
+    pub fn credential_store(&self) -> Result<(Arc<JavaVM>, GlobalRef)> {
+        self.with_env(|env| {
+            let store = env
+                .call_method(
+                    self.object.as_obj(),
+                    "credentialStore",
+                    "()Ldev/gpui/android/CredentialStore;",
+                    &[],
+                )?
+                .l()?;
+            Ok((self.vm.clone(), env.new_global_ref(store)?))
+        })
+    }
     pub fn file_store(&self) -> Result<(Arc<JavaVM>, GlobalRef)> {
         self.with_env(|env| {
             let store = env

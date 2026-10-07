@@ -16,6 +16,7 @@ anyhow.workspace = true
 futures.workspace = true
 gpui.workspace = true
 gpui_wgpu.workspace = true
+gpui_util.workspace = true
 jni = "0.21.1"
 log.workspace = true
 parking_lot.workspace = true

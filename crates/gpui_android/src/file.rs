@@ -108,8 +108,15 @@ pub(crate) fn selected_file(
             .call_method(document.object.as_obj(), "canWrite", "()Z", &[])?
             .z()?)
     })?;
+    let url = document.call(|env| {
+        let value = env
+            .call_method(document.object.as_obj(), "url", "()Ljava/lang/String;", &[])?
+            .l()?;
+        Ok(env.get_string(&JString::from(value))?.into())
+    })?;
     Ok(FileHandle::new(Arc::new(AndroidFile {
         name,
+        url,
         document,
         executor,
         writable,
@@ -139,6 +146,7 @@ impl Drop for DocumentLease {
 
 struct AndroidFile {
     name: String,
+    url: String,
     document: Arc<DocumentLease>,
     executor: IoExecutor,
     writable: bool,
@@ -173,6 +181,9 @@ impl PlatformFile for AndroidFile {
     }
     fn name(&self) -> &str {
         &self.name
+    }
+    fn url(&self) -> Option<&str> {
+        Some(&self.url)
     }
     fn can_write(&self) -> bool {
         self.writable

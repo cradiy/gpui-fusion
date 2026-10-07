@@ -5,6 +5,7 @@ members = [
   "crates/gpui",
   "crates/gpui_android",
   "crates/gpui_android/examples/hello_android",
+  "crates/gpui_android/examples/media_android",
   "crates/gpui_automation",
   "crates/gpui_inspector",
   "crates/gpui_io",

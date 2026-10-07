@@ -2,8 +2,8 @@
 
 A renderer-independent media backend with no GPUI dependency.
 `SystemBackend` uses GStreamer on Linux and macOS, and Media Foundation on
-Windows, and HTML media playback in browsers. Applications use the same player and frame-extraction APIs on each
-platform. Media types are re-exported from
+Windows, Media3 on Android, and HTML media playback in browsers. Applications use
+common playback APIs with platform-specific capabilities. Media types are re-exported from
 [`gpui_media_core`](../gpui_media_core/README.md).
 
 ## Dependencies
@@ -16,6 +16,9 @@ Linux and macOS require GStreamer development libraries at build time and
 runtime libraries with the plugins needed by the input media. Windows uses the
 operating system's Media Foundation installation and does not depend on
 GStreamer.
+
+Android uses the GPUiForge Kotlin host. See the [Android media guide](docs/android.md)
+for source access, frame output, and supported controls.
 
 ## GStreamer version
 

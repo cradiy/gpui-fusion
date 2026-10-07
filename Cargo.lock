@@ -2698,6 +2698,7 @@ dependencies = [
  "anyhow",
  "futures",
  "gpui",
+ "gpui_util",
  "gpui_wgpu",
  "jni 0.21.1",
  "log",
@@ -2889,6 +2890,7 @@ dependencies = [
 name = "gpui_media_backend"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "core-foundation 0.10.0",
  "core-video",
  "gpui_media_core",
@@ -2897,6 +2899,7 @@ dependencies = [
  "gstreamer-allocators",
  "gstreamer-app",
  "gstreamer-video",
+ "jni 0.21.1",
  "js-sys",
  "log",
  "url",
@@ -2968,6 +2971,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-channel",
+ "jni 0.21.1",
  "log",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -4318,6 +4322,18 @@ checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
 dependencies = [
  "cfg-if",
  "digest",
+]
+
+[[package]]
+name = "media_android"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui",
+ "gpui_android",
+ "gpui_media",
+ "gpui_media_backend",
+ "gpui_platform",
 ]
 
 [[package]]

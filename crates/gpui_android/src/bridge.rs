@@ -595,6 +595,10 @@ extern "system" fn create(
             CURRENT.with(|current| current.borrow().is_none()),
             "nested Android launch"
         );
+        let context = env
+            .call_method(&host, "requireContext", "()Landroid/content/Context;", &[])?
+            .l()?;
+        gpui_util::android::AndroidRuntime::initialize(env, &context)?;
         let host = Arc::new(Host {
             vm: VM.get().context("JNI VM not initialized")?.clone(),
             object: env.new_global_ref(host)?,

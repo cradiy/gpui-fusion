@@ -57,7 +57,9 @@ gpui_media_backend = { path = ".../gpui_media_backend", features = ["v1_26"] }
 ```
 
 `gpui_media_backend::SystemBackend` selects GStreamer on Linux/macOS and Media
-Foundation on Windows, and browser media playback on Web. GStreamer requires at least 1.24; version features and
+Foundation on Windows, Media3 playback on Android, and browser media playback on Web.
+See the [Android media guide](../gpui_media_backend/docs/android.md) for supported operations.
+GStreamer requires at least 1.24; version features and
 runtime requirements are documented in the [backend guide](../gpui_media_backend/README.md).
 
 ```rust

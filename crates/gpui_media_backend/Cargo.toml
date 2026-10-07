@@ -4,7 +4,7 @@ version = "0.1.0"
 publish.workspace = true
 edition.workspace = true
 license = "MIT"
-description = "Renderer-independent GStreamer and Media Foundation media backend"
+description = "Renderer-independent system media playback and frame extraction"
 
 [features]
 default = ["v1_24"]
@@ -45,6 +45,11 @@ windows-core.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+anyhow.workspace = true
+gpui_util.workspace = true
+jni = "0.21.1"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 gpui_util.workspace = true

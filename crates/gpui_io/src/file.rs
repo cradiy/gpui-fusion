@@ -83,7 +83,8 @@ pub trait PlatformFile: Any + Debug + Send + Sync {
     fn path(&self) -> Option<&Path> {
         None
     }
-    /// A browser object URL, kept valid by the handle or its open sessions.
+    /// A provider URL, such as an Android content URI or browser object URL.
+    /// Keep the handle alive while using it; the URL does not grant access to other apps.
     fn url(&self) -> Option<&str> {
         None
     }

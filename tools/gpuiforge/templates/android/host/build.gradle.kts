@@ -9,4 +9,7 @@ android {
     }
 }
 
-dependencies { implementation("androidx.core:core:1.18.0") }
+dependencies {
+    implementation("androidx.core:core:1.18.0")
+    implementation("androidx.media3:media3-exoplayer:1.9.0")
+}

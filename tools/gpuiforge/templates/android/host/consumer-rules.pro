@@ -5,3 +5,4 @@
 -keep class dev.gpui.android.FileStore { *; }
 -keep class dev.gpui.android.CredentialStore { *; }
 -keep class dev.gpui.android.StoredCredential { *; }
+-keep class dev.gpui.android.MediaSession { *; }

@@ -15,6 +15,7 @@ internal class SelectedDocument(private val resolver: ContentResolver, private v
     private var outputOpen = false
     private var discarded = false
     fun canWrite(): Boolean = writable
+    fun url(): String = uri.toString()
     @Synchronized fun viewIntent(): Intent {
         check(!pending && !discarded && !outputOpen) { "Finish writing before opening the file" }
         require(uri.scheme == "content" && !uri.authority.isNullOrEmpty()) { "A content URI is required" }

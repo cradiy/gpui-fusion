@@ -115,6 +115,33 @@ The generated application supplies light and dark Android themes. Applications
 choose their GPUI colors from the reported appearance; custom colors are not
 automatically recolored.
 
+## Fullscreen
+
+Use the shared window API to request immersive fullscreen:
+
+```rust
+window.toggle_fullscreen();
+let fullscreen = window.is_fullscreen();
+```
+
+`GpuiActivity` hides the system bars and restores their previous visibility when
+fullscreen ends. Edge swipes can temporarily reveal the bars. The fullscreen
+mode survives Activity configuration changes; `is_fullscreen()` reports the
+requested mode, including while transient bars are visible. The system may
+retain window controls in multi-window environments.
+
+Safe-area and keyboard insets continue to apply. Fullscreen does not lock device
+orientation, change your view layout, or register a Back action. To make Back
+exit fullscreen, use `on_system_back` and enable Back handling only while that
+action is available; combine it with your application's navigation handler.
+
+Embedded hosts opt in with `session.setOnFullscreenChanged { enabled -> ... }`
+and apply the requested system-bar policy to their own window. The callback
+immediately receives the retained mode and later requests arrive on the main
+Looper. Clear it when its Activity is destroyed and restore any host-owned
+window state. Without a callback, fullscreen requests leave the GPUI mode
+unchanged. Temporary system-bar visibility must not be treated as an exit.
+
 ## Host ownership
 
 Android media playback uses `gpui_media_backend::SystemBackend` with the Kotlin

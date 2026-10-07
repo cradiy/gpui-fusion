@@ -164,6 +164,18 @@ impl Host {
             Ok(())
         })
     }
+    pub fn set_fullscreen(&self, enabled: bool) -> Result<bool> {
+        self.with_env(|env| {
+            Ok(env
+                .call_method(
+                    self.object.as_obj(),
+                    "setFullscreen",
+                    "(Z)Z",
+                    &[JValue::Bool(enabled.into())],
+                )?
+                .z()?)
+        })
+    }
     pub fn window_appearance(&self) -> Result<gpui::WindowAppearance> {
         self.with_env(|env| {
             let dark = env

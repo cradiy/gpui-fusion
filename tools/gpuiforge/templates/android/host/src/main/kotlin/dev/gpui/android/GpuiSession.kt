@@ -35,6 +35,8 @@ class GpuiSession : AutoCloseable {
     private var backProgress = 0f
     private var backEdge = 0
     private var backChanged: Consumer<Boolean>? = null
+    private var fullscreen = false
+    private var fullscreenChanged: Consumer<Boolean>? = null
     private var keyboardRequestVersion = 0L
     private var permissionHostVersion = 0L
     private val permissions = PermissionHost { token, status ->
@@ -247,6 +249,24 @@ class GpuiSession : AutoCloseable {
         checkThread()
         backChanged = callback
         callback?.accept(!closed && backEnabled)
+    }
+
+    /** Handles window-wide fullscreen requests. Receives the retained mode on attachment. */
+    fun setOnFullscreenChanged(callback: Consumer<Boolean>?) {
+        checkThread()
+        fullscreenChanged = callback
+        callback?.accept(!closed && fullscreen)
+    }
+
+    private fun setFullscreen(enabled: Boolean): Boolean {
+        checkThread()
+        if (closed || fullscreenChanged == null) return false
+        fullscreen = enabled
+        // Apply outside the Rust JNI call: system-bar changes can resize the View.
+        handler.postAtTime({
+            if (!closed) fullscreenChanged?.accept(fullscreen)
+        }, this, SystemClock.uptimeMillis())
+        return true
     }
 
     /** Dispatches committed system Back after the IME has had a chance to consume it. */
@@ -470,6 +490,9 @@ class GpuiSession : AutoCloseable {
                 backEnabled = false
                 backChanged?.accept(false)
                 backChanged = null
+                fullscreen = false
+                fullscreenChanged?.accept(false)
+                fullscreenChanged = null
                 closeRequested = null
                 errorHandler = null
                 view.clear()

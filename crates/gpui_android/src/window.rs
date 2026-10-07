@@ -52,6 +52,7 @@ struct Callbacks {
 pub(crate) struct AndroidWindow {
     host: Arc<crate::bridge::Host>,
     back_enabled: Cell<bool>,
+    fullscreen: Cell<bool>,
     insets: RefCell<WindowInsets>,
     // Renderer must be dropped before the last native window reference.
     renderer: RefCell<WgpuRenderer>,
@@ -86,6 +87,7 @@ impl AndroidWindow {
         Self {
             host,
             back_enabled: Cell::new(false),
+            fullscreen: Cell::new(false),
             insets: RefCell::default(),
             renderer: RefCell::new(renderer),
             native: RefCell::new(Some(native)),
@@ -487,9 +489,16 @@ impl PlatformWindow for AndroidWindowHandle {
     fn set_background_appearance(&self, _: WindowBackgroundAppearance) {}
     fn minimize(&self) {}
     fn zoom(&self) {}
-    fn toggle_fullscreen(&self) {}
+    fn toggle_fullscreen(&self) {
+        let fullscreen = !self.fullscreen.get();
+        match self.host.set_fullscreen(fullscreen) {
+            Ok(true) => self.fullscreen.set(fullscreen),
+            Ok(false) => log::warn!("Android host does not handle fullscreen requests"),
+            Err(error) => log::error!("Android fullscreen request failed: {error}"),
+        }
+    }
     fn is_fullscreen(&self) -> bool {
-        false
+        self.fullscreen.get()
     }
     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>) {
         self.callbacks.borrow_mut().frame = Some(callback);

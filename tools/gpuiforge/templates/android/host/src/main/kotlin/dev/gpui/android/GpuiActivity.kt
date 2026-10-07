@@ -17,6 +17,7 @@ import kotlin.math.roundToInt
 /** Full-page host retaining the Rust application across configuration changes. */
 abstract class GpuiActivity : Activity() {
     private lateinit var session: GpuiSession
+    private lateinit var fullscreen: FullscreenHost
     private var backEnabled = false
     private var resumed = false
     private var imeVisible = false
@@ -33,6 +34,8 @@ abstract class GpuiActivity : Activity() {
         }
         val retained = lastNonConfigurationInstance as? GpuiSession
         session = retained ?: GpuiSession()
+        fullscreen = FullscreenHost(window)
+        session.setOnFullscreenChanged { fullscreen.setEnabled(it) }
         if (retained == null) session.onOpenIntent(intent)
         session.attachPermissionHost(this)
         session.attachFileHost(this)
@@ -110,6 +113,8 @@ abstract class GpuiActivity : Activity() {
         backRegistration?.close()
         backRegistration = null
         session.setOnBackEnabledChanged(null)
+        session.setOnFullscreenChanged(null)
+        fullscreen.setEnabled(false)
         session.setOnCloseRequested(null)
         session.setOnError(null)
         if (!isChangingConfigurations) session.close()

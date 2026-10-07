@@ -7,8 +7,8 @@ use std::{sync::Arc, time::Duration};
 #[gpui_platform::main]
 fn main() {
     gpui_platform::application().run(|cx| {
-        cx.open_window(WindowOptions::default(), |_, cx| {
-            cx.new(|_| MediaDemo {
+        cx.open_window(WindowOptions::default(), |window, cx| {
+            let view = cx.new(|_| MediaDemo {
                 player: None,
                 file: None,
                 subscription: None,
@@ -17,7 +17,18 @@ fn main() {
                 thumbnail: VideoSurface::new(),
                 thumbnail_position: Duration::ZERO,
                 thumbnail_request: 0,
-            })
+            });
+            window.on_system_back(
+                cx,
+                window.handler_for(&view, |_, window, cx| {
+                    if window.is_fullscreen() {
+                        window.toggle_fullscreen();
+                    }
+                    window.set_back_enabled(false);
+                    cx.notify();
+                }),
+            );
+            view
         })
         .expect("open media window");
     });
@@ -171,7 +182,8 @@ fn log_state(state: &gpui_media::PlaybackState) {
 }
 
 impl Render for MediaDemo {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let fullscreen = window.is_fullscreen();
         let mut column = div()
             .id("media-demo")
             .size_full()
@@ -183,6 +195,23 @@ impl Render for MediaDemo {
             .bg(rgb(0x101923))
             .text_color(rgb(0xe6edf5))
             .child(div().text_2xl().child("Media playback"))
+            .child(
+                div()
+                    .id("fullscreen")
+                    .p_3()
+                    .rounded_lg()
+                    .bg(rgb(0x30475c))
+                    .child(if fullscreen {
+                        "Exit fullscreen"
+                    } else {
+                        "Fullscreen"
+                    })
+                    .on_click(cx.listener(|_, _, window, cx| {
+                        window.toggle_fullscreen();
+                        window.set_back_enabled(window.is_fullscreen());
+                        cx.notify();
+                    })),
+            )
             .child(
                 div()
                     .id("choose")

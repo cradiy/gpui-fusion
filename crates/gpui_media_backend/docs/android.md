@@ -115,6 +115,11 @@ Retain the player when replacing the Activity's display Surface. Drop the player
 and its subscriptions when the screen no longer needs it. Decide explicitly
 whether application lifecycle changes should pause or resume playback.
 
+Use `Window::toggle_fullscreen()` to hide or restore the Android system bars.
+Your view controls the video size and playback controls in either mode. See
+[fullscreen hosting](../../gpui_android/docs/hosting.md#fullscreen) for Back
+handling and embedded hosts.
+
 ## Coordinate audio with other applications
 
 Android playback manages audio focus automatically. Temporary interruptions

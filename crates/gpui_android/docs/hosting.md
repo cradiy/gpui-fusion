@@ -159,8 +159,8 @@ unchanged. Temporary system-bar visibility must not be treated as an exit.
 
 Android media playback uses `gpui_media_backend::SystemBackend` with the Kotlin
 host's Media3 adapter. Playback sessions own their decoder surfaces independently
-of the View. See the [Android media guide](../../gpui_media_backend/docs/android.md)
-for supported controls and lifecycle responsibilities.
+of the View. Enable the [media host feature](../../gpui_media/docs/configuration.md)
+and use the shared [media API](../../gpui_media/README.md).
 
 The host library is written in Kotlin and can also be called from Java. A
 full-page Kotlin host only selects its Rust library:

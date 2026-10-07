@@ -48,6 +48,8 @@ workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 gpui_util.workspace = true
 jni = "0.21.1"
 

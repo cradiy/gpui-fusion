@@ -9,6 +9,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -37,6 +38,7 @@ internal class MediaSession(
     private var player: ExoPlayer? = null
     private var frames: MediaFrames? = null
     private var systemControls: SystemMediaControls? = null
+    private val audioTracks = MediaAudioTracks(id) { revision, tracks -> nativeAudioTracks(id, revision, tracks) }
     @Volatile private var generation = 0L
     private var failed = false
     private val tick = object : Runnable {
@@ -60,6 +62,24 @@ internal class MediaSession(
             return "Playback wake locks require android.permission.WAKE_LOCK in gpuiforge.json permissions"
         }
         if (!handler.post { guarded { player?.setWakeMode(mode) } }) return "Media session closed"
+        return null
+    }
+
+    fun selectAudioStream(key: String): String? {
+        if (closed.get()) return "Media session closed"
+        if (extractionPosition >= 0) return "Frame extraction does not select audio streams"
+        val choice = audioTracks.find(key) ?: return "Unknown or unavailable audio stream"
+        if (!handler.post {
+            guarded {
+                val current = player ?: return@guarded
+                // A reload or track-list change can invalidate a queued request.
+                if (audioTracks.find(key) != choice) return@guarded
+                current.trackSelectionParameters = current.trackSelectionParameters.buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                    .setOverrideForType(TrackSelectionOverride(choice.group, choice.index))
+                    .build()
+            }
+        }) return "Media session closed"
         return null
     }
 
@@ -107,6 +127,7 @@ internal class MediaSession(
                     override fun onEvents(player: Player, events: Player.Events) {
                         if (closed.get() || failed) return
                         if (!validateExtraction()) return
+                        audioTracks.report(player.currentTracks, generation)
                         val size = player.videoSize
                         if (size.width > 0 && size.height > 0) {
                             output.width = (size.width * size.pixelWidthHeightRatio).toInt().coerceAtLeast(1)
@@ -170,12 +191,16 @@ internal class MediaSession(
                     5 -> current.setPlaybackSpeed(value.toFloat())
                     6 -> {
                         failed = false
+                        audioTracks.reset(generation)
+                        current.trackSelectionParameters = current.trackSelectionParameters.buildUpon()
+                            .clearOverridesOfType(C.TRACK_TYPE_AUDIO).build()
                         current.setMediaItem(MediaItem.fromUri(uri))
                         current.playWhenReady = value != 0.0
                         current.prepare()
                     }
                     7 -> current.setAudioAttributes(AudioAttributes.DEFAULT, value != 0.0)
                 }
+                audioTracks.report(current.currentTracks, generation)
                 handler.removeCallbacks(tick)
                 tick.run()
             }
@@ -254,4 +279,5 @@ internal class MediaSession(
     private external fun nativeFrame(id: Long, generation: Long, pixels: ByteBuffer, width: Int, height: Int, timestamp: Long)
     private external fun nativeError(id: Long, generation: Long, code: Int, message: String)
     private external fun nativeSystemCommand(id: Long, operation: Int, position: Long)
+    private external fun nativeAudioTracks(id: Long, generation: Long, tracks: String)
 }

@@ -212,6 +212,7 @@ fn sync_prunes_disabled_modules_and_icons() {
             .contains("android:foregroundServiceType=\"dataSync\"")
     );
     assert!(!host.join("MediaSession.kt").exists());
+    assert!(!host.join("MediaAudioTracks.kt").exists());
     assert!(
         !fs::read_to_string(output.join("host/build.gradle.kts"))
             .unwrap()

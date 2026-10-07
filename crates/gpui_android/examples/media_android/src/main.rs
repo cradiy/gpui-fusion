@@ -199,6 +199,15 @@ impl MediaDemo {
         cx.notify();
     }
 
+    fn select_audio(&mut self, id: &gpui_media::MediaStreamId, cx: &mut Context<Self>) {
+        if let Some(player) = &self.player
+            && let Err(error) = player.update(cx, |player, cx| player.select_audio_stream(id, cx))
+        {
+            self.status = error.to_string();
+            cx.notify();
+        }
+    }
+
     fn choose_artwork(&mut self, cx: &mut Context<Self>) {
         let Some(player) = self.player.clone() else {
             return;
@@ -423,6 +432,35 @@ impl Render for MediaDemo {
             .child(div().text_sm().child(self.status.clone()));
         if let Some(player) = &self.player {
             let timeline = player.read(cx).timeline();
+            if let Some(info) = player
+                .read(cx)
+                .media_info()
+                .filter(|info| !info.audio_streams.is_empty())
+            {
+                column = column.child(div().text_sm().child("Audio tracks")).child(
+                    div().flex().flex_wrap().gap_2().children(
+                        info.audio_streams.iter().enumerate().map(|(index, track)| {
+                            let id = track.id.clone();
+                            let label = format!(
+                                "{}{} · {} · {} Hz",
+                                if track.selected { "✓ " } else { "" },
+                                track.title.as_deref().unwrap_or("Audio"),
+                                track.language.as_deref().unwrap_or("Unknown language"),
+                                track.sample_rate.unwrap_or_default()
+                            );
+                            div()
+                                .id(("audio-track", index))
+                                .p_3()
+                                .rounded_lg()
+                                .bg(rgb(if track.selected { 0x35628a } else { 0x30475c }))
+                                .child(label)
+                                .on_click(
+                                    cx.listener(move |this, _, _, cx| this.select_audio(&id, cx)),
+                                )
+                        }),
+                    ),
+                );
+            }
             column = column
                 .child(
                     div()

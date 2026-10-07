@@ -17,7 +17,7 @@ pub fn included(path: &str, platform: &Platform) -> bool {
         | "gpui_file_paths.xml" => Files,
         "IncomingShare.kt" | "ShareIntent.kt" => Sharing,
         "CredentialStore.kt" => Credentials,
-        "MediaSession.kt" | "MediaFrames.kt" | "SystemMediaControls.kt" => Media,
+        "MediaSession.kt" | "MediaFrames.kt" | "MediaAudioTracks.kt" | "SystemMediaControls.kt" => Media,
         "NotificationStore.kt" => Notifications,
         "MediaNotification.kt" => MediaNotifications,
         "DataSyncService.kt" => DataSync,

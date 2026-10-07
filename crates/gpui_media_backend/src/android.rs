@@ -59,6 +59,11 @@ pub(super) fn initialize() -> MediaResult<()> {
                             "(JIJ)V",
                             system_command as *mut c_void,
                         ),
+                        method(
+                            "nativeAudioTracks",
+                            "(JJLjava/lang/String;)V",
+                            audio_tracks as *mut c_void,
+                        ),
                     ],
                 )?;
                 Ok(())
@@ -357,7 +362,8 @@ extern "system" fn state_changed(
             || state.height != height
             || state.audio != (audio != 0)
         {
-            let mut info = MediaInfo::default();
+            let mut info = state.info.as_deref().cloned().unwrap_or_default();
+            info.video_streams.clear();
             if width > 0 && height > 0 {
                 info.video_streams.push(VideoStreamInfo {
                     id: "video".into(),
@@ -367,18 +373,6 @@ extern "system" fn state_changed(
                     frame_rate: None,
                     bitrate: None,
                     language: None,
-                    selected: true,
-                });
-            }
-            if audio != 0 {
-                info.audio_streams.push(AudioStreamInfo {
-                    id: "audio".into(),
-                    codec: None,
-                    channels: None,
-                    sample_rate: None,
-                    bitrate: None,
-                    language: None,
-                    title: None,
                     selected: true,
                 });
             }
@@ -419,6 +413,57 @@ extern "system" fn state_changed(
                 state.emit(MediaBackendEvent::PlaybackStateChanged(actual));
             }
         }
+    });
+}
+
+#[derive(serde::Deserialize)]
+struct AudioTrack {
+    id: String,
+    codec: Option<String>,
+    channels: Option<u32>,
+    sample_rate: Option<u32>,
+    bitrate: Option<u64>,
+    language: Option<String>,
+    title: Option<String>,
+    selected: bool,
+}
+
+extern "system" fn audio_tracks(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    generation: jlong,
+    tracks: JString,
+) {
+    let tracks = (|| -> anyhow::Result<Vec<AudioTrack>> {
+        let json = String::from(env.get_string(&tracks)?);
+        Ok(serde_json::from_str(&json)?)
+    })();
+    let tracks = match tracks {
+        Ok(tracks) => tracks,
+        Err(error) => {
+            log::warn!("Android audio track metadata: {error}");
+            return;
+        }
+    };
+    with_state(id, generation, |state| {
+        let mut info = state.info.as_deref().cloned().unwrap_or_default();
+        info.audio_streams = tracks
+            .into_iter()
+            .map(|track| AudioStreamInfo {
+                id: track.id.into(),
+                codec: track.codec.map(Into::into),
+                channels: track.channels,
+                sample_rate: track.sample_rate,
+                bitrate: track.bitrate,
+                language: track.language.map(Into::into),
+                title: track.title.map(Into::into),
+                selected: track.selected,
+            })
+            .collect();
+        let info = Arc::new(info);
+        state.info = Some(info.clone());
+        state.emit(MediaBackendEvent::MediaInfoChanged(info));
     });
 }
 
@@ -538,6 +583,15 @@ impl AndroidSession {
                 state.generation += 1;
                 state.playback = 0;
             }
+            if operation == 6 {
+                state.info = None;
+                state.width = 0;
+                state.height = 0;
+                state.audio = false;
+                state.emit(MediaBackendEvent::MediaInfoChanged(Arc::new(
+                    MediaInfo::default(),
+                )));
+            }
             state.generation
         };
         AndroidRuntime::get()
@@ -628,6 +682,43 @@ impl MediaPlaybackSession for AndroidSession {
     }
     fn set_audio_focus_enabled(&mut self, enabled: bool) -> MediaResult<()> {
         self.command(7, if enabled { 1. } else { 0. }, false)
+    }
+    fn select_audio_stream(&mut self, id: &MediaStreamId) -> MediaResult<()> {
+        let available = self
+            .state
+            .lock()
+            .map_err(error)?
+            .info
+            .as_ref()
+            .is_some_and(|info| info.audio_streams.iter().any(|stream| &stream.id == id));
+        if !available {
+            return Err(MediaError::invalid_input(
+                "unknown or unavailable Android audio stream",
+            ));
+        }
+        let message = AndroidRuntime::get()
+            .map_err(error)?
+            .with_env(|env| {
+                let id = env.new_string(id.as_str())?;
+                let result = env
+                    .call_method(
+                        self.object.as_obj(),
+                        "selectAudioStream",
+                        "(Ljava/lang/String;)Ljava/lang/String;",
+                        &[JValue::Object(&id)],
+                    )?
+                    .l()?;
+                if result.is_null() {
+                    Ok(None)
+                } else {
+                    Ok(Some(String::from(env.get_string(&JString::from(result))?)))
+                }
+            })
+            .map_err(error)?;
+        match message {
+            Some(message) => Err(MediaError::invalid_input(message)),
+            None => Ok(()),
+        }
     }
     fn set_wake_mode(&mut self, mode: PlaybackWakeMode) -> MediaResult<()> {
         let mode = match mode {

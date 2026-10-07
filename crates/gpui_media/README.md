@@ -58,9 +58,9 @@ gpui_media_backend = { path = ".../gpui_media_backend", features = ["v1_26"] }
 
 `gpui_media_backend::SystemBackend` selects GStreamer on Linux/macOS and Media
 Foundation on Windows, Media3 playback on Android, and browser media playback on Web.
-See the [Android media guide](../gpui_media_backend/docs/android.md) for supported operations.
 GStreamer requires at least 1.24; version features and
-runtime requirements are documented in the [backend guide](../gpui_media_backend/README.md).
+host requirements are documented in [media configuration](docs/configuration.md).
+See [backend capabilities](docs/backend-capabilities.md) for operation availability.
 
 ```rust
 use gpui_media::{MediaSource, VideoPlayer};
@@ -161,6 +161,9 @@ div().size_full().child(
 The player only supplies the video-and-overlay container. Controls, pointer
 behavior, subtitles, status overlays and fullscreen transitions remain owned
 by the host application.
+
+See [playback lifecycle](docs/playback-lifecycle.md) for document access,
+audio focus, screen-off playback and system controls.
 
 ## Open a native-size borderless window
 
@@ -362,6 +365,7 @@ cx.subscribe(&player, |_, _, event, cx| {
 `SystemBackend` reports available audio and embedded-subtitle streams through
 `MediaInfoChanged`. Applications choose streams through the player while the
 backend preserves the shared playback clock.
+See the [audio track guide](docs/media-tracks.md) for enumeration and selection.
 
 Embedded subtitle cues arrive through `VideoPlayerEvent::Subtitle`. External
 SRT, WebVTT and ASS/SSA text can be normalized with `parse_subtitles`; cue

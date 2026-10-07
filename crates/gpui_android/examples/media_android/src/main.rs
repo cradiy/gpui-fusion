@@ -1,8 +1,9 @@
 use gpui::gpui_notifications::MediaArtwork;
 use gpui::{prelude::*, *};
 use gpui_media::{
-    MediaSource, MediaStreamId, PlaybackWakeMode, SeekMode, SubtitleCue, SubtitleEvent,
-    VideoFrameExtractor, VideoPlayer, VideoPlayerEvent, VideoSurface, video_container,
+    MediaSource, MediaStreamId, PlaybackBuffer, PlaybackWakeMode, SeekMode, SubtitleCue,
+    SubtitleEvent, VideoFrameExtractor, VideoPlayer, VideoPlayerEvent, VideoSurface,
+    video_container,
 };
 use std::{sync::Arc, time::Duration};
 
@@ -665,7 +666,30 @@ impl Render for MediaDemo {
                     timeline.position().as_secs_f64(),
                     timeline.duration().unwrap_or_default().as_secs_f64(),
                     player.read(cx).state()
-                ));
+                ))
+                .child(match player.read(cx).buffered() {
+                    PlaybackBuffer::Unknown => "Buffered: unavailable".to_owned(),
+                    PlaybackBuffer::Position(end) => {
+                        format!("Buffered to {:.1}s", end.as_secs_f64())
+                    }
+                    PlaybackBuffer::Ranges(ranges) if ranges.is_empty() => {
+                        "Buffered: none".to_owned()
+                    }
+                    PlaybackBuffer::Ranges(ranges) => format!(
+                        "Buffered: {}",
+                        ranges
+                            .iter()
+                            .map(|range| {
+                                format!(
+                                    "{:.1}–{:.1}s",
+                                    range.start.as_secs_f64(),
+                                    range.end.as_secs_f64()
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                });
             if window.supports_picture_in_picture() {
                 column = column.child(
                     div()

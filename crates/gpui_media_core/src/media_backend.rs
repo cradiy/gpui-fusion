@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use crate::FrameOutputCapabilities;
 
 use crate::{
-    MediaError, MediaInfo, MediaResult, MediaSource, MediaStreamId, PlaybackState,
+    MediaError, MediaInfo, MediaResult, MediaSource, MediaStreamId, PlaybackBuffer, PlaybackState,
     PlaybackTimeline, SeekMode, SubtitleEvent, VideoFrame,
 };
 
@@ -215,6 +215,11 @@ pub trait MediaPlaybackSession: Send {
     fn play(&mut self) -> MediaResult<()>;
     fn pause(&mut self) -> MediaResult<()>;
     fn timeline(&self) -> PlaybackTimeline;
+
+    /// Buffered media snapshot; unrelated to the percentage needed to resume playback.
+    fn buffered(&self) -> PlaybackBuffer {
+        PlaybackBuffer::Unknown
+    }
 
     fn reload(&mut self, _autoplay: bool) -> MediaResult<()> {
         Err(MediaError::unsupported(

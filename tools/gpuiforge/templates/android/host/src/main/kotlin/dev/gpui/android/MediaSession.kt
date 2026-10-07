@@ -56,7 +56,7 @@ internal class MediaSession(
             if (closed.get() || failed) return
             reportState()
             val current = player ?: return
-            if (current.isPlaying || current.playbackState == Player.STATE_BUFFERING) {
+            if (current.isPlaying || current.isLoading || current.playbackState == Player.STATE_BUFFERING) {
                 handler.postDelayed(this, 100)
             }
         }
@@ -261,6 +261,7 @@ internal class MediaSession(
         systemControls?.update(current)
         nativeState(id, generation, current.currentPosition,
             current.duration.takeUnless { it == C.TIME_UNSET } ?: -1L,
+            current.bufferedPosition.takeIf { current.playbackState != Player.STATE_IDLE && !failed && it >= 0 } ?: -1L,
             current.isCurrentMediaItemSeekable, current.playbackState,
             frames?.width ?: 0, frames?.height ?: 0,
             current.currentTracks.isTypeSelected(C.TRACK_TYPE_AUDIO),
@@ -323,7 +324,7 @@ internal class MediaSession(
         }
     }
 
-    private external fun nativeState(id: Long, generation: Long, position: Long, duration: Long,
+    private external fun nativeState(id: Long, generation: Long, position: Long, duration: Long, bufferedPosition: Long,
         seekable: Boolean, state: Int, width: Int, height: Int, audio: Boolean,
         playWhenReady: Boolean, suppressed: Boolean)
     private external fun nativeFrame(id: Long, generation: Long, pixels: ByteBuffer, width: Int, height: Int, timestamp: Long)

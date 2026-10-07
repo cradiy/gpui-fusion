@@ -41,7 +41,7 @@ pub(super) fn initialize() -> MediaResult<()> {
                     &[
                         method(
                             "nativeState",
-                            "(JJJJZIIIZZZ)V",
+                            "(JJJJJZIIIZZZ)V",
                             state_changed as *mut c_void,
                         ),
                         method(
@@ -145,6 +145,7 @@ fn open_session(
         extraction: extraction.map(|request| request.response),
         generation: 0,
         timeline: PlaybackTimeline::default(),
+        buffered: PlaybackBuffer::Unknown,
         playback: 0,
         reported_state: None,
         info: None,
@@ -279,6 +280,7 @@ struct State {
     sequence: u64,
     generation: i64,
     timeline: PlaybackTimeline,
+    buffered: PlaybackBuffer,
     playback: i32,
     reported_state: Option<PlaybackState>,
     info: Option<Arc<MediaInfo>>,
@@ -353,6 +355,7 @@ extern "system" fn state_changed(
     generation: jlong,
     position: jlong,
     duration: jlong,
+    buffered_position: jlong,
     seekable: jboolean,
     playback: jint,
     width: jint,
@@ -362,6 +365,11 @@ extern "system" fn state_changed(
     suppressed: jboolean,
 ) {
     with_state(id, generation, |state| {
+        state.buffered = if buffered_position >= 0 {
+            PlaybackBuffer::Position(Duration::from_millis(buffered_position as u64))
+        } else {
+            PlaybackBuffer::Unknown
+        };
         state.timeline = PlaybackTimeline::new(
             Duration::from_millis(position.max(0) as u64),
             (duration >= 0).then(|| Duration::from_millis(duration as u64)),
@@ -714,6 +722,7 @@ impl AndroidSession {
             if advance {
                 state.generation += 1;
                 state.playback = 0;
+                state.buffered = PlaybackBuffer::Unknown;
             }
             if operation == 6 {
                 state.info = None;
@@ -782,6 +791,13 @@ impl MediaPlaybackSession for AndroidSession {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .timeline
+    }
+    fn buffered(&self) -> PlaybackBuffer {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .buffered
+            .clone()
     }
     fn reload(&mut self, autoplay: bool) -> MediaResult<()> {
         self.command(6, if autoplay { 1. } else { 0. }, true)

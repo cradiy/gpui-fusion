@@ -12,8 +12,8 @@ use gpui::{DmaBufImportStatus, SurfaceFrameBacking};
 use crate::{
     FrameTransport, FrameTransportPreference, MediaBackend, MediaBackendEvent, MediaCapabilities,
     MediaInfo, MediaOutputSink, MediaPlaybackRequest, MediaPlaybackSession, MediaResult,
-    MediaSource, MediaStreamId, PlaybackState, PlaybackTimeline, PlaybackWakeMode, SeekMode,
-    SubtitleEvent, SystemMediaCommand, SystemMediaMetadata, TransportChange, VideoFrame,
+    MediaSource, MediaStreamId, PlaybackBuffer, PlaybackState, PlaybackTimeline, PlaybackWakeMode,
+    SeekMode, SubtitleEvent, SystemMediaCommand, SystemMediaMetadata, TransportChange, VideoFrame,
     VideoFrameExtractor, VideoPlaybackStats,
 };
 
@@ -100,6 +100,7 @@ pub enum VideoPlayerEvent {
     StateChanged(PlaybackState),
     TimelineChanged(PlaybackTimeline),
     BufferingChanged(u8),
+    BufferedChanged(PlaybackBuffer),
     MediaInfoChanged(Arc<MediaInfo>),
     Subtitle(SubtitleEvent),
     FrameReady(Arc<VideoFrame>),
@@ -136,6 +137,7 @@ pub struct VideoPlayer {
     timeline: PlaybackTimeline,
     media_info: Option<Arc<MediaInfo>>,
     buffering_percent: Option<u8>,
+    buffered: PlaybackBuffer,
     play_when_ready: bool,
     playback_rate: f64,
     delivered_frames: u64,
@@ -381,6 +383,7 @@ impl VideoPlayer {
             timeline: PlaybackTimeline::default(),
             media_info,
             buffering_percent: None,
+            buffered: PlaybackBuffer::Unknown,
             play_when_ready: options.autoplay,
             playback_rate: 1.0,
             delivered_frames: 0,
@@ -442,6 +445,12 @@ impl VideoPlayer {
     /// the host application.
     pub fn buffering_percent(&self) -> Option<u8> {
         self.buffering_percent
+    }
+
+    /// Latest buffered media snapshot. Refreshed at the timeline update interval,
+    /// including while paused. This does not indicate whether playback is stalled.
+    pub fn buffered(&self) -> &PlaybackBuffer {
+        &self.buffered
     }
 
     pub fn is_buffering(&self) -> bool {
@@ -560,6 +569,7 @@ impl VideoPlayer {
         self.timeline = PlaybackTimeline::default();
         self.media_info = self.playback.media_info();
         self.buffering_percent = None;
+        self.set_buffered(PlaybackBuffer::Unknown, cx);
         self.play_when_ready = autoplay;
         self.delivered_frames = 0;
         self.playback_rate = 1.0;
@@ -593,6 +603,7 @@ impl VideoPlayer {
             PlaybackState::Paused
         };
         self.playback.seek_to(target, mode)?;
+        self.set_buffered(PlaybackBuffer::Unknown, cx);
         cx.emit(VideoPlayerEvent::Subtitle(SubtitleEvent::Reset));
         self.state_after_seek = Some(resume_state);
         self.timeline = PlaybackTimeline::new(
@@ -847,7 +858,7 @@ impl VideoPlayer {
         self.set_muted(!self.muted, cx);
     }
 
-    /// Refreshes duration, position and seekability immediately.
+    /// Refreshes duration, position, seekability and buffered media immediately.
     pub fn refresh_timeline(&mut self, cx: &mut Context<Self>) {
         // A backend may continue reporting its running clock while an
         // asynchronous seek is still decoding toward the requested position.
@@ -859,6 +870,12 @@ impl VideoPlayer {
         }
 
         let timeline = timeline_without_regression(self.timeline, self.playback.timeline());
+        let buffered = if matches!(self.state, PlaybackState::Error(_)) {
+            PlaybackBuffer::Unknown
+        } else {
+            self.playback.buffered()
+        };
+        self.set_buffered(buffered, cx);
         if timeline != self.timeline {
             self.timeline = timeline;
             cx.emit(VideoPlayerEvent::TimelineChanged(timeline));
@@ -932,7 +949,18 @@ impl VideoPlayer {
         }
     }
 
+    fn set_buffered(&mut self, buffered: PlaybackBuffer, cx: &mut Context<Self>) {
+        if self.buffered != buffered {
+            self.buffered = buffered.clone();
+            cx.emit(VideoPlayerEvent::BufferedChanged(buffered));
+            cx.notify();
+        }
+    }
+
     fn set_state(&mut self, state: PlaybackState, cx: &mut Context<Self>) {
+        if matches!(state, PlaybackState::Error(_)) {
+            self.set_buffered(PlaybackBuffer::Unknown, cx);
+        }
         if self.state != state {
             if self.state == PlaybackState::Seeking {
                 if let Some(session) = &self.system_session {
@@ -1015,6 +1043,7 @@ mod tests {
         struct Backend {
             output: Arc<Mutex<Option<MediaOutputSink>>>,
             commands: Arc<Mutex<Vec<&'static str>>>,
+            buffered: Arc<Mutex<PlaybackBuffer>>,
         }
         impl MediaBackend for Backend {
             fn name(&self) -> &'static str {
@@ -1046,6 +1075,13 @@ mod tests {
             }
             fn timeline(&self) -> PlaybackTimeline {
                 PlaybackTimeline::default()
+            }
+            fn buffered(&self) -> PlaybackBuffer {
+                self.buffered.lock().unwrap().clone()
+            }
+            fn reload(&mut self, _: bool) -> MediaResult<()> {
+                *self.buffered.lock().unwrap() = PlaybackBuffer::Unknown;
+                Ok(())
             }
             fn seek_to(&mut self, _: Duration, _: SeekMode) -> MediaResult<()> {
                 self.commands.lock().unwrap().push("seek");
@@ -1096,6 +1132,19 @@ mod tests {
         );
         assert_eq!(*backend.commands.lock().unwrap(), ["play"]);
 
+        // Buffered media can grow while paused without changing playback state.
+        let ranges = PlaybackBuffer::Ranges(Arc::from([
+            Duration::ZERO..Duration::from_secs(2),
+            Duration::from_secs(8)..Duration::from_secs(10),
+        ]));
+        *backend.buffered.lock().unwrap() = ranges.clone();
+        player.update(cx, |p, cx| p.refresh_timeline(cx));
+        assert_eq!(player.read_with(cx, |p, _| p.buffered().clone()), ranges);
+        assert_eq!(
+            player.read_with(cx, |p, _| p.state().clone()),
+            PlaybackState::Paused
+        );
+
         send(
             vec![MediaBackendEvent::PlaybackStateChanged(
                 PlaybackState::Playing,
@@ -1112,6 +1161,11 @@ mod tests {
                 p.seek_to(Duration::from_secs(5), SeekMode::Accurate, cx)
             })
             .unwrap();
+        player.update(cx, |p, cx| p.refresh_timeline(cx));
+        assert_eq!(
+            player.read_with(cx, |p, _| p.buffered().clone()),
+            PlaybackBuffer::Unknown
+        );
         send(
             vec![
                 MediaBackendEvent::Buffering(0),
@@ -1162,6 +1216,24 @@ mod tests {
         assert_eq!(
             *backend.commands.lock().unwrap(),
             ["play", "pause", "seek", "play", "pause", "seek"]
+        );
+        send(
+            vec![
+                MediaBackendEvent::Ready,
+                MediaBackendEvent::PlaybackStateChanged(PlaybackState::Paused),
+            ],
+            cx,
+        );
+        *backend.buffered.lock().unwrap() = PlaybackBuffer::Ranges(Arc::from([]));
+        player.update(cx, |p, cx| p.refresh_timeline(cx));
+        assert_eq!(
+            player.read_with(cx, |p, _| p.buffered().clone()),
+            PlaybackBuffer::Ranges(Arc::from([]))
+        );
+        player.update(cx, |p, cx| p.reload(false, cx)).unwrap();
+        assert_eq!(
+            player.read_with(cx, |p, _| p.buffered().clone()),
+            PlaybackBuffer::Unknown
         );
     }
 

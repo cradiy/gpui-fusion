@@ -47,8 +47,8 @@ use gpui_media_core::{
     AudioStreamInfo, FrameExtractionSession, FrameExtractorBackendRequest, MediaBackendEvent,
     MediaCapabilities, MediaError, MediaErrorKind, MediaInfo, MediaOutputSink,
     MediaPlaybackRequest, MediaPlaybackSession, MediaRecovery, MediaResult, MediaStreamId,
-    PlaybackTimeline, SeekMode, SubtitleCue, SubtitleEvent, SubtitleFormat, SubtitleStreamInfo,
-    VideoFrame, VideoStreamInfo,
+    PlaybackBuffer, PlaybackTimeline, SeekMode, SubtitleCue, SubtitleEvent, SubtitleFormat,
+    SubtitleStreamInfo, VideoFrame, VideoStreamInfo,
 };
 
 const FRAME_POLL_INTERVAL: Duration = Duration::from_millis(5);
@@ -80,6 +80,7 @@ enum Command {
         response: Sender<MediaResult<()>>,
     },
     Timeline(Sender<PlaybackTimeline>),
+    Buffered(Sender<PlaybackBuffer>),
     Seek {
         position: Duration,
         response: Sender<MediaResult<()>>,
@@ -205,6 +206,14 @@ impl MediaPlaybackSession for WindowsPlayback {
             return PlaybackTimeline::default();
         }
         response_rx.recv().unwrap_or_default()
+    }
+
+    fn buffered(&self) -> PlaybackBuffer {
+        let (sender, receiver) = mpsc::channel();
+        if self.commands.send(Command::Buffered(sender)).is_err() {
+            return PlaybackBuffer::Unknown;
+        }
+        receiver.recv().unwrap_or_default()
     }
 
     fn seek_to(&mut self, position: Duration, _mode: SeekMode) -> MediaResult<()> {
@@ -542,6 +551,9 @@ impl MediaFoundationWorker {
             Command::Timeline(response) => {
                 let _ = response.send(self.timeline());
             }
+            Command::Buffered(response) => {
+                let _ = response.send(self.buffered());
+            }
             Command::Seek { position, response } => {
                 let result = unsafe { self.engine.SetCurrentTime(position.as_secs_f64()) }.map_err(
                     |error| {
@@ -615,6 +627,33 @@ impl MediaFoundationWorker {
                 .is_ok_and(|ranges| ranges.GetLength() > 0)
         };
         PlaybackTimeline::new(position, duration, seekable)
+    }
+
+    fn buffered(&self) -> PlaybackBuffer {
+        let Ok(ranges) = (unsafe { self.engine.GetBuffered() }) else {
+            return PlaybackBuffer::Unknown;
+        };
+        let mut result = Vec::new();
+        for index in 0..unsafe { ranges.GetLength() } {
+            let (Ok(start), Ok(end)) = (unsafe { ranges.GetStart(index) }, unsafe {
+                ranges.GetEnd(index)
+            }) else {
+                return PlaybackBuffer::Unknown;
+            };
+            let (Ok(start), Ok(end)) = (
+                Duration::try_from_secs_f64(start),
+                Duration::try_from_secs_f64(end),
+            ) else {
+                return PlaybackBuffer::Unknown;
+            };
+            if start > end {
+                return PlaybackBuffer::Unknown;
+            }
+            if start < end {
+                result.push(start..end);
+            }
+        }
+        PlaybackBuffer::Ranges(result.into())
     }
 
     fn refresh_media_info(&mut self) -> MediaResult<()> {

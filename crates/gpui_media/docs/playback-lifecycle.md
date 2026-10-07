@@ -49,6 +49,43 @@ includes both protocols; network access requires `android.permission.INTERNET`.
 Desktop support depends on installed media components, and browser playback on
 native browser support; GPUI does not install a JavaScript streaming player.
 
+## Buffered media
+
+Read `VideoPlayer::buffered()` or observe `VideoPlayerEvent::BufferedChanged` to
+draw buffered media on a progress bar:
+
+```rust
+use gpui_media::PlaybackBuffer;
+
+match player.buffered() {
+    PlaybackBuffer::Unknown => { /* Hide the buffered indicator. */ }
+    PlaybackBuffer::Position(end) => { /* Show an estimated endpoint. */ }
+    PlaybackBuffer::Ranges(ranges) => {
+        for range in ranges.iter() {
+            // Draw each interval separately; preserve gaps.
+        }
+    }
+}
+```
+
+An empty `Ranges` list means the backend reports no buffered media. `Unknown`
+means it cannot provide a current estimate. `Position` does not imply that all
+data from zero to that point is buffered. `end()` returns the furthest known
+endpoint, without filling gaps. Values use the same time coordinates as the
+playback timeline and can shrink after a seek or eviction.
+
+Snapshots refresh at `VideoPlayerOptions::timeline_update_interval`, including
+while paused. Events fire only when the snapshot changes. Seeking and reloading
+invalidate the previous snapshot; seeking waits for backend completion before
+publishing fresh data. Buffer information does not change play/pause state.
+Use `is_buffering()` for whether the player is waiting for data;
+`buffering_percent()` describes readiness to resume, not download progress.
+
+Android reports an estimated endpoint. Browser and Windows backends report time
+ranges. Linux/macOS expose ranges when the GStreamer pipeline answers buffering
+queries in time units; otherwise they return `Unknown`. GPUI does not infer time
+ranges from downloaded byte counts or treat local files as fully buffered.
+
 ## Audio focus
 
 Observe `VideoPlayerEvent::StateChanged` to keep controls synchronized with

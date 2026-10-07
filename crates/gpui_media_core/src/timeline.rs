@@ -1,4 +1,29 @@
-use std::time::Duration;
+use std::{ops::Range, sync::Arc, time::Duration};
+
+/// Buffered media in timeline coordinates, independent of waiting-for-data state.
+/// A snapshot may shrink after eviction or seeking. It is not a download guarantee.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum PlaybackBuffer {
+    /// Unsupported, unavailable, or invalidated by a pending operation.
+    #[default]
+    Unknown,
+    /// Estimated buffered endpoint. No claim is made about data before it.
+    Position(Duration),
+    /// Known buffered intervals. An empty list means no buffered data;
+    /// gaps must not be painted as buffered.
+    Ranges(Arc<[Range<Duration>]>),
+}
+
+impl PlaybackBuffer {
+    /// Furthest reported endpoint, not the amount of data buffered from zero.
+    pub fn end(&self) -> Option<Duration> {
+        match self {
+            Self::Unknown => None,
+            Self::Position(position) => Some(*position),
+            Self::Ranges(ranges) => ranges.iter().map(|range| range.end).max(),
+        }
+    }
+}
 
 /// Controls the tradeoff between seek precision and latency.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

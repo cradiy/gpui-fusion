@@ -17,6 +17,14 @@ providers may reject it. A native write can create a file, but requires an exist
 parent directory. Readers and writers are sequential sessions, not shared cursors.
 Await a write's completion before starting another save to the same file.
 
+`FileReader::seek(std::io::SeekFrom)` moves that reader's byte cursor relative to
+the start, current position, or end and returns the resulting offset. Native files
+and browser files support seeking. Android uses the document's file descriptor;
+providers backed by pipes can reject seeking while remaining readable sequentially.
+Seeking past EOF is allowed where supported; subsequent reads return `None` until
+the cursor is moved back or the file grows. Negative positions return an error.
+Seeking does not change any other reader's position or the file's contents.
+
 `write_all()` writes the whole supplied slice. Native and Android adapters submit
 bounded chunks to background workers. `flush()` flushes bytes without finishing
 the session. `close()` consumes the writer and reports provider completion errors.
@@ -33,6 +41,20 @@ convenience methods for a truncating write followed by close. A stream yields
 requested only after the previous write completes. Input errors stop polling and
 abort the output. Choose bounded chunk sizes in the producer. Errors and cancellation
 can leave existing files partially written; no automatic rollback is promised.
+
+`read_limited(max_bytes)` collects a complete file only if it fits within the
+given byte limit. It reads at most one additional byte to detect overflow and
+returns a `std::io::ErrorKind::FileTooLarge` error rather than truncated contents.
+It does not rely on metadata or allocate the entire limit in advance. A zero limit
+accepts only empty files. The limit applies to file bytes, not later decoding or
+decompression. Use reader sessions for larger files that must be processed in chunks.
+
+```rust,ignore
+let text = String::from_utf8(file.read_limited(4 * 1024 * 1024).await?)?;
+let mut reader = file.open_read().await?;
+reader.seek(std::io::SeekFrom::Start(1024)).await?;
+let block = reader.read_chunk_with_limit(4096).await?;
+```
 
 ## Storage locations
 
@@ -98,5 +120,7 @@ worker pool. It must not execute that work inline on the UI thread. Standalone
 applications need no GPUI context. `PlatformFile`, `PlatformLocation`, and
 `PlatformLocations` implement resources and discovery. `PlatformReader` and
 `PlatformWriter` implement async sessions; `from_blocking` adapts blocking streams.
+`FileReader::from_seekable` adapts blocking `Read + Seek` sources. A reader backend
+without `seek` support returns `Unsupported` through the default implementation.
 `BlockingWrite::close` finishes output and `abort` releases unfinished output.
 The dispatcher must remain able to execute cleanup while handles or sessions exist.

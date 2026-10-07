@@ -2,7 +2,7 @@ use crate::IoExecutor;
 use anyhow::{Result, ensure};
 use futures::future::LocalBoxFuture;
 use std::{
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     sync::{Arc, Mutex},
 };
 
@@ -11,6 +11,9 @@ const CHUNK_SIZE: usize = 64 * 1024;
 /// Backend for a read session. `None` represents EOF.
 pub trait PlatformReader: Send {
     fn read_chunk(&mut self, limit: usize) -> LocalBoxFuture<'_, Result<Option<Vec<u8>>>>;
+    fn seek(&mut self, _position: SeekFrom) -> LocalBoxFuture<'_, Result<u64>> {
+        Box::pin(async { Err(crate::unsupported("reader does not support seeking")) })
+    }
 }
 
 pub struct FileReader(Box<dyn PlatformReader>);
@@ -20,8 +23,18 @@ impl FileReader {
     }
     pub fn from_blocking(reader: impl Read + Send + 'static, executor: IoExecutor) -> Self {
         Self::new(BlockingReader {
-            resource: Resource::new(Box::new(reader), executor),
+            resource: Resource::new(BlockingInput::Sequential(Box::new(reader)), executor),
         })
+    }
+    /// Adapt a blocking source that implements `Seek`; the underlying device may still reject it.
+    pub fn from_seekable(reader: impl Read + Seek + Send + 'static, executor: IoExecutor) -> Self {
+        Self::new(BlockingReader {
+            resource: Resource::new(BlockingInput::Seekable(Box::new(reader)), executor),
+        })
+    }
+    /// Move the byte cursor and return its position. Not all document providers support seeking.
+    pub async fn seek(&mut self, position: SeekFrom) -> Result<u64> {
+        self.0.seek(position).await
     }
     /// Read up to 64 KiB, returning `None` at EOF.
     pub async fn read_chunk(&mut self) -> Result<Option<Vec<u8>>> {
@@ -81,7 +94,7 @@ trait Cleanup: Send {
         Ok(())
     }
 }
-impl Cleanup for Box<dyn Read + Send> {}
+impl Cleanup for BlockingInput {}
 impl Cleanup for Box<dyn BlockingWrite> {
     fn cleanup(&mut self) -> Result<()> {
         self.abort()
@@ -126,10 +139,35 @@ impl<T: Cleanup + 'static> Drop for Resource<T> {
     }
 }
 
+trait ReadSeek: Read + Seek + Send {}
+impl<T: Read + Seek + Send> ReadSeek for T {}
+
+enum BlockingInput {
+    Sequential(Box<dyn Read + Send>),
+    Seekable(Box<dyn ReadSeek>),
+}
+impl Read for BlockingInput {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Sequential(reader) => reader.read(bytes),
+            Self::Seekable(reader) => reader.read(bytes),
+        }
+    }
+}
+
 struct BlockingReader {
-    resource: Resource<Box<dyn Read + Send>>,
+    resource: Resource<BlockingInput>,
 }
 impl PlatformReader for BlockingReader {
+    fn seek(&mut self, position: SeekFrom) -> LocalBoxFuture<'_, Result<u64>> {
+        self.resource.run(move |slot| match slot {
+            Some(BlockingInput::Seekable(reader)) => Ok(reader.seek(position)?),
+            Some(BlockingInput::Sequential(_)) => {
+                Err(crate::unsupported("reader does not support seeking"))
+            }
+            None => Err(std::io::Error::other("reader closed").into()),
+        })
+    }
     fn read_chunk(&mut self, limit: usize) -> LocalBoxFuture<'_, Result<Option<Vec<u8>>>> {
         self.resource.run(move |slot| {
             let reader = slot

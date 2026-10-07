@@ -306,7 +306,7 @@ impl Counter {
                     .into_iter()
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("No document selected"))?;
-                let text = String::from_utf8(file.read().await?)?;
+                let text = String::from_utf8(file.read_limited(4 * 1024 * 1024).await?)?;
                 Ok(Some((file, text)))
             }
             .await;

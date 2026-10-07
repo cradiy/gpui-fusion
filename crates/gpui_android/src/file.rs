@@ -10,7 +10,7 @@ use jni::{
 };
 use std::{
     fs::File,
-    io::{self, Read, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     os::fd::FromRawFd,
     sync::{Arc, Mutex, OnceLock, mpsc},
 };
@@ -193,7 +193,7 @@ impl PlatformFile for AndroidFile {
             ensure!(fd >= 0, "invalid document descriptor");
             // SAFETY: openRead transfers ownership via ParcelFileDescriptor.detachFd.
             let file = unsafe { File::from_raw_fd(fd) };
-            Ok(FileReader::from_blocking(
+            Ok(FileReader::from_seekable(
                 DocumentReader {
                     file,
                     _lease: document,
@@ -255,6 +255,11 @@ struct DocumentReader {
 impl Read for DocumentReader {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
         self.file.read(bytes)
+    }
+}
+impl Seek for DocumentReader {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        self.file.seek(position)
     }
 }
 

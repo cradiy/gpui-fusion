@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use futures::future::LocalBoxFuture;
 use gpui::gpui_io::{FileHandle, FileMetadata, FileReader, PlatformFile, PlatformReader};
 use gpui_util::browser::BrowserResource;
-use std::sync::Arc;
+use std::{io::SeekFrom, sync::Arc};
 
 #[derive(Debug)]
 struct FileResource {
@@ -67,6 +67,26 @@ struct BrowserReader {
     size: u64,
 }
 impl PlatformReader for BrowserReader {
+    fn seek(&mut self, position: SeekFrom) -> LocalBoxFuture<'_, Result<u64>> {
+        Box::pin(async move {
+            self.resource
+                .with(|_| ())
+                .ok_or_else(|| anyhow!("browser file must be accessed on its owning thread"))?;
+            let offset = match position {
+                SeekFrom::Start(offset) => i128::from(offset),
+                SeekFrom::Current(delta) => i128::from(self.offset) + i128::from(delta),
+                SeekFrom::End(delta) => i128::from(self.size) + i128::from(delta),
+            };
+            let offset = u64::try_from(offset).map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "seek position is outside the byte offset range",
+                )
+            })?;
+            self.offset = offset;
+            Ok(offset)
+        })
+    }
     fn read_chunk(&mut self, limit: usize) -> LocalBoxFuture<'_, Result<Option<Vec<u8>>>> {
         Box::pin(async move {
             if self.offset >= self.size {

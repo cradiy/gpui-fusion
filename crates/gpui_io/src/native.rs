@@ -60,7 +60,7 @@ impl PlatformFile for NativeFile {
         let path = self.path.clone();
         let executor = self.executor.clone();
         self.executor
-            .run(move || Ok(FileReader::from_blocking(File::open(path)?, executor)))
+            .run(move || Ok(FileReader::from_seekable(File::open(path)?, executor)))
     }
     fn open_write(&self, options: WriteOptions) -> LocalBoxFuture<'static, Result<FileWriter>> {
         if !self.writable {

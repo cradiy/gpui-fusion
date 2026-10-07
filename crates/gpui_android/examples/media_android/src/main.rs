@@ -1,6 +1,8 @@
 use gpui::{prelude::*, *};
-use gpui_media::{MediaSource, SeekMode, VideoPlayer, VideoPlayerEvent};
-use std::time::Duration;
+use gpui_media::{
+    MediaSource, SeekMode, VideoFrameExtractor, VideoPlayer, VideoPlayerEvent, VideoSurface,
+};
+use std::{sync::Arc, time::Duration};
 
 #[gpui_platform::main]
 fn main() {
@@ -11,6 +13,10 @@ fn main() {
                 file: None,
                 subscription: None,
                 status: "Choose a video or audio file.".into(),
+                extractor: None,
+                thumbnail: VideoSurface::new(),
+                thumbnail_position: Duration::ZERO,
+                thumbnail_request: 0,
             })
         })
         .expect("open media window");
@@ -22,6 +28,10 @@ struct MediaDemo {
     file: Option<gpui::gpui_io::FileHandle>,
     subscription: Option<Subscription>,
     status: String,
+    extractor: Option<VideoFrameExtractor>,
+    thumbnail: VideoSurface,
+    thumbnail_position: Duration,
+    thumbnail_request: u64,
 }
 
 impl MediaDemo {
@@ -44,8 +54,12 @@ impl MediaDemo {
                 };
                 this.update(cx, |this, cx| -> anyhow::Result<()> {
                     gpui_media_backend::SystemBackend::initialize()?;
+                    let extractor = VideoFrameExtractor::new(
+                        source.clone(),
+                        Arc::new(gpui_media_backend::SystemBackend),
+                    )?;
                     let player = cx.new(|cx| {
-                        VideoPlayer::builder(source, gpui_media_backend::SystemBackend)
+                        VideoPlayer::builder(source.clone(), gpui_media_backend::SystemBackend)
                             .build(cx)
                             .expect("create media session")
                     });
@@ -56,6 +70,10 @@ impl MediaDemo {
                         cx.notify();
                     }));
                     this.player = Some(player);
+                    this.extractor = Some(extractor);
+                    this.thumbnail.clear();
+                    this.thumbnail_position = Duration::ZERO;
+                    this.thumbnail_request += 1;
                     this.status = file.name().to_owned();
                     this.file = Some(file);
                     cx.notify();
@@ -74,11 +92,55 @@ impl MediaDemo {
         .detach();
     }
 
+    fn extract(&mut self, first: bool, cx: &mut Context<Self>) {
+        let Some(extractor) = self.extractor.clone() else {
+            return;
+        };
+        let file = self.file.clone();
+        let position = if first {
+            Duration::ZERO
+        } else {
+            self.thumbnail_position + Duration::from_secs(5)
+        };
+        self.thumbnail_request += 1;
+        let request = self.thumbnail_request;
+        self.status = format!("Extracting a frame at {:.1}s…", position.as_secs_f64());
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = extractor.frame_at_latest(position).await;
+            // Keep the document's access alive until its independent request completes.
+            drop(file);
+            let _ = this.update(cx, |this, cx| {
+                if this.thumbnail_request != request {
+                    return;
+                }
+                let result = result.and_then(|frame| {
+                    this.thumbnail.set_frame(&frame)?;
+                    this.thumbnail_position = position;
+                    Ok(frame.timestamp().unwrap_or_default())
+                });
+                this.status = match result {
+                    Ok(timestamp) => format!(
+                        "Thumbnail at {:.3}s; playback position unchanged",
+                        timestamp.as_secs_f64()
+                    ),
+                    Err(error) => error.to_string(),
+                };
+                eprintln!("media extraction: {}", this.status);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn control(&mut self, action: usize, cx: &mut Context<Self>) {
         if action == 5 {
             self.subscription = None;
             self.player = None;
             self.file = None;
+            self.extractor = None;
+            self.thumbnail.clear();
+            self.thumbnail_request += 1;
             self.status = "Choose a video or audio file.".into();
             cx.notify();
             return;
@@ -149,21 +211,53 @@ impl Render for MediaDemo {
                     player.read(cx).state()
                 ));
         }
-        column.child(
-            div().flex().flex_wrap().gap_2().children(
-                ["Play", "Pause", "Seek +2s", "Restart", "Reload", "Close"]
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, label)| {
-                        div()
-                            .id(("control", index))
-                            .p_3()
-                            .rounded_lg()
-                            .bg(rgb(0x30475c))
-                            .child(label)
-                            .on_click(cx.listener(move |this, _, _, cx| this.control(index, cx)))
-                    }),
-            ),
-        )
+        column = column
+            .child(
+                div().flex().flex_wrap().gap_2().children(
+                    ["Play", "Pause", "Seek +2s", "Restart", "Reload", "Close"]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, label)| {
+                            div()
+                                .id(("control", index))
+                                .p_3()
+                                .rounded_lg()
+                                .bg(rgb(0x30475c))
+                                .child(label)
+                                .on_click(
+                                    cx.listener(move |this, _, _, cx| this.control(index, cx)),
+                                )
+                        }),
+                ),
+            )
+            .child(
+                div().flex().gap_2().children(
+                    ["First frame", "Frame +5s"]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, label)| {
+                            div()
+                                .id(("extract", index))
+                                .p_3()
+                                .rounded_lg()
+                                .bg(rgb(0x30475c))
+                                .child(label)
+                                .on_click(
+                                    cx.listener(move |this, _, _, cx| this.extract(index == 0, cx)),
+                                )
+                        }),
+                ),
+            );
+        if let Some(frame) = self.thumbnail.surface() {
+            column = column.child(
+                div()
+                    .h(px(140.))
+                    .w_full()
+                    .flex_shrink_0()
+                    .relative()
+                    .child(surface(frame.clone()).absolute().size_full()),
+            );
+        }
+        column
     }
 }

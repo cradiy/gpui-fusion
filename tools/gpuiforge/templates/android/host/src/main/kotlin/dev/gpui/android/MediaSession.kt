@@ -11,6 +11,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import java.nio.ByteBuffer
@@ -25,6 +26,7 @@ internal class MediaSession(
     keys: Array<String>,
     values: Array<String>,
     timeout: Int,
+    private val extractionPosition: Long,
 ) : AutoCloseable {
     private val thread = HandlerThread("gpui-media").apply { start() }
     private val handler = Handler(thread.looper)
@@ -49,7 +51,7 @@ internal class MediaSession(
         handler.post {
             guarded {
                 val output = MediaFrames(handler) { pixels, width, height, pts, revision ->
-                    if (!closed.get() && !failed && revision == generation) {
+                    if (!closed.get() && !failed && revision == generation && validateExtraction()) {
                         nativeFrame(id, revision, pixels, width, height, pts)
                     }
                 }
@@ -64,14 +66,26 @@ internal class MediaSession(
                 headers.entries.firstOrNull { it.key.equals("User-Agent", true) }?.let {
                     http.setUserAgent(it.value)
                 }
-                val current = ExoPlayer.Builder(application)
+                val renderers = DefaultRenderersFactory(application)
+                if (extractionPosition >= 0) {
+                    renderers.forceDisableMediaCodecAsynchronousQueueing()
+                }
+                val current = ExoPlayer.Builder(application, renderers)
                     .setLooper(thread.looper)
                     .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(application, http)))
                     .build()
                 player = current
+                if (extractionPosition >= 0) {
+                    current.trackSelectionParameters = current.trackSelectionParameters.buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                        .build()
+                    current.setSeekParameters(SeekParameters.EXACT)
+                }
                 current.addListener(object : Player.Listener {
                     override fun onEvents(player: Player, events: Player.Events) {
                         if (closed.get() || failed) return
+                        if (!validateExtraction()) return
                         val size = player.videoSize
                         if (size.width > 0 && size.height > 0) {
                             output.width = (size.width * size.pixelWidthHeightRatio).toInt().coerceAtLeast(1)
@@ -84,14 +98,32 @@ internal class MediaSession(
                         fail(error.errorCode, error.errorCodeName)
                     }
                 })
-                current.setVideoFrameMetadataListener { pts, release, _, _ ->
-                    output.recordTimestamp(release, pts, generation)
+                current.setVideoFrameMetadataListener { pts, release, format, _ ->
+                    val rotated = format.rotationDegrees == 90 || format.rotationDegrees == 270
+                    val width = (format.width * format.pixelWidthHeightRatio).toInt()
+                    output.recordTimestamp(release, pts, generation,
+                        if (rotated) format.height else width, if (rotated) width else format.height)
                 }
                 current.setVideoSurface(output.surface)
-                current.setMediaItem(MediaItem.fromUri(uri))
+                current.setMediaItem(MediaItem.fromUri(uri), extractionPosition.coerceAtLeast(0))
                 current.prepare()
             }
         }
+    }
+
+    private fun validateExtraction(): Boolean {
+        if (extractionPosition < 0) return true
+        val current = player ?: return false
+        if (current.duration != C.TIME_UNSET && extractionPosition >= current.duration) {
+            fail(10000, "Frame position is outside the video duration")
+        } else if (current.playbackState == Player.STATE_READY || current.playbackState == Player.STATE_ENDED) {
+            if (!current.currentTracks.isTypeSelected(C.TRACK_TYPE_VIDEO)) {
+                fail(10001, "The source does not contain a selected video track")
+            } else if (extractionPosition > 0 && !current.isCurrentMediaItemSeekable) {
+                fail(10001, "The source does not support seeking")
+            }
+        }
+        return !failed
     }
 
     fun command(operation: Int, value: Double, revision: Long) {

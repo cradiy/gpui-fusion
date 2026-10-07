@@ -34,7 +34,7 @@ internal class MediaFrames(
     private var allocatedHeight = 0
     private var pixels: ByteBuffer? = null
     private val matrix = FloatArray(16)
-    private data class Timestamp(val release: Long, val pts: Long, val generation: Long)
+    private data class Timestamp(val release: Long, val pts: Long, val generation: Long, val width: Int, val height: Int)
     private val timestamps = ArrayDeque<Timestamp>()
     private val vertices = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
         put(floatArrayOf(-1f, -1f, 0f, 1f, 1f, -1f, 1f, 1f, -1f, 1f, 0f, 0f, 1f, 1f, 1f, 0f))
@@ -81,9 +81,9 @@ internal class MediaFrames(
         checkGl()
     }
 
-    @Synchronized fun recordTimestamp(release: Long, pts: Long, generation: Long) {
+    @Synchronized fun recordTimestamp(release: Long, pts: Long, generation: Long, width: Int, height: Int) {
         while (timestamps.size >= 16) timestamps.removeFirst()
-        timestamps.addLast(Timestamp(release, pts, generation))
+        timestamps.addLast(Timestamp(release, pts, generation, width, height))
     }
 
     @Synchronized fun discardPending() { timestamps.clear() }
@@ -97,6 +97,10 @@ internal class MediaFrames(
     private fun capture(source: SurfaceTexture) {
         source.updateTexImage()
         val stamp = timestamp(source.timestamp) ?: return
+        if (stamp.width > 0 && stamp.height > 0) {
+            width = stamp.width
+            height = stamp.height
+        }
         if (width <= 0 || height <= 0) return
         check(width <= maxSize && height <= maxSize) { "Video exceeds GL texture limits" }
         if (width != allocatedWidth || height != allocatedHeight) {

@@ -11,8 +11,9 @@ use std::{
     sync::{
         Arc, Mutex, OnceLock, Weak,
         atomic::{AtomicI64, Ordering},
+        mpsc::{self, SyncSender},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const CLASS: &str = "dev.gpui.android.MediaSession";
@@ -71,8 +72,11 @@ pub(super) fn open_playback(
     request: MediaPlaybackRequest,
     output: MediaOutputSink,
 ) -> MediaResult<Box<dyn MediaPlaybackSession>> {
-    initialize()?;
-    let network = request.source.network_options();
+    Ok(Box::new(open_session(&request.source, Some(output), None)?))
+}
+
+fn validate_source(source: &MediaSource) -> MediaResult<()> {
+    let network = source.network_options();
     if network.user_id().is_some()
         || network.user_password().is_some()
         || network.proxy().is_some()
@@ -91,11 +95,35 @@ pub(super) fn open_playback(
             "Android media supports HTTP headers, user agent and timeout options",
         ));
     }
+    Ok(())
+}
+
+struct ExtractionRequest {
+    position: Duration,
+    handle: FrameHandle,
+    sequence: u64,
+    response: SyncSender<MediaResult<Arc<VideoFrame>>>,
+}
+
+fn open_session(
+    source: &MediaSource,
+    output: Option<MediaOutputSink>,
+    extraction: Option<ExtractionRequest>,
+) -> MediaResult<AndroidSession> {
+    initialize()?;
+    validate_source(source)?;
+    let network = source.network_options();
+    let position = extraction.as_ref().map_or(-1, |request| {
+        request.position.as_millis().min(i64::MAX as u128) as i64
+    });
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let state = Arc::new(Mutex::new(State {
         output,
-        handle: FrameHandle::new(),
-        sequence: 0,
+        handle: extraction
+            .as_ref()
+            .map_or_else(FrameHandle::new, |request| request.handle),
+        sequence: extraction.as_ref().map_or(0, |request| request.sequence),
+        extraction: extraction.map(|request| request.response),
         generation: 0,
         timeline: PlaybackTimeline::default(),
         playback: 0,
@@ -111,7 +139,7 @@ pub(super) fn open_playback(
     let runtime = AndroidRuntime::get().map_err(error)?;
     let object = runtime.with_env(|env| {
         let class = runtime.load_class(env, CLASS)?;
-        let uri = env.new_string(request.source.uri())?;
+        let uri = env.new_string(source.uri())?;
         let mut headers = network.headers().clone();
         if let Some(agent) = network.user_agent() {
             headers.retain(|key, _| !key.eq_ignore_ascii_case("User-Agent"));
@@ -128,20 +156,21 @@ pub(super) fn open_playback(
             env.delete_local_ref(value)?;
         }
         let timeout = network.timeout().unwrap_or(Duration::from_secs(30)).as_millis().clamp(1, i32::MAX as u128) as i32;
-        let object = env.new_object(class, "(Landroid/content/Context;JLjava/lang/String;[Ljava/lang/String;[Ljava/lang/String;I)V", &[
+        let object = env.new_object(class, "(Landroid/content/Context;JLjava/lang/String;[Ljava/lang/String;[Ljava/lang/String;IJ)V", &[
             JValue::Object(runtime.context()), JValue::Long(id), JValue::Object(&uri),
             JValue::Object(&keys), JValue::Object(&values), JValue::Int(timeout),
+            JValue::Long(position),
         ])?;
         Ok(env.new_global_ref(object)?)
     });
     match object {
-        Ok(object) => Ok(Box::new(AndroidSession {
+        Ok(object) => Ok(AndroidSession {
             id,
             state,
             object,
             volume: 1.,
             muted: false,
-        })),
+        }),
         Err(cause) => {
             if let Ok(mut sessions) = sessions().lock() {
                 sessions.remove(&id);
@@ -152,15 +181,75 @@ pub(super) fn open_playback(
 }
 
 pub(super) fn open_frame_extractor(
-    _: FrameExtractorBackendRequest,
+    request: FrameExtractorBackendRequest,
 ) -> MediaResult<Box<dyn FrameExtractionSession>> {
-    Err(MediaError::unsupported(
-        "Android independent frame extraction is not supported",
-    ))
+    initialize()?;
+    validate_source(&request.source)?;
+    if request.video_decoder != VideoDecoderPolicy::Auto {
+        return Err(MediaError::unsupported(
+            "Android frame extraction requires automatic decoder selection",
+        ));
+    }
+    if request.timeout.is_zero() {
+        return Err(MediaError::invalid_input(
+            "frame extraction timeout must be greater than zero",
+        ));
+    }
+    Ok(Box::new(AndroidFrameExtractor {
+        request,
+        handle: FrameHandle::new(),
+        sequence: 0,
+    }))
+}
+
+struct AndroidFrameExtractor {
+    request: FrameExtractorBackendRequest,
+    handle: FrameHandle,
+    sequence: u64,
+}
+
+impl FrameExtractionSession for AndroidFrameExtractor {
+    fn initial_frame(&mut self) -> MediaResult<Arc<VideoFrame>> {
+        self.frame_at(Duration::ZERO, SeekMode::Accurate)
+    }
+
+    fn frame_at(&mut self, position: Duration, mode: SeekMode) -> MediaResult<Arc<VideoFrame>> {
+        if mode != SeekMode::Accurate {
+            return Err(MediaError::unsupported(
+                "Android frame extraction requires accurate seeking",
+            ));
+        }
+        let started = Instant::now();
+        let (response, receiver) = mpsc::sync_channel(1);
+        self.sequence = self.sequence.wrapping_add(1);
+        // A request owns its decoder, so late output after timeout cannot satisfy
+        // another request, including a repeated request for the same timestamp.
+        let _session = open_session(
+            &self.request.source,
+            None,
+            Some(ExtractionRequest {
+                position,
+                response,
+                handle: self.handle,
+                sequence: self.sequence,
+            }),
+        )?;
+        receiver
+            .recv_timeout(self.request.timeout.saturating_sub(started.elapsed()))
+            .map_err(|cause| match cause {
+                mpsc::RecvTimeoutError::Timeout => {
+                    MediaError::timeout("Android frame extraction timed out")
+                }
+                mpsc::RecvTimeoutError::Disconnected => {
+                    MediaError::backend("Android frame extraction closed without a frame")
+                }
+            })?
+    }
 }
 
 struct State {
-    output: MediaOutputSink,
+    output: Option<MediaOutputSink>,
+    extraction: Option<SyncSender<MediaResult<Arc<VideoFrame>>>>,
     handle: FrameHandle,
     sequence: u64,
     generation: i64,
@@ -170,6 +259,26 @@ struct State {
     width: i32,
     height: i32,
     audio: bool,
+}
+
+impl State {
+    fn emit(&mut self, event: MediaBackendEvent) {
+        if let Some(output) = &self.output {
+            output.emit(event);
+        } else if let MediaBackendEvent::Error(error) = event
+            && let Some(response) = self.extraction.take()
+        {
+            let _ = response.try_send(Err((*error).clone()));
+        }
+    }
+
+    fn publish_frame(&mut self, frame: Arc<VideoFrame>) {
+        if let Some(output) = &self.output {
+            output.publish_video_frame(frame);
+        } else if let Some(response) = self.extraction.take() {
+            let _ = response.try_send(Ok(frame));
+        }
+    }
 }
 
 fn with_state(id: i64, generation: i64, operation: impl FnOnce(&mut State)) {
@@ -236,9 +345,7 @@ extern "system" fn state_changed(
                 });
             }
             let info = Arc::new(info);
-            state
-                .output
-                .emit(MediaBackendEvent::MediaInfoChanged(info.clone()));
+            state.emit(MediaBackendEvent::MediaInfoChanged(info.clone()));
             state.info = Some(info);
             state.width = width;
             state.height = height;
@@ -247,14 +354,14 @@ extern "system" fn state_changed(
         if state.playback != playback {
             match playback {
                 2 => {
-                    state.output.emit(MediaBackendEvent::Buffering(0));
+                    state.emit(MediaBackendEvent::Buffering(0));
                 }
                 3 => {
-                    state.output.emit(MediaBackendEvent::Buffering(100));
-                    state.output.emit(MediaBackendEvent::Ready);
+                    state.emit(MediaBackendEvent::Buffering(100));
+                    state.emit(MediaBackendEvent::Ready);
                 }
                 4 => {
-                    state.output.emit(MediaBackendEvent::Ended);
+                    state.emit(MediaBackendEvent::Ended);
                 }
                 _ => {}
             }
@@ -274,6 +381,9 @@ extern "system" fn frame(
     timestamp: jlong,
 ) {
     with_state(id, generation, |state| {
+        if state.output.is_none() && state.extraction.is_none() {
+            return;
+        }
         let result = (|| -> MediaResult<VideoFrame> {
             let len = (width as usize)
                 .checked_mul(height as usize)
@@ -312,10 +422,10 @@ extern "system" fn frame(
         })();
         match result {
             Ok(frame) => {
-                state.output.publish_video_frame(Arc::new(frame));
+                state.publish_frame(Arc::new(frame));
             }
             Err(error) => {
-                state.output.emit(MediaBackendEvent::Error(Arc::new(error)));
+                state.emit(MediaBackendEvent::Error(Arc::new(error)));
             }
         }
     });
@@ -335,6 +445,8 @@ extern "system" fn failed(
         .unwrap_or_else(|_| "media operation failed".into());
     with_state(id, generation, |state| {
         let kind = match code {
+            10000 => MediaErrorKind::InvalidInput,
+            10001 => MediaErrorKind::UnsupportedOperation,
             2001..=2004 | 2008 => MediaErrorKind::Network { status: None },
             2005 => MediaErrorKind::SourceNotFound,
             2006 => MediaErrorKind::Io {
@@ -346,13 +458,14 @@ extern "system" fn failed(
             5001..=5004 => MediaErrorKind::AudioOutput,
             _ => MediaErrorKind::Backend,
         };
-        state
-            .output
-            .emit(MediaBackendEvent::Error(Arc::new(MediaError::new(
-                kind,
-                message,
-                MediaRecovery::ReloadSource,
-            ))));
+        let recovery = if code == 10000 || code == 10001 {
+            MediaRecovery::None
+        } else {
+            MediaRecovery::ReloadSource
+        };
+        state.emit(MediaBackendEvent::Error(Arc::new(MediaError::new(
+            kind, message, recovery,
+        ))));
     });
 }
 
@@ -394,8 +507,8 @@ impl AndroidSession {
 
     fn volume_changed(&self) {
         if let Err(error) = self.command(4, if self.muted { 0. } else { self.volume }, false) {
-            if let Ok(state) = self.state.lock() {
-                state.output.emit(MediaBackendEvent::Error(Arc::new(error)));
+            if let Ok(mut state) = self.state.lock() {
+                state.emit(MediaBackendEvent::Error(Arc::new(error)));
             }
         }
     }
@@ -409,6 +522,7 @@ impl MediaPlaybackSession for AndroidSession {
             audio: state.audio,
             seeking: state.timeline.is_seekable(),
             accurate_seeking: true,
+            frame_extraction: true,
             playback_rate: true,
             ..Default::default()
         }

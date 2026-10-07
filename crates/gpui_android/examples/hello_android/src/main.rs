@@ -78,6 +78,7 @@ fn main() {
         cx.open_window(WindowOptions::default(), |window, cx| {
             let view = cx.new(|cx| Counter {
                 details: false,
+                back_preview: None,
                 count: 0,
                 zoom: 1.,
                 pinch_phase: TouchPhase::Ended,
@@ -164,6 +165,16 @@ fn main() {
                     cx.notify();
                 }),
             );
+            let weak_view = view.downgrade();
+            window.on_system_back_gesture(cx, move |event, _, cx| {
+                let _ = weak_view.update(cx, |this, cx| {
+                    this.back_preview = match event.phase {
+                        TouchPhase::Started | TouchPhase::Moved => Some(event),
+                        TouchPhase::Ended | TouchPhase::Cancelled => None,
+                    };
+                    cx.notify();
+                });
+            });
             view
         })
         .expect("failed to open the GPUI window");
@@ -188,6 +199,7 @@ impl Global for SharedContent {}
 
 struct Counter {
     details: bool,
+    back_preview: Option<gpui::BackGestureEvent>,
     count: usize,
     zoom: f32,
     pinch_phase: TouchPhase,
@@ -723,6 +735,14 @@ impl Render for Counter {
                 .gap_5()
                 .child(div().text_3xl().child("Details"))
                 .child("System Back returns to the main page. With the keyboard open, Back hides it first.")
+                .child(div().text_sm().child(match self.back_preview {
+                    Some(event) => format!("Back from {:?} · {:.0}%", event.edge, event.progress * 100.),
+                    None => "Swipe from an edge to preview Back; reverse the swipe to cancel.".into(),
+                }))
+                .child(div().h(px(6.)).w_full().rounded_full().bg(rgb(surface)).child(
+                    div().h_full().w(gpui::relative(self.back_preview.map_or(0., |event| event.progress)))
+                        .rounded_full().bg(rgb(0x5e96e8))
+                ))
                 .child(Input::new(&self.title).text_color(rgb(0x172033)))
                 .child(div().text_sm().child(format!("Keyboard: {} · Action: {:?}", KEYBOARDS[self.keyboard].0, INPUT_ACTIONS[self.input_action])))
                 .child(Input::new(&self.keyboard_input).text_color(rgb(0x172033)))

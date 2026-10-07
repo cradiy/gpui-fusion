@@ -8,6 +8,8 @@ import android.util.Log
 import android.view.WindowManager
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
+import android.window.OnBackAnimationCallback
+import android.window.BackEvent
 import android.widget.FrameLayout
 import android.widget.TextView
 import kotlin.math.roundToInt
@@ -61,6 +63,7 @@ abstract class GpuiActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 30) {
             KeyboardInsets(content, gpui) { visible ->
                 imeVisible = visible
+                if (visible) session.cancelBackGesture()
                 updateBackRegistration()
             }
         } else {
@@ -115,7 +118,8 @@ abstract class GpuiActivity : Activity() {
 
     @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
-        if (!session.handleSystemBack()) super.onBackPressed()
+        if (imeVisible) session.hideSoftKeyboard()
+        else if (!session.handleSystemBack()) super.onBackPressed()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -134,9 +138,11 @@ abstract class GpuiActivity : Activity() {
     @Suppress("DEPRECATION")
     private fun updateBackRegistration() {
         if (Build.VERSION.SDK_INT < 33) return
-        val enabled = resumed && backEnabled && !imeVisible
+        val enabled = resumed && (backEnabled || imeVisible)
         if (enabled && backRegistration == null) {
-            backRegistration = BackApi33.register(this) { onBackPressed() }
+            backRegistration = if (Build.VERSION.SDK_INT >= 34) {
+                BackApi34.register(this, session, { !imeVisible }) { onBackPressed() }
+            } else BackApi33.register(this) { onBackPressed() }
         } else if (!enabled) {
             backRegistration?.close()
             backRegistration = null
@@ -149,6 +155,29 @@ abstract class GpuiActivity : Activity() {
             val callback = OnBackInvokedCallback { action() }
             dispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback)
             return AutoCloseable { dispatcher.unregisterOnBackInvokedCallback(callback) }
+        }
+    }
+
+    private object BackApi34 {
+        fun register(activity: Activity, session: GpuiSession, preview: () -> Boolean, action: () -> Unit): AutoCloseable {
+            val dispatcher = activity.onBackInvokedDispatcher
+            val callback = object : OnBackAnimationCallback {
+                override fun onBackStarted(event: BackEvent) {
+                    if (preview()) session.startBackGesture(event.progress, when (event.swipeEdge) {
+                        BackEvent.EDGE_LEFT -> GpuiBackEdge.LEFT
+                        BackEvent.EDGE_RIGHT -> GpuiBackEdge.RIGHT
+                        else -> GpuiBackEdge.NONE
+                    })
+                }
+                override fun onBackProgressed(event: BackEvent) { session.progressBackGesture(event.progress) }
+                override fun onBackCancelled() { session.cancelBackGesture() }
+                override fun onBackInvoked() { action() }
+            }
+            dispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback)
+            return AutoCloseable {
+                dispatcher.unregisterOnBackInvokedCallback(callback)
+                session.cancelBackGesture()
+            }
         }
     }
 }

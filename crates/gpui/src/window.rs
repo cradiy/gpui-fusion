@@ -2847,9 +2847,26 @@ impl Window {
     }
 
     /// Enables application handling of system Back, for example while a detail page is open.
+    ///
+    /// Predictive preview listeners do not enable Back handling on their own.
     /// Keep this disabled at the navigation root to preserve the platform's default behavior.
     pub fn set_back_enabled(&self, enabled: bool) {
         self.platform_window.set_back_enabled(enabled);
+    }
+
+    /// Observes system Back gesture progress on supported platforms. Update preview
+    /// state here and navigate only in [`Self::on_system_back`]. Cancellation must
+    /// restore the preview. Replaces the previous listener without enabling Back.
+    pub fn on_system_back_gesture(
+        &self,
+        cx: &App,
+        mut callback: impl FnMut(crate::BackGestureEvent, &mut Window, &mut App) + 'static,
+    ) {
+        let mut cx = self.to_async(cx);
+        self.platform_window
+            .set_back_gesture_handler(Box::new(move |event| {
+                let _ = cx.update(|window, cx| callback(event, window, cx));
+            }));
     }
 
     /// Requests the soft keyboard for the focused text input on supported platforms.

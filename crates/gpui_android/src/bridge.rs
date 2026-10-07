@@ -446,6 +446,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         method("nativeFocus", "(JZ)V", focus as *mut c_void),
         method("nativeAppearance", "(JZ)V", appearance as *mut c_void),
         method("nativeBack", "(J)Z", system_back as *mut c_void),
+        method("nativeBackGesture", "(JIFI)V", back_gesture as *mut c_void),
         method("nativeTouch", "(JIIFF)Z", touch as *mut c_void),
         method("nativePinch", "(JIFFF)V", pinch as *mut c_void),
         method("nativeLongPress", "(JFF)Z", long_press as *mut c_void),
@@ -959,6 +960,44 @@ extern "system" fn system_back(mut env: JNIEnv, _: JClass, id: jlong) -> jboolea
     call(&mut env, |_| {
         Ok(session(id)?.platform.window.system_back() as u8)
     })
+}
+
+extern "system" fn back_gesture(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    phase: jint,
+    progress: jfloat,
+    edge: jint,
+) {
+    call(&mut env, |_| {
+        anyhow::ensure!(
+            progress.is_finite() && (0.0..=1.0).contains(&progress),
+            "invalid Back gesture progress"
+        );
+        let phase = match phase {
+            0 => gpui::TouchPhase::Started,
+            1 => gpui::TouchPhase::Moved,
+            2 => gpui::TouchPhase::Ended,
+            3 => gpui::TouchPhase::Cancelled,
+            _ => anyhow::bail!("invalid Back gesture phase"),
+        };
+        let edge = match edge {
+            0 => gpui::BackGestureEdge::Left,
+            1 => gpui::BackGestureEdge::Right,
+            2 => gpui::BackGestureEdge::None,
+            _ => anyhow::bail!("invalid Back gesture edge"),
+        };
+        session(id)?
+            .platform
+            .window
+            .back_gesture(gpui::BackGestureEvent {
+                phase,
+                progress,
+                edge,
+            });
+        Ok(())
+    });
 }
 
 extern "system" fn touch(

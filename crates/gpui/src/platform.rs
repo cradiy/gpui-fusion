@@ -1089,6 +1089,9 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     /// button/gesture; no source on iOS or desktop).
     fn set_back_handler(&self, _callback: Box<dyn FnMut()>) {}
 
+    /// Observes predictive Back previews without enabling or committing navigation.
+    fn set_back_gesture_handler(&self, _callback: Box<dyn FnMut(crate::BackGestureEvent)>) {}
+
     /// Declares whether the application would currently handle the system
     /// back action (e.g. navigation depth > 0).
     fn set_back_enabled(&self, _enabled: bool) {}

@@ -9,6 +9,31 @@ use std::time::Duration;
 
 use crate::{Pixels, Point, px};
 
+/// The display edge from which a system Back gesture started.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackGestureEdge {
+    /// Left edge of the display.
+    Left,
+    /// Right edge of the display.
+    Right,
+    /// A button or another non-edge Back source.
+    None,
+}
+
+/// A system navigation preview, separate from committing the Back action.
+/// Available on Android 14 and later. Buttons and older platforms can commit
+/// Back without sending these events. An `Ended` phase precedes `on_system_back`;
+/// a `Cancelled` phase must restore the preview without navigating.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BackGestureEvent {
+    /// Started, Moved, Ended (committed), or Cancelled.
+    pub phase: crate::TouchPhase,
+    /// System-provided progress in `0.0..=1.0`. Terminal events retain the last value.
+    pub progress: f32,
+    /// Edge chosen when the gesture started.
+    pub edge: BackGestureEdge,
+}
+
 /// Feel constants consumed by gesture recognizers. Provided on a best-effort
 /// basis, depending on each platform's support, defaulting to GPUI's own
 /// (iOS flavored) values

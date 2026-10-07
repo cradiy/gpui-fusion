@@ -30,6 +30,9 @@ class GpuiSession : AutoCloseable {
     private var closeRequested: Runnable? = null
     private var errorHandler: Consumer<RuntimeException>? = null
     private var backEnabled = false
+    private var backGestureActive = false
+    private var backProgress = 0f
+    private var backEdge = 0
     private var backChanged: Consumer<Boolean>? = null
     private var keyboardRequestVersion = 0L
     private var permissionHostVersion = 0L
@@ -144,7 +147,7 @@ class GpuiSession : AutoCloseable {
         if (!closed && id != 0L) nativeAppearance(id, darkAppearance())
     }
 
-    internal fun detachSurface() { checkThread(); if (id != 0L) nativeDetach(id) }
+    internal fun detachSurface() { checkThread(); cancelBackGesture(); if (id != 0L) nativeDetach(id) }
     internal fun frame(): Boolean { checkThread(); return id != 0L && nativeFrame(id) }
     internal fun redraw() { checkThread(); if (!closed && id != 0L) nativeRedraw(id) }
     internal fun viewport(width: Int, height: Int, density: Float, insets: GpuiWindowInsets) {
@@ -248,10 +251,57 @@ class GpuiSession : AutoCloseable {
     /** Dispatches committed system Back after the IME has had a chance to consume it. */
     fun handleSystemBack(): Boolean {
         checkThread()
-        if (!active() || !backEnabled || id == 0L) return false
+        if (!active() || !backEnabled || id == 0L) { cancelBackGesture(); return false }
         keyboardRequestVersion++
         view.get()?.requestSoftKeyboard(false)
-        return try { nativeBack(id) } catch (error: RuntimeException) { fail(error); false }
+        return try {
+            finishBackGesture(2)
+            nativeBack(id)
+        } catch (error: RuntimeException) { fail(error); false }
+    }
+
+    /** Starts a preview from the platform's Back animation callback. Main thread only. */
+    fun startBackGesture(progress: Float, edge: GpuiBackEdge) {
+        checkThread()
+        require(progress.isFinite() && progress in 0f..1f)
+        cancelBackGesture()
+        if (!active() || !backEnabled || id == 0L) return
+        backGestureActive = true
+        backProgress = progress
+        backEdge = edge.ordinal
+        try { nativeBackGesture(id, 0, backProgress, backEdge) }
+        catch (error: RuntimeException) { fail(error) }
+    }
+
+    /** Updates an active preview; it does not navigate. Main thread only. */
+    fun progressBackGesture(progress: Float) {
+        checkThread()
+        require(progress.isFinite() && progress in 0f..1f)
+        if (!backGestureActive) return
+        backProgress = progress
+        try { nativeBackGesture(id, 1, backProgress, backEdge) }
+        catch (error: RuntimeException) { fail(error) }
+    }
+
+    /** Cancels an unfinished preview when the gesture or host registration ends. */
+    fun cancelBackGesture() {
+        checkThread()
+        try { finishBackGesture(3) }
+        catch (error: RuntimeException) { fail(error) }
+    }
+
+    /** Hides the soft keyboard without navigating or clearing input focus. */
+    fun hideSoftKeyboard() {
+        checkThread()
+        keyboardRequestVersion++
+        cancelBackGesture()
+        view.get()?.requestSoftKeyboard(false)
+    }
+
+    private fun finishBackGesture(phase: Int) {
+        if (!backGestureActive) return
+        backGestureActive = false
+        if (id != 0L) nativeBackGesture(id, phase, backProgress, backEdge)
     }
 
     /** Forward the host's onStart/onResume/onPause/onStop transitions. */
@@ -259,6 +309,7 @@ class GpuiSession : AutoCloseable {
         checkThread()
         require(next in FOREGROUND..BACKGROUND) { "Invalid lifecycle phase" }
         if (closed || next == phase) return
+        if (next != ACTIVE) cancelBackGesture()
         phase = next
         if (next != ACTIVE) keyboardRequestVersion++
         if (id != 0L) nativeLifecycle(id, phase)
@@ -307,6 +358,7 @@ class GpuiSession : AutoCloseable {
         handler.postAtTime({
             if (!closed && backEnabled != enabled) {
                 backEnabled = enabled
+                if (!enabled) cancelBackGesture()
                 backChanged?.accept(enabled)
             }
         }, this, SystemClock.uptimeMillis())
@@ -385,6 +437,7 @@ class GpuiSession : AutoCloseable {
         checkThread()
         if (closed) return
         closed = true
+        cancelBackGesture()
         pendingUrls.clear()
         pendingShares.clear()
         permissions.close()
@@ -434,6 +487,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeFocus(id: Long, active: Boolean)
         @JvmStatic private external fun nativeAppearance(id: Long, dark: Boolean)
         @JvmStatic private external fun nativeBack(id: Long): Boolean
+        @JvmStatic private external fun nativeBackGesture(id: Long, phase: Int, progress: Float, edge: Int)
         @JvmStatic private external fun nativeTouch(id: Long, pointer: Int, phase: Int, x: Float, y: Float): Boolean
         @JvmStatic private external fun nativePinch(id: Long, phase: Int, x: Float, y: Float, delta: Float)
         @JvmStatic private external fun nativeLongPress(id: Long, x: Float, y: Float): Boolean

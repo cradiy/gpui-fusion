@@ -38,6 +38,7 @@ impl PlatformDisplay for AndroidDisplay {
 #[derive(Default)]
 struct Callbacks {
     back: Option<Box<dyn FnMut()>>,
+    back_gesture: Option<Box<dyn FnMut(BackGestureEvent)>>,
     frame: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     input: Option<Box<dyn FnMut(PlatformInput) -> DispatchEventResult>>,
     active: Option<Box<dyn FnMut(bool)>>,
@@ -123,6 +124,17 @@ impl AndroidWindow {
         callback();
         self.callbacks.borrow_mut().back.get_or_insert(callback);
         true
+    }
+
+    pub fn back_gesture(&self, event: BackGestureEvent) {
+        let callback = self.callbacks.borrow_mut().back_gesture.take();
+        if let Some(mut callback) = callback {
+            callback(event);
+            self.callbacks
+                .borrow_mut()
+                .back_gesture
+                .get_or_insert(callback);
+        }
     }
 
     pub fn attach(
@@ -558,6 +570,10 @@ impl PlatformWindow for AndroidWindowHandle {
                 log::error!("Unable to enable Android Back: {error:#}");
             }
         }
+    }
+
+    fn set_back_gesture_handler(&self, callback: Box<dyn FnMut(BackGestureEvent)>) {
+        self.callbacks.borrow_mut().back_gesture = Some(callback);
     }
 
     fn set_back_enabled(&self, enabled: bool) {

@@ -589,17 +589,32 @@ and disable Back when returning to the root; capture entities weakly or use
 `Window::handler_for`.
 
 `GpuiActivity` handles committed Back through `OnBackInvokedDispatcher` on
-Android 13 and later and `onBackPressed` on older releases. Its callback is
-unregistered while the IME is visible, the Activity is paused, or application
-Back is disabled. The keyboard closes before in-app navigation, and the root
-keeps Android's default Back behavior. Interactive gesture progress is not
-forwarded to GPUI.
+Android 13 and later and `onBackPressed` on older releases. Its callback uses
+default priority so the IME can handle Back first. If Back reaches the host
+while the IME is visible, it hides the keyboard without navigating or sending
+preview events. The callback is unregistered while the Activity is paused or
+neither application Back nor the IME needs it. With the keyboard hidden, the
+navigation root keeps Android's default Back behavior.
+
+On Android 14 and later, `Window::on_system_back_gesture(cx, callback)` receives
+`BackGestureEvent` with a `TouchPhase`, progress in `0.0..=1.0`, and the starting
+display edge (`None` for non-edge sources). Use `Started` and `Moved` to draw a
+navigation preview. Restore the preview on `Cancelled`; `Ended` precedes the existing `on_system_back`
+callback, which commits navigation. Terminal events retain the last progress.
+Buttons and older releases may commit Back without preview events. Registering
+a preview listener does not enable Back interception or provide an animation.
+Pausing, losing the Surface, disabling Back, or detaching the platform callback
+cancels an unfinished preview.
 
 Custom hosts use `GpuiSession.setOnBackEnabledChanged` to register or unregister
 their navigation callbacks, then call `GpuiSession.handleSystemBack()` when Back
 is committed. A `false` result leaves navigation to the host. Enable
 `android:enableOnBackInvokedCallback` in the hosting Activity's manifest when
 using the platform dispatcher. Clear the listener when detaching the host.
+For predictive previews, forward `OnBackAnimationCallback` through
+`startBackGesture(progress, GpuiBackEdge)`, `progressBackGesture(progress)`,
+and `cancelBackGesture()` on the main thread. Commit through `handleSystemBack()`
+and cancel any unfinished preview before unregistering the host callback.
 
 ## Clipboard and links
 

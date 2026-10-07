@@ -87,6 +87,59 @@ fn native_locations_preserve_files_and_reader_positions() {
     });
 }
 
+#[test]
+fn relative_paths_create_parents_and_preserve_existing_files() {
+    block_on(async {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("downloads");
+        let location = LocationHandle::from_path(&root, executor());
+        for invalid in [
+            "",
+            "/absolute",
+            "../escape",
+            "a/../b",
+            "a/./b",
+            "a//b",
+            "a/",
+            "C:/data",
+            "a\\b",
+            "a/.. ",
+            "a/hidden.",
+            "a/\0b",
+        ] {
+            assert!(location.file(invalid).is_err(), "{invalid:?}");
+            assert!(
+                location
+                    .create_file(invalid, CreateOptions::default())
+                    .await
+                    .is_err(),
+                "{invalid:?}"
+            );
+        }
+        let path = "中文 # %/Downloads/note.txt";
+        let reference = location.file(path).unwrap();
+        assert!(!root.exists());
+        let file = location
+            .create_file(path, CreateOptions::default())
+            .await
+            .unwrap();
+        file.write(b"nested".to_vec()).await.unwrap();
+        assert_eq!(reference.read().await.unwrap(), b"nested");
+        assert!(
+            location
+                .create_file(path, CreateOptions::default())
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            std::fs::read(root.join("中文 # %/Downloads/note.txt")).unwrap(),
+            b"nested"
+        );
+        assert!(!root.join("note.txt").exists());
+        assert_eq!(location.path(), Some(root.as_path()));
+    });
+}
+
 #[derive(Debug)]
 struct UnboundedFile(Arc<AtomicUsize>);
 impl PlatformFile for UnboundedFile {

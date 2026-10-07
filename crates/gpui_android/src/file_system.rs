@@ -198,19 +198,21 @@ struct Collection {
 impl PlatformLocation for Collection {
     fn create_file(
         &self,
-        name: String,
+        relative_path: String,
         options: CreateOptions,
     ) -> LocalBoxFuture<'static, Result<FileHandle>> {
         let store = self.store.clone();
         let executor = self.executor.clone();
         let code = self.code;
         self.executor.run(move || {
+            let (directory, name) = relative_path.rsplit_once('/').unwrap_or(("", &relative_path));
             let mime = options.mime_type.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "a concrete MIME type is required for public collections"))?;
             let object = store.call(|env| {
                 let name = env.new_string(name)?;
                 let mime = env.new_string(mime)?;
-                let file = env.call_method(store.object.as_obj(), "create", "(ILjava/lang/String;Ljava/lang/String;)Ldev/gpui/android/SelectedDocument;",
-                    &[JValue::Int(code), JValue::Object(name.as_ref()), JValue::Object(mime.as_ref())])?.l()?;
+                let directory = env.new_string(directory)?;
+                let file = env.call_method(store.object.as_obj(), "create", "(ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ldev/gpui/android/SelectedDocument;",
+                    &[JValue::Int(code), JValue::Object(name.as_ref()), JValue::Object(mime.as_ref()), JValue::Object(directory.as_ref())])?.l()?;
                 Ok(env.new_global_ref(file)?)
             })?;
             selected_file(store.vm.clone(), object, executor)

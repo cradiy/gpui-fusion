@@ -111,17 +111,25 @@ impl PlatformLocation for NativeLocation {
     fn path(&self) -> Option<&Path> {
         Some(&self.path)
     }
-    fn file(&self, name: &str) -> Result<FileHandle> {
-        Ok(file(self.path.join(name), self.executor.clone(), true))
+    fn file(&self, relative_path: &str) -> Result<FileHandle> {
+        Ok(file(
+            self.path.join(relative_path),
+            self.executor.clone(),
+            true,
+        ))
     }
     fn create_file(
         &self,
-        name: String,
+        relative_path: String,
         _options: CreateOptions,
     ) -> LocalBoxFuture<'static, Result<FileHandle>> {
         let root = self.path.clone();
         let executor = self.executor.clone();
         self.executor.run(move || {
+            let (parent, name) = relative_path
+                .rsplit_once('/')
+                .unwrap_or(("", &relative_path));
+            let root = root.join(parent);
             std::fs::create_dir_all(&root)?;
             let path = root.join(name);
             OpenOptions::new()

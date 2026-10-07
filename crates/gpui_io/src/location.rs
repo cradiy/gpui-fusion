@@ -27,14 +27,15 @@ pub trait PlatformLocation: Send + Sync {
     fn path(&self) -> Option<&Path> {
         None
     }
-    /// Resolve a named file without creating it; not all providers support name lookup.
-    fn file(&self, _name: &str) -> Result<FileHandle> {
+    /// Resolve a validated relative file path without creating it; not all providers support lookup.
+    fn file(&self, _relative_path: &str) -> Result<FileHandle> {
         Err(unsupported("location cannot resolve files by name"))
     }
-    /// Create without overwriting existing files. Providers may choose a different display name.
+    /// Create at a validated slash-separated relative path, including parent directories.
+    /// Do not overwrite existing files. Providers may choose a different display name.
     fn create_file(
         &self,
-        name: String,
+        relative_path: String,
         options: CreateOptions,
     ) -> LocalBoxFuture<'static, Result<FileHandle>>;
 }
@@ -48,18 +49,22 @@ impl LocationHandle {
     pub fn path(&self) -> Option<&Path> {
         self.0.path()
     }
-    pub fn file(&self, name: &str) -> Result<FileHandle> {
-        validate_name(name)?;
-        self.0.file(name)
+    /// Resolve a slash-separated relative file path without accessing storage.
+    pub fn file(&self, relative_path: &str) -> Result<FileHandle> {
+        validate_relative_path(relative_path)?;
+        self.0.file(relative_path)
     }
+    /// Create a file and missing parent directories relative to this location.
+    /// Use `/` separators on every platform; absolute paths, empty components,
+    /// `.` and `..` are rejected. Native filesystem symlinks are followed normally.
     pub async fn create_file(
         &self,
-        name: impl Into<String>,
+        relative_path: impl Into<String>,
         options: CreateOptions,
     ) -> Result<FileHandle> {
-        let name = name.into();
-        validate_name(&name)?;
-        self.0.create_file(name, options).await
+        let relative_path = relative_path.into();
+        validate_relative_path(&relative_path)?;
+        self.0.create_file(relative_path, options).await
     }
     pub fn from_path(path: impl Into<std::path::PathBuf>, executor: impl Into<IoExecutor>) -> Self {
         crate::native::location(path.into(), executor.into())
@@ -140,6 +145,13 @@ fn validate_name(name: &str) -> Result<()> {
             && !name.contains(['/', '\\', '\0', ':']),
         "expected a filename, not a path"
     );
+    Ok(())
+}
+
+fn validate_relative_path(path: &str) -> Result<()> {
+    for component in path.split('/') {
+        validate_name(component)?;
+    }
     Ok(())
 }
 

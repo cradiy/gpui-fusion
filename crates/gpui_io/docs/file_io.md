@@ -88,13 +88,27 @@ Music, and Videos use the user's configured locations without appending the app 
 Missing locations return errors. Desktop app directories do not imply sandbox
 isolation, automatic uninstall cleanup, or exclusion from backup.
 
-`LocationHandle::create_file(name, options)` creates a new file without overwriting
+`LocationHandle::create_file(relative_path, options)` creates a new file without overwriting
 an existing one. Native locations create the directory if necessary and reject an
 existing filename. Providers may adjust the requested display name; use the returned
-handle's `name()`. Names must be single path components, without separators, colons,
-NUL, or trailing dots or spaces. Creation followed by cancellation may leave an empty
-native file. `file(name)` resolves a reference without creating it where name lookup
+handle's `name()`. Creation followed by cancellation may leave an empty
+native file. `file(relative_path)` resolves a reference without creating it where name lookup
 is supported. `path()` is optional.
+
+Both methods accept a filename or a relative file path, such as
+`MyApp/Exports/report.txt`. Use `/` separators on every platform. Absolute paths,
+empty components, `.` and `..` are rejected. Components must not contain backslashes,
+colons or NUL, or end in dots or spaces. `file()` performs no storage access;
+`create_file()` creates missing parent directories. Native locations follow
+filesystem symlinks normally; a location handle is not a filesystem sandbox.
+
+```rust,ignore
+let downloads = files.location(SystemLocation::Downloads).await?;
+let file = downloads.create_file("MyApp/Exports/report.txt", CreateOptions {
+    mime_type: Some("text/plain".into()),
+}).await?;
+file.write(contents).await?;
+```
 
 ## Android
 
@@ -111,6 +125,12 @@ These locations have no native path or name lookup. Creating a new item does not
 grant access to existing items owned by other apps. Documents requires explicit
 selection through the system document picker. Older Android versions report
 unsupported public collections; they do not request broad storage permissions.
+
+Public collection subdirectories map to MediaStore's `RELATIVE_PATH` under the
+selected collection's standard directory. For example, creating
+`MyApp/Exports/report.txt` in Downloads creates an item under `Download/MyApp/Exports/`.
+This does not expose a native path, enumerate existing files, or change access
+permissions. Providers may normalize directory or file names.
 
 New collection items remain pending until their first writer closes successfully.
 Aborting that writer or dropping all handles and sessions before publication

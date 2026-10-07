@@ -491,15 +491,15 @@ impl Counter {
         cx.spawn(async move |this, cx| {
             let result = async {
                 let target = io.location(location).await?;
-                let name = format!(
-                    "gpui-note-{}.txt",
+                let relative_path = format!(
+                    "GPUI/Samples/gpui-note-{}.txt",
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)?
                         .as_millis()
                 );
                 let file = target
                     .create_file(
-                        name,
+                        relative_path,
                         gpui::gpui_io::CreateOptions {
                             mime_type: Some("text/plain".into()),
                         },
@@ -520,7 +520,7 @@ impl Counter {
                 this.file_pending = false;
                 this.file_status = match result {
                     Ok(file) => {
-                        let status = format!("Saved to {location:?}: {}", file.name());
+                        let status = format!("Saved to {location:?}/GPUI/Samples: {}", file.name());
                         this.document = Some(file);
                         status
                     }

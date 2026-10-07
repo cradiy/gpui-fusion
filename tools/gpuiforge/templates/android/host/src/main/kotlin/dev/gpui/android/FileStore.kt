@@ -45,10 +45,15 @@ internal class FileStore(context: Context) {
 
     fun collectionsSupported(): Boolean = Build.VERSION.SDK_INT >= 29
 
-    fun create(kind: Int, name: String, mime: String): SelectedDocument {
+    fun create(kind: Int, name: String, mime: String, subdirectory: String): SelectedDocument {
         check(collectionsSupported()) { "Public collections require Android 10 or later" }
         require(name.isNotBlank() && name != "." && name != ".." && !name.contains('/') && !name.contains('\\') && !name.contains('\u0000')) { "Invalid filename" }
         require(mime.matches(Regex("[^/\\s]+/[^/\\s]+")) && !mime.contains('*')) { "A concrete MIME type is required" }
+        require(subdirectory.isEmpty() || subdirectory.split('/').all { part ->
+            part.isNotEmpty() && part != "." && part != ".." &&
+                !part.endsWith('.') && !part.endsWith(' ') &&
+                !part.contains('\\') && !part.contains(':') && !part.contains('\u0000')
+        }) { "Invalid relative directory" }
         val (collection, directory) = when (kind) {
             0 -> MediaStore.Downloads.EXTERNAL_CONTENT_URI to Environment.DIRECTORY_DOWNLOADS
             1 -> { require(mime.startsWith("image/")); MediaStore.Images.Media.EXTERNAL_CONTENT_URI to Environment.DIRECTORY_PICTURES }
@@ -59,7 +64,8 @@ internal class FileStore(context: Context) {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, mime)
-            put(MediaStore.MediaColumns.RELATIVE_PATH, directory)
+            put(MediaStore.MediaColumns.RELATIVE_PATH,
+                if (subdirectory.isEmpty()) directory else "$directory/$subdirectory/")
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val uri = resolver.insert(collection, values) ?: throw FileNotFoundException("Unable to create file")

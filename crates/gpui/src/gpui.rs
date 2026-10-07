@@ -369,6 +369,10 @@ where
 /// Information about the GPU GPUI is running on.
 #[derive(Default, Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct GpuSpecs {
+    /// Whether the renderer accepts Android RGBA hardware buffers with acquire fences.
+    #[cfg(target_os = "android")]
+    #[serde(default)]
+    pub supports_hardware_buffer_import: bool,
     /// Whether the GPU is really a fake (like `llvmpipe`) running on the CPU.
     pub is_software_emulated: bool,
     /// The name of the device, as reported by Vulkan.

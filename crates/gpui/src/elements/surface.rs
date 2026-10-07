@@ -885,6 +885,8 @@ pub struct SurfaceFrame {
 #[derive(Clone, Debug)]
 enum SurfaceFrameBackingData {
     Cpu(SmallVec<[SurfacePlane; 2]>),
+    #[cfg(target_os = "android")]
+    HardwareBuffer(Arc<gpui_util::android::hardware_buffer::HardwareBufferFrame>),
     #[cfg(target_family = "wasm")]
     Browser(gpui_util::browser::BrowserVideoFrame),
     #[cfg(target_os = "macos")]
@@ -899,6 +901,9 @@ enum SurfaceFrameBackingData {
 /// The storage backing an immutable surface frame.
 #[derive(Clone, Copy, Debug)]
 pub enum SurfaceFrameBacking<'a> {
+    /// Android RGBA allocation with an acquire fence.
+    #[cfg(target_os = "android")]
+    HardwareBuffer(&'a Arc<gpui_util::android::hardware_buffer::HardwareBufferFrame>),
     /// Portable CPU memory that must be uploaded to a GPU texture.
     Cpu(&'a [SurfacePlane]),
     /// An immutable browser frame copied into a GPU texture on its owner thread.
@@ -1008,6 +1013,38 @@ impl SurfaceFrame {
             format,
             backing: SurfaceFrameBackingData::Cpu(planes),
             color,
+        })
+    }
+
+    /// Creates a surface backed by an immutable Android RGBA hardware buffer.
+    #[cfg(target_os = "android")]
+    pub fn from_hardware_buffer(
+        handle: SurfaceHandle,
+        sequence: u64,
+        visible_rect: Bounds<DevicePixels>,
+        display_size: Size<DevicePixels>,
+        frame: Arc<gpui_util::android::hardware_buffer::HardwareBufferFrame>,
+    ) -> Result<Self, SurfaceFrameError> {
+        let coded_size = crate::size(
+            DevicePixels(
+                i32::try_from(frame.buffer().width())
+                    .map_err(|_| SurfaceFrameError::InvalidSize)?,
+            ),
+            DevicePixels(
+                i32::try_from(frame.buffer().height())
+                    .map_err(|_| SurfaceFrameError::InvalidSize)?,
+            ),
+        );
+        validate_frame_geometry(coded_size, visible_rect, display_size)?;
+        Ok(Self {
+            handle,
+            sequence,
+            coded_size,
+            visible_rect,
+            display_size,
+            format: SurfaceFormat::Rgba8,
+            backing: SurfaceFrameBackingData::HardwareBuffer(frame),
+            color: Default::default(),
         })
     }
 
@@ -1317,6 +1354,10 @@ impl SurfaceFrame {
     pub fn backing(&self) -> SurfaceFrameBacking<'_> {
         match &self.backing {
             SurfaceFrameBackingData::Cpu(planes) => SurfaceFrameBacking::Cpu(planes),
+            #[cfg(target_os = "android")]
+            SurfaceFrameBackingData::HardwareBuffer(frame) => {
+                SurfaceFrameBacking::HardwareBuffer(frame)
+            }
             #[cfg(target_family = "wasm")]
             SurfaceFrameBackingData::Browser(frame) => SurfaceFrameBacking::Browser(frame),
             #[cfg(target_os = "macos")]
@@ -1332,6 +1373,8 @@ impl SurfaceFrame {
     pub fn cpu_planes(&self) -> Option<&[SurfacePlane]> {
         match &self.backing {
             SurfaceFrameBackingData::Cpu(planes) => Some(planes),
+            #[cfg(target_os = "android")]
+            SurfaceFrameBackingData::HardwareBuffer(_) => None,
             #[cfg(target_family = "wasm")]
             SurfaceFrameBackingData::Browser(_) => None,
             #[cfg(target_os = "macos")]

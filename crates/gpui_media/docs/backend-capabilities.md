@@ -10,13 +10,19 @@ Windows delivers CPU frames through Media Foundation and WIC. Decoder and
 container support depend on the system's installed media components.
 
 Android supports device-decodable progressive local and HTTP(S) media, HLS/DASH
-on-demand streams, audio track selection, text subtitles, and CPU frame delivery.
+on-demand streams, audio track selection, text subtitles, and GPU or CPU frame delivery.
 Frame stepping, DRM and HDR output are unavailable. Extraction uses
 `VideoDecoderPolicy::Auto` and `SeekMode::Accurate`; explicit decoder policies,
 other seek modes, audio-only sources and positions beyond a known video duration
 return errors. HTTP options support headers, user agent and connect/read timeout;
-other explicit options return unsupported-operation errors. Video readback and
-upload costs should be measured for high-resolution or simultaneous players.
+other explicit options return unsupported-operation errors.
+
+Use `VideoPlayer::builder(...).build_in_window(window, cx)` to negotiate native
+frame transport with the renderer. On compatible Android Vulkan devices,
+`FrameTransport::HardwareBuffer` keeps playback pixels on the GPU, including
+color conversion and the copy into GPUI's texture. Unsupported devices or
+failed imports fall back to CPU frames. Independent frame extraction returns
+CPU pixels. `VideoPlayer::frame_transport()` reports the transport actually used.
 
 HLS/DASH use the same source, playback, seeking and stream-selection APIs as
 other media. See [network sources](playback-lifecycle.md#network-sources) for

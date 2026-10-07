@@ -14,6 +14,9 @@ import java.util.ArrayDeque
 /** Converts decoder surfaces into top-to-bottom RGBA frames on a dedicated GL thread. */
 internal class MediaFrames(
     private val handler: Handler,
+    private val session: Long,
+    private val nativeFrames: Boolean,
+    private val acceptsFrame: (Long) -> Boolean,
     private val publish: (ByteBuffer, Int, Int, Long, Long) -> Unit,
 ) : AutoCloseable {
     var width = 0
@@ -33,8 +36,10 @@ internal class MediaFrames(
     private var allocatedWidth = 0
     private var allocatedHeight = 0
     private var pixels: ByteBuffer? = null
+    private var nativePool = 0L
     private val matrix = FloatArray(16)
     private data class Timestamp(val release: Long, val pts: Long, val generation: Long, val width: Int, val height: Int)
+    private var lastStamp: Timestamp? = null
     private val timestamps = ArrayDeque<Timestamp>()
     private val vertices = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
         put(floatArrayOf(-1f, -1f, 0f, 1f, 1f, -1f, 1f, 1f, -1f, 1f, 0f, 0f, 1f, 1f, 1f, 0f))
@@ -79,6 +84,7 @@ internal class MediaFrames(
             }, handler)
         }
         checkGl()
+        if (nativeFrames) nativePool = nativeCreate()
     }
 
     @Synchronized fun recordTimestamp(release: Long, pts: Long, generation: Long, width: Int, height: Int) {
@@ -86,7 +92,7 @@ internal class MediaFrames(
         timestamps.addLast(Timestamp(release, pts, generation, width, height))
     }
 
-    @Synchronized fun discardPending() { timestamps.clear() }
+    @Synchronized fun discardPending() { timestamps.clear(); lastStamp = null }
 
     @Synchronized private fun timestamp(release: Long): Timestamp? {
         var selected: Timestamp? = null
@@ -94,16 +100,39 @@ internal class MediaFrames(
         return selected
     }
 
-    private fun capture(source: SurfaceTexture) {
-        source.updateTexImage()
-        val stamp = timestamp(source.timestamp) ?: return
+    fun useCpuFrames() {
+        if (nativePool != 0L) nativeClose(nativePool)
+        nativePool = 0L
+        texture?.let { capture(it, true) }
+    }
+
+    private fun capture(source: SurfaceTexture, refresh: Boolean = false) {
+        if (!refresh) source.updateTexImage()
+        val stamp = (if (refresh) lastStamp else timestamp(source.timestamp)) ?: return
+        if (!acceptsFrame(stamp.generation)) return
+        lastStamp = stamp
         if (stamp.width > 0 && stamp.height > 0) {
             width = stamp.width
             height = stamp.height
         }
         if (width <= 0 || height <= 0) return
         check(width <= maxSize && height <= maxSize) { "Video exceeds GL texture limits" }
-        if (width != allocatedWidth || height != allocatedHeight) {
+        var gpuTarget = if (nativePool != 0L) nativeTarget(nativePool, width, height) else -1
+        if (gpuTarget == 0) return // All bounded pool slots are still in use.
+        if (gpuTarget < 0 && nativePool != 0L) {
+            nativeClose(nativePool)
+            nativePool = 0L
+        }
+        if (gpuTarget > 0) {
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, framebuffer)
+            GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, gpuTarget, 0)
+            if (GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+                nativeClose(nativePool)
+                nativePool = 0L
+                gpuTarget = -1
+            }
+        }
+        if (gpuTarget < 0 && (width != allocatedWidth || height != allocatedHeight)) {
             val byteCount = Math.multiplyExact(Math.multiplyExact(width, height), 4)
             pixels = ByteBuffer.allocateDirect(byteCount).order(ByteOrder.nativeOrder())
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, target)
@@ -116,6 +145,7 @@ internal class MediaFrames(
             allocatedHeight = height
         }
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, framebuffer)
+        if (gpuTarget < 0) GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, target, 0)
         GLES20.glViewport(0, 0, width, height)
         GLES20.glUseProgram(program)
         source.getTransformMatrix(matrix)
@@ -132,6 +162,13 @@ internal class MediaFrames(
         GLES20.glEnableVertexAttribArray(position)
         GLES20.glEnableVertexAttribArray(uv)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        checkGl()
+        if (gpuTarget > 0) {
+            if (nativePublish(nativePool, session, stamp.generation, stamp.pts) == 0) {
+                useCpuFrames()
+            }
+            return
+        }
         val buffer = requireNotNull(pixels).apply { clear() }
         GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer)
         checkGl()
@@ -198,6 +235,11 @@ internal class MediaFrames(
 
     private fun checkGl() { check(GLES20.glGetError() == GLES20.GL_NO_ERROR) { "Video GL operation failed" } }
 
+    private external fun nativeCreate(): Long
+    private external fun nativeTarget(pool: Long, width: Int, height: Int): Int
+    private external fun nativePublish(pool: Long, session: Long, generation: Long, timestamp: Long): Int
+    private external fun nativeClose(pool: Long)
+
     override fun close() {
         texture?.setOnFrameAvailableListener(null)
         if (::surface.isInitialized) surface.release()
@@ -205,6 +247,8 @@ internal class MediaFrames(
         texture = null
         if (context != EGL14.EGL_NO_CONTEXT) {
             EGL14.eglMakeCurrent(display, pbuffer, pbuffer, context)
+            if (nativePool != 0L) nativeClose(nativePool)
+            nativePool = 0L
             GLES20.glDeleteTextures(2, intArrayOf(external, target), 0)
             GLES20.glDeleteFramebuffers(1, intArrayOf(framebuffer), 0)
             GLES20.glDeleteProgram(program)

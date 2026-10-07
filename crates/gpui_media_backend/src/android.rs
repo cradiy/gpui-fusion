@@ -1,4 +1,5 @@
 use gpui_media_core::*;
+mod gpu_frames;
 use gpui_util::android::AndroidRuntime;
 use jni::{
     JNIEnv, NativeMethod,
@@ -71,6 +72,20 @@ pub(super) fn initialize() -> MediaResult<()> {
                         ),
                     ],
                 )?;
+                let frames = runtime.load_class(env, "dev.gpui.android.MediaFrames")?;
+                env.register_native_methods(
+                    frames,
+                    &[
+                        method("nativeCreate", "()J", gpu_frames::create as *mut c_void),
+                        method("nativeTarget", "(JII)I", gpu_frames::target as *mut c_void),
+                        method(
+                            "nativePublish",
+                            "(JJJJ)I",
+                            gpu_frames::publish as *mut c_void,
+                        ),
+                        method("nativeClose", "(J)V", gpu_frames::close as *mut c_void),
+                    ],
+                )?;
                 Ok(())
             })
             .map_err(error)?;
@@ -91,7 +106,16 @@ pub(super) fn open_playback(
     request: MediaPlaybackRequest,
     output: MediaOutputSink,
 ) -> MediaResult<Box<dyn MediaPlaybackSession>> {
-    Ok(Box::new(open_session(&request.source, Some(output), None)?))
+    let native = request
+        .output_capabilities
+        .as_ref()
+        .is_some_and(|caps| caps.hardware_buffer);
+    Ok(Box::new(open_session(
+        &request.source,
+        Some(output),
+        None,
+        native,
+    )?))
 }
 
 fn validate_source(source: &MediaSource) -> MediaResult<()> {
@@ -128,6 +152,7 @@ fn open_session(
     source: &MediaSource,
     output: Option<MediaOutputSink>,
     extraction: Option<ExtractionRequest>,
+    native: bool,
 ) -> MediaResult<AndroidSession> {
     initialize()?;
     validate_source(source)?;
@@ -181,11 +206,12 @@ fn open_session(
             env.delete_local_ref(value)?;
         }
         let timeout = network.timeout().unwrap_or(Duration::from_secs(30)).as_millis().clamp(1, i32::MAX as u128) as i32;
-        let object = env.new_object(class, "(Landroid/content/Context;JLjava/lang/String;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;IJ)V", &[
+        let object = env.new_object(class, "(Landroid/content/Context;JLjava/lang/String;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;IJZ)V", &[
             JValue::Object(runtime.context()), JValue::Long(id), JValue::Object(&uri),
             JValue::Object(&mime_type),
             JValue::Object(&keys), JValue::Object(&values), JValue::Int(timeout),
             JValue::Long(position),
+            JValue::Bool(native.into()),
         ])?;
         Ok(env.new_global_ref(object)?)
     });
@@ -196,6 +222,7 @@ fn open_session(
             object,
             volume: 1.,
             muted: false,
+            native_frames: native,
         }),
         Err(cause) => {
             if let Ok(mut sessions) = sessions().lock() {
@@ -259,6 +286,7 @@ impl FrameExtractionSession for AndroidFrameExtractor {
                 handle: self.handle,
                 sequence: self.sequence,
             }),
+            false,
         )?;
         receiver
             .recv_timeout(self.request.timeout.saturating_sub(started.elapsed()))
@@ -562,6 +590,45 @@ extern "system" fn subtitles_changed(
     });
 }
 
+fn hardware_frame(
+    id: i64,
+    generation: i64,
+    frame: Arc<gpui_util::android::hardware_buffer::HardwareBufferFrame>,
+    timestamp: i64,
+) {
+    with_state(id, generation, |state| {
+        if state.output.is_none() {
+            return;
+        }
+        let size = FrameSize::new(
+            frame.buffer().width() as i32,
+            frame.buffer().height() as i32,
+        );
+        state.sequence = state.sequence.wrapping_add(1);
+        let buffer = FrameBuffer::with_backing(
+            state.handle,
+            state.sequence,
+            size,
+            FrameRect {
+                origin: Default::default(),
+                size,
+            },
+            size,
+            PixelFormat::Rgba8,
+            FrameBacking::HardwareBuffer(frame),
+            Default::default(),
+        );
+        match buffer {
+            Ok(buffer) => state.publish_frame(Arc::new(VideoFrame::new(
+                Arc::new(buffer),
+                Some(Duration::from_micros(timestamp.max(0) as u64)),
+                None,
+            ))),
+            Err(error) => state.emit(MediaBackendEvent::Error(Arc::new(error))),
+        }
+    });
+}
+
 extern "system" fn frame(
     env: JNIEnv,
     _: JClass,
@@ -667,6 +734,7 @@ struct AndroidSession {
     object: GlobalRef,
     volume: f64,
     muted: bool,
+    native_frames: bool,
 }
 
 impl AndroidSession {
@@ -832,6 +900,18 @@ impl MediaPlaybackSession for AndroidSession {
     fn set_audio_focus_enabled(&mut self, enabled: bool) -> MediaResult<()> {
         self.command(7, if enabled { 1. } else { 0. }, false)
     }
+    fn set_frame_transport_preference(
+        &mut self,
+        preference: FrameTransportPreference,
+    ) -> MediaResult<TransportChange> {
+        if preference == FrameTransportPreference::CpuOnly && self.native_frames {
+            self.command(8, 0., false)?;
+            self.native_frames = false;
+            Ok(TransportChange::Reconfigured)
+        } else {
+            Ok(TransportChange::Unchanged)
+        }
+    }
     fn select_audio_stream(&mut self, id: &MediaStreamId) -> MediaResult<()> {
         self.select_stream(Some(id), false)
     }
@@ -905,12 +985,6 @@ impl MediaPlaybackSession for AndroidSession {
     }
     fn media_info(&self) -> Option<Arc<MediaInfo>> {
         self.state.lock().ok().and_then(|s| s.info.clone())
-    }
-    fn set_frame_transport_preference(
-        &mut self,
-        _: FrameTransportPreference,
-    ) -> MediaResult<TransportChange> {
-        Ok(TransportChange::Unchanged)
     }
 }
 

@@ -93,6 +93,8 @@ pub struct FrameColorInfo {
 /// Native output layouts accepted by a frame consumer.
 #[derive(Clone, Debug, Default)]
 pub struct FrameOutputCapabilities {
+    #[cfg(target_os = "android")]
+    pub hardware_buffer: bool,
     #[cfg(target_os = "linux")]
     pub native_nv12_dma_buf_modifiers: Vec<DmaBufModifier>,
 }
@@ -135,6 +137,8 @@ impl FramePlane {
 #[derive(Clone, Debug)]
 pub enum FrameBacking {
     Cpu(Vec<FramePlane>),
+    #[cfg(target_os = "android")]
+    HardwareBuffer(Arc<gpui_util::android::hardware_buffer::HardwareBufferFrame>),
     #[cfg(target_family = "wasm")]
     Browser(gpui_util::browser::BrowserVideoFrame),
     #[cfg(target_os = "linux")]
@@ -232,6 +236,17 @@ impl FrameBuffer {
             FrameBacking::DmaBuf(image) => image.validate(coded_size, format)?,
             #[cfg(target_os = "macos")]
             FrameBacking::CoreVideo(buffer) => buffer.validate(coded_size, format)?,
+            #[cfg(target_os = "android")]
+            FrameBacking::HardwareBuffer(frame) => {
+                if format != PixelFormat::Rgba8
+                    || frame.buffer().width() != coded_size.width as u32
+                    || frame.buffer().height() != coded_size.height as u32
+                {
+                    return Err(MediaError::invalid_input(
+                        "hardware buffer dimensions or format mismatch",
+                    ));
+                }
+            }
         }
         Ok(Self {
             handle,

@@ -7,6 +7,8 @@ use jni::{
 };
 use std::sync::{Arc, OnceLock};
 
+pub mod hardware_buffer;
+
 static RUNTIME: OnceLock<AndroidRuntime> = OnceLock::new();
 
 pub struct AndroidRuntime {

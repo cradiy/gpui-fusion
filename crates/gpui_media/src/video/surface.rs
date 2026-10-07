@@ -86,7 +86,13 @@ impl VideoSurface {
                 },
             }
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(target_os = "android")]
+        {
+            FrameOutputCapabilities {
+                hardware_buffer: specs.supports_hardware_buffer_import,
+            }
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
         {
             let _ = specs;
             FrameOutputCapabilities::default()
@@ -131,6 +137,15 @@ fn convert_frame(buffer: &FrameBuffer, handle: SurfaceHandle) -> MediaResult<Sur
         },
     };
     match buffer.backing() {
+        #[cfg(target_os = "android")]
+        FrameBacking::HardwareBuffer(frame) => SurfaceFrame::from_hardware_buffer(
+            handle,
+            buffer.sequence(),
+            visible,
+            display,
+            frame.clone(),
+        )
+        .map_err(output_error),
         #[cfg(target_family = "wasm")]
         FrameBacking::Browser(frame) => {
             SurfaceFrame::from_browser(handle, buffer.sequence(), visible, display, frame.clone())

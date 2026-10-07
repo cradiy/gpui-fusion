@@ -165,9 +165,8 @@ impl VideoPlayer {
 
     /// Creates a player configured for the renderer backing `window`.
     ///
-    /// Use this constructor to enable capability-gated native NV12 DMA-BUF
-    /// negotiation. [`Self::new`] retains the portable CPU and linear DMA-BUF
-    /// paths when no window is available during construction.
+    /// Use this constructor to negotiate native frame formats supported by the
+    /// window's renderer, including Android hardware buffers and Linux NV12 DMA-BUF.
     pub fn new_in_window(
         source: MediaSource,
         options: VideoPlayerOptions,
@@ -913,7 +912,18 @@ impl VideoPlayer {
         Ok(())
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "android")]
+    fn check_frame_import(&mut self, _: &mut Context<Self>) -> MediaResult<()> {
+        let failed = self.video_surface.surface().is_some_and(|frame| {
+            matches!(frame.backing(), gpui::SurfaceFrameBacking::HardwareBuffer(buffer) if buffer.import_failed())
+        });
+        if failed {
+            self.set_frame_transport_preference(FrameTransportPreference::CpuOnly)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     fn check_frame_import(&mut self, _: &mut Context<Self>) -> MediaResult<()> {
         Ok(())
     }

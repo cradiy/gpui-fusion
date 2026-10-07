@@ -33,6 +33,7 @@ internal class MediaSession(
     values: Array<String>,
     timeout: Int,
     private val extractionPosition: Long,
+    private val nativeFrames: Boolean,
 ) : AutoCloseable {
     private val application = context.applicationContext
     private val mediaItem = MediaItem.Builder().setUri(uri).setMimeType(when (mimeType) {
@@ -108,10 +109,10 @@ internal class MediaSession(
     init {
         handler.post {
             guarded {
-                val output = MediaFrames(handler) { pixels, width, height, pts, revision ->
-                    if (!closed.get() && !failed && revision == generation && validateExtraction()) {
-                        nativeFrame(id, revision, pixels, width, height, pts)
-                    }
+                val output = MediaFrames(handler, id, nativeFrames && extractionPosition < 0, { revision ->
+                    !closed.get() && !failed && revision == generation && validateExtraction()
+                }) { pixels, width, height, pts, revision ->
+                    nativeFrame(id, revision, pixels, width, height, pts)
                 }
                 frames = output
                 output.onError = { fail(0, "Android video output failed (${it.javaClass.simpleName})") }
@@ -231,6 +232,7 @@ internal class MediaSession(
                         current.prepare()
                     }
                     7 -> current.setAudioAttributes(AudioAttributes.DEFAULT, value != 0.0)
+                    8 -> frames?.useCpuFrames()
                 }
                 tracks.report(current.currentTracks, generation)
                 handler.removeCallbacks(tick)

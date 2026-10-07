@@ -106,9 +106,9 @@ impl MediaDemo {
         cx.notify();
     }
 
-    fn choose(&mut self, cx: &mut Context<Self>) {
+    fn choose(&mut self, window: &Window, cx: &mut Context<Self>) {
         let selection = cx.prompt_for_files(FilePromptOptions::default());
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let result = async {
                 let Some(files) = selection.await?? else {
                     return Ok::<_, anyhow::Error>(());
@@ -123,7 +123,7 @@ impl MediaDemo {
                 } else {
                     anyhow::bail!("The file provider does not expose a playable URL");
                 };
-                this.update(cx, |this, cx| -> anyhow::Result<()> {
+                this.update_in(cx, |this, window, cx| -> anyhow::Result<()> {
                     gpui_media_backend::SystemBackend::initialize()?;
                     let extractor = VideoFrameExtractor::new(
                         source.clone(),
@@ -131,7 +131,7 @@ impl MediaDemo {
                     )?;
                     let player = cx.new(|cx| {
                         VideoPlayer::builder(source.clone(), gpui_media_backend::SystemBackend)
-                            .build(cx)
+                            .build_in_window(window, cx)
                             .expect("create media session")
                     });
                     this.system_controls = false;
@@ -506,7 +506,7 @@ impl Render for MediaDemo {
                     .rounded_lg()
                     .bg(rgb(0x30475c))
                     .child("Choose media")
-                    .on_click(cx.listener(|this, _, _, cx| this.choose(cx))),
+                    .on_click(cx.listener(|this, _, window, cx| this.choose(window, cx))),
             )
             .child(div().text_sm().child(self.status.clone()));
         if let Some(player) = &self.player {

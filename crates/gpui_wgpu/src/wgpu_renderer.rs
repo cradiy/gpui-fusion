@@ -42,6 +42,8 @@ mod particle_transition;
 mod particles;
 mod pipeline_cache;
 pub(crate) use pipeline_cache::PipelineCache;
+#[cfg(target_os = "android")]
+pub(crate) mod android_buffer;
 mod diagnostics;
 pub(crate) mod scene3d;
 mod scene_snapshot;
@@ -1981,6 +1983,8 @@ impl WgpuRenderer {
     pub fn gpu_specs(&self) -> GpuSpecs {
         let resources = self.resources();
         GpuSpecs {
+            #[cfg(target_os = "android")]
+            supports_hardware_buffer_import: android_buffer::supported(&resources.device),
             is_software_emulated: self.adapter_info.device_type == wgpu::DeviceType::Cpu,
             device_name: self.adapter_info.name.clone(),
             driver_name: self.adapter_info.driver.clone(),
@@ -3721,6 +3725,10 @@ impl WgpuRenderer {
                     ));
                 }
                 resources.surfaces.remove(&id);
+                #[cfg(target_os = "android")]
+                if let gpui::SurfaceFrameBacking::HardwareBuffer(buffer) = frame.backing() {
+                    buffer.report_import_failed();
+                }
                 continue;
             }
 
@@ -3795,6 +3803,55 @@ impl WgpuRenderer {
 
             #[cfg(target_os = "macos")]
             resources.core_video.surfaces.remove(&id);
+            #[cfg(target_os = "android")]
+            if let gpui::SurfaceFrameBacking::HardwareBuffer(buffer) = frame.backing() {
+                if resources
+                    .surfaces
+                    .get(&id)
+                    .is_some_and(|cached| cached.sequence == frame.sequence())
+                {
+                    continue;
+                }
+                let textures = resources
+                    .surfaces
+                    .remove(&id)
+                    .filter(|cached| {
+                        cached.size == frame.coded_size() && cached.format == frame.format()
+                    })
+                    .map(|cached| cached.textures)
+                    .unwrap_or_else(|| Self::create_surface_textures(&resources.device, &frame));
+                let CachedSurfaceTextures::Rgba {
+                    _texture: target, ..
+                } = &textures
+                else {
+                    unreachable!()
+                };
+                match android_buffer::copy(
+                    &resources.capture_context.instance,
+                    &resources.device,
+                    &resources.queue,
+                    buffer,
+                    target,
+                ) {
+                    Ok(()) => {
+                        resources.surfaces.insert(
+                            id,
+                            CachedSurface {
+                                sequence: frame.sequence(),
+                                format: frame.format(),
+                                size: frame.coded_size(),
+                                textures,
+                                owner: frame.handle().downgrade(),
+                            },
+                        );
+                    }
+                    Err(error) => {
+                        log::warn!("Android hardware buffer import failed: {error:#}");
+                        buffer.report_import_failed();
+                    }
+                }
+                continue;
+            }
             let action = surface_cache_action(
                 resources
                     .surfaces

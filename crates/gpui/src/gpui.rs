@@ -128,6 +128,7 @@ pub use gpui_io::{FileHandle, FileHandle as SelectedFile, FileWriteStream, Platf
 pub use gpui_macros::{
     AppContext, IntoElement, Render, VisualContext, bench, property_test, register_action, test,
 };
+pub use gpui_notifications;
 pub use image_loading::{ImageAnimation, ImageAnimationOptions, ImageLoadLimits};
 pub use particle_transition::*;
 pub use particles::*;

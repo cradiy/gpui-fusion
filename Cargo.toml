@@ -9,6 +9,8 @@ members = [
   "crates/gpui_automation",
   "crates/gpui_inspector",
   "crates/gpui_io",
+  "crates/gpui_notifications",
+  "crates/gpui_notifications/examples/notifications",
   "crates/gpui_media",
   "crates/gpui_media_core",
   "crates/gpui_media_backend",
@@ -56,6 +58,7 @@ gpui = { path = "crates/gpui", default-features = false }
 gpui_android = { path = "crates/gpui_android" }
 gpui_inspector = { path = "crates/gpui_inspector" }
 gpui_io = { path = "crates/gpui_io" }
+gpui_notifications = { path = "crates/gpui_notifications" }
 gpui_automation = { path = "crates/gpui_automation" }
 gpui_media = { path = "crates/gpui_media" }
 gpui_media_core = { path = "crates/gpui_media_core" }

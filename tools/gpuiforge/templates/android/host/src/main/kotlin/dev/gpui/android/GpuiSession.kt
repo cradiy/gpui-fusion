@@ -26,7 +26,9 @@ class GpuiSession : AutoCloseable {
     private var id = 0L
     private val frameWakePosted = AtomicBoolean(false)
     private val pendingUrls = ArrayList<String>()
+// gpuiforge:if sharing
     private val pendingShares = ArrayList<IncomingShare>()
+// gpuiforge:endif
     private var phase = BACKGROUND
     private var closeRequested: Runnable? = null
     private var errorHandler: Consumer<RuntimeException>? = null
@@ -44,6 +46,7 @@ class GpuiSession : AutoCloseable {
             if (!closed && id != 0L) nativePermissionResult(id, token, status)
         }, this, SystemClock.uptimeMillis())
     }
+// gpuiforge:if files
     private val files = FilePickerHost { token, documents, error ->
         handler.postAtTime({
             if (!closed && id != 0L) nativeFileResult(id, token, documents, error)
@@ -74,8 +77,59 @@ class GpuiSession : AutoCloseable {
         }, this, SystemClock.uptimeMillis())
     }
 
-    private fun fileStore(): FileStore = FileStore(requireContext())
-    private fun credentialStore(): CredentialStore = CredentialStore(requireContext())
+    private fun fileStore(): Any = FileStore(requireContext())
+// gpuiforge:else
+    private fun requestFiles(token: Long, multiple: Boolean, writable: Boolean) { unsupported("files") }
+    private fun requestFileSave(token: Long, name: String, mime: String) { unsupported("files") }
+    private fun fileStore(): Any = unsupported("files")
+// gpuiforge:endif
+// gpuiforge:if credentials
+    private fun credentialStore(): Any = CredentialStore(requireContext())
+// gpuiforge:else
+    private fun credentialStore(): Any = unsupported("credentials")
+// gpuiforge:endif
+    private fun unsupported(feature: String): Nothing = error("Enable '$feature' in platforms.android.features and run gpuiforge sync")
+// gpuiforge:if notifications
+    private var notificationStore: NotificationStore? = null
+// gpuiforge:endif
+// gpuiforge:if media-notifications
+    private val mediaNotifications = mutableMapOf<String, MediaNotification>()
+// gpuiforge:endif
+    private fun notificationOperation(operation: String, payload: String): String {
+        checkThread()
+        check(!closed) { "GPUI session is closed" }
+// gpuiforge:if media-notifications
+        when (operation) {
+            "media_create" -> {
+                val options = org.json.JSONObject(payload)
+                require(options.getString("app_id") == requireContext().packageName)
+                val key = options.getString("id")
+                mediaNotifications[key] = MediaNotification(requireContext(), key) { event ->
+                    handler.post { if (!closed && id != 0L) nativeMediaCommand(id, event) }
+                }
+                return ""
+            }
+            "media_update" -> {
+                val update = org.json.JSONObject(payload)
+                checkNotNull(mediaNotifications[update.getString("id")]) { "Media session closed" }.update(update.getJSONObject("state"))
+                return ""
+            }
+            "media_close" -> { mediaNotifications.remove(payload)?.close(); return "" }
+        }
+// gpuiforge:else
+        if (operation.startsWith("media_")) unsupported("media-notifications")
+// gpuiforge:endif
+// gpuiforge:if notifications
+        val store = notificationStore ?: NotificationStore(requireContext()) {
+            handler.post {
+                if (!closed && id != 0L) notificationStore?.deliver { nativeNotificationEvent(id, it) }
+            }
+        }.also { notificationStore = it }
+        return store.operation(operation, payload)
+// gpuiforge:else
+        unsupported("notifications")
+// gpuiforge:endif
+    }
 
     init { checkThread() }
 
@@ -109,19 +163,23 @@ class GpuiSession : AutoCloseable {
         updateAppearance()
         for (url in pendingUrls) nativeOpenUrl(id, url)
         pendingUrls.clear()
+// gpuiforge:if sharing
         deliverShares()
+// gpuiforge:endif
     }
 
     /** Forwards VIEW URLs and SEND/SEND_MULTIPLE shares, including before the first Surface. */
     fun onOpenIntent(intent: Intent): Boolean {
         checkThread()
         if (closed) return false
+// gpuiforge:if sharing
         if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
             pendingShares.add(IncomingShare.parse(intent))
             deliverShares()
             view.get()?.requestFrame()
             return true
         }
+// gpuiforge:endif
         if (intent.action != Intent.ACTION_VIEW) return false
         val uri = intent.data ?: return false
         if (uri.scheme.isNullOrEmpty()) return false
@@ -131,6 +189,7 @@ class GpuiSession : AutoCloseable {
         return true
     }
 
+// gpuiforge:if sharing
     private fun deliverShares() {
         if (id == 0L || pendingShares.isEmpty()) return
         val context = view.get()?.context?.applicationContext ?: return
@@ -141,6 +200,7 @@ class GpuiSession : AutoCloseable {
             nativeReceiveShare(id, share.text, share.mime, documents, share.error)
         }
     }
+// gpuiforge:endif
 
     private fun darkAppearance(): Boolean =
         view.get()?.resources?.configuration?.uiMode?.and(Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
@@ -461,23 +521,39 @@ class GpuiSession : AutoCloseable {
         error.toString()
     }
 
+// gpuiforge:if sharing
     private fun share(text: String?, title: String?, files: Array<Intent>): String? = try {
         startIntent(ShareIntent.create(text, title, files))
         null
     } catch (error: Exception) {
         error.toString()
     }
+// gpuiforge:else
+    private fun share(text: String?, title: String?, files: Array<Intent>): String? = "Enable 'sharing' in platforms.android.features and run gpuiforge sync"
+// gpuiforge:endif
 
     /** Releases the Rust application. Do not close during a retained Activity recreation. */
     override fun close() {
+// gpuiforge:if media-notifications
+        mediaNotifications.values.forEach { it.close() }
+        mediaNotifications.clear()
+// gpuiforge:endif
+// gpuiforge:if notifications
+        notificationStore?.close()
+        notificationStore = null
+// gpuiforge:endif
         checkThread()
         if (closed) return
         closed = true
         cancelBackGesture()
         pendingUrls.clear()
+// gpuiforge:if sharing
         pendingShares.clear()
+// gpuiforge:endif
         permissions.close()
+// gpuiforge:if files
         files.close()
+// gpuiforge:endif
         try {
             view.get()?.releaseSurface()
         } finally {
@@ -532,7 +608,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeLongPress(id: Long, x: Float, y: Float): Boolean
         @JvmStatic private external fun nativeTap(id: Long, x: Float, y: Float)
         @JvmStatic private external fun nativeOpenUrl(id: Long, url: String)
-        @JvmStatic private external fun nativeReceiveShare(id: Long, text: String?, mime: String?, documents: Array<SelectedDocument>, error: String?)
+        @JvmStatic private external fun nativeReceiveShare(id: Long, text: String?, mime: String?, documents: Array<out Any>, error: String?)
         @JvmStatic private external fun nativeFocusTextInput(id: Long, x: Float, y: Float): Boolean
         @JvmStatic private external fun nativeScroll(id: Long, phase: Int, x: Float, y: Float, dx: Float, dy: Float)
         @JvmStatic private external fun nativeMouse(id: Long, kind: Int, x: Float, y: Float,
@@ -540,7 +616,9 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeRunTask(id: Long, token: Long)
         @JvmStatic private external fun nativeClose(id: Long)
         @JvmStatic private external fun nativePermissionResult(id: Long, token: Long, status: Int)
-        @JvmStatic private external fun nativeFileResult(id: Long, token: Long, documents: Array<SelectedDocument>?, error: String?)
+        @JvmStatic private external fun nativeNotificationEvent(id: Long, event: String): Boolean
+        @JvmStatic private external fun nativeMediaCommand(id: Long, event: String)
+        @JvmStatic private external fun nativeFileResult(id: Long, token: Long, documents: Array<out Any>?, error: String?)
         @JvmStatic private external fun nativeRedraw(id: Long)
         @JvmStatic private external fun nativeViewport(id: Long, width: Int, height: Int, density: Float, insets: IntArray)
     }

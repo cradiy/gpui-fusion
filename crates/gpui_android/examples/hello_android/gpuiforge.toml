@@ -11,6 +11,7 @@ args = ["run", "-p", "hello_android", "--profile", "{{cargo_profile}}"]
 
 [platforms.android]
 application-id = "dev.gpui.example"
+features = ["files", "sharing", "credentials"]
 abis = ["arm64-v8a", "x86_64"]
 permissions = ["android.permission.RECORD_AUDIO"]
 url-schemes = ["gpui-example"]

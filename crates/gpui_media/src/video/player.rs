@@ -18,7 +18,20 @@ use crate::{
 };
 
 use super::surface::VideoSurface;
+use gpui::gpui_notifications::{
+    MediaCommand, MediaMetadata, MediaPlayback, MediaSessionState, NotificationIcon,
+    SystemMediaSession,
+};
 use gpui_media_core::PlaybackCounters;
+
+/// Presentation and queue actions for a player's system media surface.
+#[derive(Clone, Debug, Default)]
+pub struct VideoSystemMediaOptions {
+    pub metadata: MediaMetadata,
+    pub icon: Option<NotificationIcon>,
+    pub can_next: bool,
+    pub can_previous: bool,
+}
 
 /// Initial behavior for a [`VideoPlayer`].
 #[derive(Clone, Copy, Debug)]
@@ -80,6 +93,9 @@ impl Default for VideoPlayerOptions {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum VideoPlayerEvent {
+    /// Queue actions are handled by the application's playlist.
+    SystemMediaAction(MediaCommand),
+    SystemMediaError(SharedString),
     StateChanged(PlaybackState),
     TimelineChanged(PlaybackTimeline),
     BufferingChanged(u8),
@@ -89,7 +105,10 @@ pub enum VideoPlayerEvent {
     FrameTransportChanged(FrameTransport),
     DmaBufImportFailed(SharedString),
     PlaybackRateChanged(f64),
-    VolumeChanged { volume: f64, muted: bool },
+    VolumeChanged {
+        volume: f64,
+        muted: bool,
+    },
 }
 
 /// A reusable GPUI video playback component.
@@ -100,6 +119,10 @@ pub enum VideoPlayerEvent {
 /// implementation is intentionally limited to the current video frame and has
 /// no built-in interaction or player chrome.
 pub struct VideoPlayer {
+    system_session: Option<SystemMediaSession>,
+    system_options: VideoSystemMediaOptions,
+    system_commands: Option<gpui::Task<()>>,
+    last_system_update: Option<web_time::Instant>,
     source: MediaSource,
     backend: Arc<dyn MediaBackend>,
     playback: Box<dyn MediaPlaybackSession>,
@@ -337,6 +360,10 @@ impl VideoPlayer {
         .detach();
 
         let mut player = Self {
+            system_session: None,
+            system_options: VideoSystemMediaOptions::default(),
+            system_commands: None,
+            last_system_update: None,
             source,
             backend,
             playback,
@@ -643,6 +670,7 @@ impl VideoPlayer {
     pub fn set_playback_rate(&mut self, rate: f64, cx: &mut Context<Self>) -> MediaResult<()> {
         self.playback.set_playback_rate(rate)?;
         self.playback_rate = rate;
+        self.publish_system_media(true, cx);
         cx.emit(VideoPlayerEvent::PlaybackRateChanged(rate));
         cx.notify();
         Ok(())
@@ -658,12 +686,14 @@ impl VideoPlayer {
     pub fn set_volume(&mut self, volume: f64, cx: &mut Context<Self>) {
         self.volume = normalize_volume(volume);
         self.playback.set_volume(self.volume);
+        self.publish_system_media(true, cx);
         self.emit_volume(cx);
     }
 
     pub fn set_muted(&mut self, muted: bool, cx: &mut Context<Self>) {
         self.muted = muted;
         self.playback.set_muted(muted);
+        self.publish_system_media(true, cx);
         self.emit_volume(cx);
     }
 
@@ -682,6 +712,113 @@ impl VideoPlayer {
         self.playback.set_system_media_controls(metadata)
     }
 
+    /// Connects native system controls to the player's existing command path.
+    /// `None` withdraws the media surface. Next/Previous are emitted for the host playlist.
+    pub fn set_system_media_session(
+        &mut self,
+        mut session: Option<SystemMediaSession>,
+        options: VideoSystemMediaOptions,
+        cx: &mut Context<Self>,
+    ) {
+        let _ = self.playback.set_system_media_controls(None);
+        self.system_commands = None;
+        if let Some(commands) = session.as_mut().and_then(SystemMediaSession::take_commands) {
+            self.system_commands = Some(cx.spawn(async move |this, cx| {
+                while let Ok(command) = commands.recv().await {
+                    let Some(this) = this.upgrade() else { break };
+                    this.update(cx, |player, cx| {
+                        let result = match command {
+                            MediaCommand::Play => player.play(cx),
+                            MediaCommand::Pause => player.pause(cx),
+                            MediaCommand::SetVolume(volume) => {
+                                player.set_volume(volume, cx);
+                                Ok(())
+                            }
+                            MediaCommand::Toggle => {
+                                if player.play_when_ready {
+                                    player.pause(cx)
+                                } else {
+                                    player.play(cx)
+                                }
+                            }
+                            MediaCommand::Stop => {
+                                if player.timeline.is_seekable() {
+                                    player.stop(cx)
+                                } else {
+                                    player.pause(cx)
+                                }
+                            }
+                            MediaCommand::SeekTo(position) if player.timeline.is_seekable() => {
+                                player.seek_to(position, SeekMode::Accurate, cx)
+                            }
+                            MediaCommand::SeekBy(seconds)
+                                if player.timeline.is_seekable() && seconds.is_finite() =>
+                            {
+                                let position =
+                                    (player.timeline.position().as_secs_f64() + seconds).max(0.);
+                                match Duration::try_from_secs_f64(position) {
+                                    Ok(position) => {
+                                        player.seek_to(position, SeekMode::Accurate, cx)
+                                    }
+                                    Err(_) => return,
+                                }
+                            }
+                            MediaCommand::Next | MediaCommand::Previous => {
+                                cx.emit(VideoPlayerEvent::SystemMediaAction(command));
+                                Ok(())
+                            }
+                            _ => Ok(()),
+                        };
+                        if let Err(error) = result {
+                            cx.emit(VideoPlayerEvent::SystemMediaError(error.to_string().into()));
+                        }
+                        player.publish_system_media(true, cx);
+                    });
+                }
+            }));
+        }
+        self.system_session = session;
+        self.system_options = options;
+        self.publish_system_media(true, cx);
+    }
+
+    fn publish_system_media(&mut self, force: bool, cx: &mut Context<Self>) {
+        let Some(session) = &self.system_session else {
+            return;
+        };
+        if !force
+            && self
+                .last_system_update
+                .is_some_and(|last| last.elapsed() < Duration::from_secs(1))
+        {
+            return;
+        }
+        let options = &self.system_options;
+        let result = session.update(MediaSessionState {
+            metadata: options.metadata.clone(),
+            icon: options.icon.clone(),
+            can_next: options.can_next,
+            can_previous: options.can_previous,
+            playback: match self.state {
+                PlaybackState::Playing => MediaPlayback::Playing,
+                PlaybackState::Paused => MediaPlayback::Paused,
+                PlaybackState::Loading | PlaybackState::Seeking => MediaPlayback::Buffering,
+                _ => MediaPlayback::Stopped,
+            },
+            position: self.timeline.position(),
+            duration: self.timeline.duration(),
+            rate: self.playback_rate,
+            volume: if self.muted { 0. } else { self.volume },
+            seekable: self.timeline.is_seekable(),
+        });
+        self.last_system_update = Some(web_time::Instant::now());
+        if let Err(error) = result {
+            self.system_session = None;
+            self.system_commands = None;
+            cx.emit(VideoPlayerEvent::SystemMediaError(error.to_string().into()));
+        }
+    }
+
     pub fn toggle_muted(&mut self, cx: &mut Context<Self>) {
         self.set_muted(!self.muted, cx);
     }
@@ -693,6 +830,7 @@ impl VideoPlayer {
         // Keep the public timeline pinned to the seek target until the backend
         // confirms completion with `MediaBackendEvent::Ready`.
         if !accept_backend_timeline(&self.state) {
+            self.publish_system_media(false, cx);
             return;
         }
 
@@ -702,6 +840,7 @@ impl VideoPlayer {
             cx.emit(VideoPlayerEvent::TimelineChanged(timeline));
             cx.notify();
         }
+        self.publish_system_media(false, cx);
     }
 
     #[cfg(target_os = "linux")]
@@ -771,7 +910,15 @@ impl VideoPlayer {
 
     fn set_state(&mut self, state: PlaybackState, cx: &mut Context<Self>) {
         if self.state != state {
+            if self.state == PlaybackState::Seeking {
+                if let Some(session) = &self.system_session {
+                    if let Err(error) = session.seeked(self.timeline.position()) {
+                        cx.emit(VideoPlayerEvent::SystemMediaError(error.to_string().into()));
+                    }
+                }
+            }
             self.state = state.clone();
+            self.publish_system_media(true, cx);
             cx.emit(VideoPlayerEvent::StateChanged(state));
             cx.notify();
         }

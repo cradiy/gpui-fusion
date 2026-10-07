@@ -107,6 +107,55 @@ all missing prerequisites together. It does not install tools, start emulators, 
 driver compatibility. Platform selection lists configured targets; builds report
 unavailable tools. GPUiForge does not provide a bundled Web recipe.
 
+## Android host features and icons
+
+Select optional host modules in the Android platform configuration:
+
+```toml
+[platforms.android]
+application-id = "dev.example.app"
+features = ["files", "sharing", "notifications"]
+icon = "assets/app.png"
+notification-icon = "assets/notification.xml"
+```
+
+With `features = []` (the default), the host provides window rendering, input,
+IME, accessibility, lifecycle, permissions and other core system integration.
+Optional modules are:
+
+| Feature | Capability |
+| --- | --- |
+| `files` | Document pickers, persistent document grants, private/public storage and file provider |
+| `sharing` | Sending and receiving shares; automatically includes `files` |
+| `credentials` | Android credential storage |
+| `media` | Media playback and decoding, including the Media3 dependency |
+| `notifications` | General notifications, actions and inline replies |
+| `media-notifications` | System media session and playback notification; independent of `media` |
+
+Disabled modules omit their Kotlin sources, Manifest components and module-specific
+dependencies. Applications must enable the modules used by their Rust APIs;
+calling an unavailable host capability returns an error. Rust Cargo dependencies
+are configured separately. Permissions remain explicit in `permissions`.
+
+`icon` sets the application and launcher icon. `notification-icon` sets the default
+small icon for general and media notifications; it requires either notification
+feature. Both paths resolve relative to `gpuiforge.toml` and accept PNG, WebP or
+Android drawable XML. Small notification icons should be monochrome with a
+transparent background. A per-notification resource icon overrides this default;
+missing resources fall back to the configured notification icon, then the app icon
+(or Android's generic application icon when neither is configured).
+Adaptive launcher icons with multiple resources can be maintained in an exported
+native project.
+
+Run `gpuiforge sync` (or `gpuiforge sync android`) after editing the configuration.
+It regenerates the managed project without building or requiring an Android SDK,
+and removes previously generated files for disabled features or removed icons.
+Build and run also synchronize managed projects automatically.
+Modified generated files are protected: restore them or use `platform eject android`
+to take ownership. Both `sync` and `generate` are disabled in manual mode.
+These feature and icon settings apply to the bundled Android template; custom
+templates define their own sources and resources.
+
 ## Recipes and templates
 
 A recipe is an optional custom TOML platform definition. Android uses bundled
@@ -188,7 +237,7 @@ preserving comments. An existing destination is never overwritten. The exported
 project contains its host sources and retains references to its Rust application.
 
 In manual mode, builds execute the configured steps without generating native
-files. `generate` is disabled. Kotlin, Manifest, Gradle and resources belong to
+files. `generate` and `sync` are disabled. Kotlin, Manifest, Gradle and resources belong to
 the application. Keep the configured launch identifiers and artifact path in
 sync if you change them in the native project. Automatic return to managed mode
 is not provided: choose a new empty project-dir to generate another project.
@@ -244,6 +293,7 @@ a custom manifest instead of `url-schemes`.
 ```toml
 [platforms.android]
 application-id = "dev.example.app"
+features = ["sharing"]
 share-mime-types = ["text/plain", "image/*", "application/pdf"]
 ```
 

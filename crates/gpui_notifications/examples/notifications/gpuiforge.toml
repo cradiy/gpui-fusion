@@ -1,0 +1,32 @@
+[app]
+name = "GPUI Notifications"
+
+[[platforms.desktop.build]]
+program = "cargo"
+args = ["build", "-p", "notifications", "--profile", "{{cargo_profile}}"]
+
+[[platforms.desktop.run]]
+program = "cargo"
+args = ["run", "-p", "notifications", "--profile", "{{cargo_profile}}"]
+
+[platforms.android]
+application-id = "dev.gpui.notifications"
+features = ["notifications"]
+icon = "assets/app_icon.xml"
+notification-icon = "assets/ic_notification.xml"
+abis = ["arm64-v8a", "x86_64"]
+permissions = ["android.permission.POST_NOTIFICATIONS"]
+
+[[platforms.android.build]]
+program = "bash"
+args = ["gradlew", "--no-daemon", "-PgpuiAbis={{abis}}", "-PgpuiForgeExecutable={{tool_path}}", ":app:assemble{{variant}}"]
+cwd = "{{project_dir}}"
+
+[[platforms.android.run]]
+program = "{{adb}}"
+args = ["-s", "{{device}}", "install", "-r", "{{artifact}}"]
+
+[[platforms.android.run]]
+program = "{{adb}}"
+args = ["-s", "{{device}}", "shell", "am", "start", "-W", "-n", "{{application_id}}/{{activity}}"]
+error-pattern = "Error:"

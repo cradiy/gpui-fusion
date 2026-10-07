@@ -26,6 +26,9 @@ abstract class GpuiActivity : Activity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+// gpuiforge:if notifications
+        NotificationStore.receive(this, intent)
+// gpuiforge:endif
         if (Build.VERSION.SDK_INT >= 30) {
             window.setDecorFitsSystemWindows(false)
             window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
@@ -38,7 +41,9 @@ abstract class GpuiActivity : Activity() {
         session.setOnFullscreenChanged { fullscreen.setEnabled(it) }
         if (retained == null) session.onOpenIntent(intent)
         session.attachPermissionHost(this)
+// gpuiforge:if files
         session.attachFileHost(this)
+// gpuiforge:endif
         session.setOnBackEnabledChanged { enabled ->
             backEnabled = enabled
             updateBackRegistration()
@@ -89,6 +94,9 @@ abstract class GpuiActivity : Activity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+// gpuiforge:if notifications
+        NotificationStore.receive(this, intent)
+// gpuiforge:endif
         setIntent(intent)
         try { session.onOpenIntent(intent) }
         catch (error: RuntimeException) { session.fail(error) }
@@ -108,7 +116,9 @@ abstract class GpuiActivity : Activity() {
     }
     override fun onStop() { session.setLifecycle(GpuiSession.BACKGROUND); super.onStop() }
     override fun onDestroy() {
+// gpuiforge:if files
         session.detachFileHost(this)
+// gpuiforge:endif
         session.detachPermissionHost(this)
         backRegistration?.close()
         backRegistration = null
@@ -133,12 +143,14 @@ abstract class GpuiActivity : Activity() {
         }
     }
 
+// gpuiforge:if files
     @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (!session.onActivityResult(this, requestCode, resultCode, data)) {
             super.onActivityResult(requestCode, resultCode, data)
         }
     }
+// gpuiforge:endif
 
     @Suppress("DEPRECATION")
     private fun updateBackRegistration() {

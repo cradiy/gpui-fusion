@@ -1,0 +1,39 @@
+[package]
+name = "gpui_notifications"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "Apache-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-channel.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+zbus = { version = "5.13", default-features = false, features = ["async-io"] }
+async-io = "2.6"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-foundation.workspace = true
+objc2-user-notifications = { version = "0.3.2", default-features = false, features = ["std", "block2", "UNNotification", "UNNotificationAction", "UNNotificationCategory", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationTrigger", "UNNotificationSound", "UNUserNotificationCenter"] }
+block2 = "0.6"
+objc2-media-player = { version = "0.3.2", default-features = false, features = ["std", "block2", "MPMediaItem", "MPNowPlayingInfoCenter", "MPRemoteCommand", "MPRemoteCommandCenter", "MPRemoteCommandEvent"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = ["UI_Notifications", "Win32_UI_Notifications", "Data_Xml_Dom", "Foundation", "Foundation_Collections", "Media", "Media_Playback"] }
+windows-core.workspace = true
+windows-registry = "0.5"
+uuid.workspace = true
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+wasm-bindgen.workspace = true
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Window", "Notification", "NotificationOptions", "NotificationPermission", "Event", "EventTarget"] }

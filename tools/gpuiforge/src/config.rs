@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Component, Path, PathBuf},
 };
@@ -30,6 +30,10 @@ pub enum Management {
 #[derive(Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Platform {
+    #[serde(default)]
+    pub features: BTreeSet<AndroidFeature>,
+    pub icon: Option<PathBuf>,
+    pub notification_icon: Option<PathBuf>,
     #[serde(rename = "recipe")]
     pub _recipe: Option<PathBuf>,
     #[serde(skip)]
@@ -62,6 +66,24 @@ pub struct Platform {
     #[serde(default)]
     pub share_mime_types: Vec<String>,
     pub signing: Option<Signing>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+#[serde(rename_all = "kebab-case")]
+pub enum AndroidFeature {
+    Files,
+    Sharing,
+    Credentials,
+    Media,
+    Notifications,
+    MediaNotifications,
+}
+impl Platform {
+    pub fn feature(&self, feature: AndroidFeature) -> bool {
+        self.features.contains(&feature)
+            || (feature == AndroidFeature::Files
+                && self.features.contains(&AndroidFeature::Sharing))
+    }
 }
 
 #[derive(Clone, Deserialize)]
@@ -113,6 +135,11 @@ fn paths(value: &mut toml::Value, base: &Path) -> Result<()> {
         let path = value.as_str().context("expected a path string")?;
         *value = toml::Value::String(base.join(path).to_string_lossy().into_owned());
         Ok(())
+    }
+    for field in ["icon", "notification-icon"] {
+        if let Some(path) = value.get_mut(field) {
+            resolve(path, base)?;
+        }
     }
     if let Some(template) = value.get_mut("template") {
         resolve(template, base)?;
@@ -225,6 +252,25 @@ impl Project {
                 relative(&copy.to)?;
             }
             if name == "android" {
+                ensure!(
+                    bundled
+                        || (platform.features.is_empty()
+                            && platform.icon.is_none()
+                            && platform.notification_icon.is_none()),
+                    "features, icon and notification-icon require the bundled Android template"
+                );
+                ensure!(
+                    !bundled
+                        || platform.share_mime_types.is_empty()
+                        || platform.feature(AndroidFeature::Sharing),
+                    "share-mime-types requires the sharing feature"
+                );
+                ensure!(
+                    platform.notification_icon.is_none()
+                        || platform.feature(AndroidFeature::Notifications)
+                        || platform.feature(AndroidFeature::MediaNotifications),
+                    "notification-icon requires notifications or media-notifications"
+                );
                 for permission in &platform.permissions {
                     ensure!(
                         permission.contains('.')
@@ -312,10 +358,13 @@ impl Project {
             } else {
                 ensure!(
                     platform.permissions.is_empty()
+                        && platform.features.is_empty()
+                        && platform.icon.is_none()
+                        && platform.notification_icon.is_none()
                         && platform.signing.is_none()
                         && platform.url_schemes.is_empty()
                         && platform.share_mime_types.is_empty(),
-                    "permissions, signing, url-schemes and share-mime-types are Android-only settings"
+                    "features, icons, permissions, signing, url-schemes and share-mime-types are Android-only settings"
                 );
             }
             platforms.insert(name, platform);
@@ -391,6 +440,7 @@ impl Project {
                 .map(|name| format!("    <uses-permission android:name=\"{name}\" />\n"))
                 .collect(),
         );
+        vars.insert("android_icon".into(), if p.icon.is_some() { "android:icon=\"@drawable/gpui_app_icon\" android:roundIcon=\"@drawable/gpui_app_icon\"".into() } else { String::new() });
         if let Some(id) = &p.application_id {
             vars.insert("application_id".into(), id.clone());
         }

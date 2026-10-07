@@ -30,6 +30,14 @@ application-id = "dev.example.app"
 GPUiForge derives the native library name from the application's Cargo package.
 No recipe or local GPUI checkout path is required.
 
+Enable optional host capabilities with `features`, for example
+`features = ["files", "sharing", "credentials"]`. Media playback uses `"media"`;
+general and media notifications use `"notifications"` and `"media-notifications"`.
+Omitted modules are not generated. Use `icon = "assets/app.png"` for the application
+icon and `gpuiforge sync` to regenerate the managed project without building.
+See [host features and icons](../../../tools/gpuiforge/docs/usage.md#android-host-features-and-icons)
+for available modules and resource configuration.
+
 The platform menu offers desktop and Android. Android run prompts for a device
 and builds its ABI. `gpuiforge build android` packages both configured ABIs;
 `gpuiforge run android --device emulator-5554` selects a device explicitly.

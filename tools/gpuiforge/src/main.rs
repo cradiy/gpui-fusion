@@ -1,4 +1,5 @@
 mod android;
+mod android_features;
 mod android_tools;
 mod config;
 mod devices;
@@ -36,6 +37,11 @@ enum Action {
     },
     /// Generate a managed platform project.
     Generate { platform: String },
+    /// Synchronize managed native sources from configuration without building.
+    Sync {
+        #[arg(default_value = "android")]
+        platform: String,
+    },
     /// Build a configured platform (prompts when omitted).
     Build {
         platform: Option<String>,
@@ -113,7 +119,7 @@ fn run(cli: Cli) -> Result<()> {
     }
     let project = Project::load(&cli.config)?;
     match cli.command {
-        Action::Generate { platform } => {
+        Action::Generate { platform } | Action::Sync { platform } => {
             println!("{}", generate::generate(&project, &platform)?.display())
         }
         Action::Build {
@@ -218,7 +224,7 @@ fn init(
             );
         }
         doc["platforms"]["android"]["application-id"] = toml_edit::value(id);
-        for field in ["abis", "permissions", "build", "run"] {
+        for field in ["abis", "features", "permissions", "build", "run"] {
             if let Some(value) = defaults.get(field) {
                 doc["platforms"]["android"][field] = value.clone();
             }

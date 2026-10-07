@@ -2552,6 +2552,7 @@ dependencies = [
  "gpui-scap",
  "gpui_io",
  "gpui_macros",
+ "gpui_notifications",
  "gpui_platform",
  "gpui_shared_string",
  "gpui_util",
@@ -2696,6 +2697,7 @@ name = "gpui_android"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channel",
  "futures",
  "gpui",
  "gpui_util",
@@ -2704,6 +2706,8 @@ dependencies = [
  "log",
  "parking_lot",
  "raw-window-handle",
+ "serde",
+ "serde_json",
  "uuid",
 ]
 
@@ -2884,6 +2888,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "web-time",
 ]
 
 [[package]]
@@ -2920,6 +2925,32 @@ dependencies = [
  "log",
  "url",
  "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "gpui_notifications"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "async-io",
+ "block2 0.6.2",
+ "futures",
+ "js-sys",
+ "objc2 0.6.3",
+ "objc2-foundation 0.3.2",
+ "objc2-media-player",
+ "objc2-user-notifications",
+ "serde",
+ "serde_json",
+ "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "windows 0.61.3",
+ "windows-core 0.61.2",
+ "windows-registry",
+ "zbus",
 ]
 
 [[package]]
@@ -4554,6 +4585,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 
 [[package]]
+name = "notifications"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui",
+ "gpui_android",
+ "gpui_platform",
+]
+
+[[package]]
 name = "ntapi"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4920,6 +4961,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-media-player"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85f2a98483f6e76313cb85a5a185eaa3cda86a177b13a8852d56cbd0085bf635"
+dependencies = [
+ "bitflags 2.10.0",
+ "block2 0.6.2",
+ "objc2 0.6.3",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
 name = "objc2-metal"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4981,6 +5034,18 @@ dependencies = [
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
+]
+
+[[package]]
+name = "objc2-user-notifications"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9df9128cbbfef73cda168416ccf7f837b62737d748333bfe9ab71c245d76613e"
+dependencies = [
+ "bitflags 2.10.0",
+ "block2 0.6.2",
+ "objc2 0.6.3",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]

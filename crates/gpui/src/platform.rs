@@ -133,6 +133,20 @@ pub fn guess_compositor() -> &'static str {
 
 #[expect(missing_docs)]
 pub trait Platform: 'static {
+    fn system_media_session(
+        &self,
+        options: gpui_notifications::MediaSessionOptions,
+    ) -> futures::future::LocalBoxFuture<'static, Result<gpui_notifications::SystemMediaSession>>
+    {
+        Box::pin(gpui_notifications::SystemMediaSession::new(options))
+    }
+    fn notifications(
+        &self,
+        options: gpui_notifications::NotificationOptions,
+    ) -> futures::future::LocalBoxFuture<'static, Result<gpui_notifications::NotificationCenter>>
+    {
+        Box::pin(gpui_notifications::NotificationCenter::new(options))
+    }
     fn background_executor(&self) -> BackgroundExecutor;
     /// Platform file I/O and location discovery, independently of file dialogs.
     fn file_system(&self, app_id: &str) -> Result<gpui_io::FileSystem> {

@@ -18,6 +18,7 @@ fn main() {
                 thumbnail_position: Duration::ZERO,
                 thumbnail_request: 0,
                 system_controls: false,
+                system_controls_pending: false,
             });
             window.on_system_back(
                 cx,
@@ -45,6 +46,7 @@ struct MediaDemo {
     thumbnail_position: Duration,
     thumbnail_request: u64,
     system_controls: bool,
+    system_controls_pending: bool,
 }
 
 impl MediaDemo {
@@ -76,16 +78,7 @@ impl MediaDemo {
                             .build(cx)
                             .expect("create media session")
                     });
-                    if this.system_controls {
-                        player.update(cx, |player, _| {
-                            player.set_system_media_controls(Some(
-                                gpui_media::SystemMediaMetadata {
-                                    title: file.name().to_owned(),
-                                    ..Default::default()
-                                },
-                            ))
-                        })?;
-                    }
+                    this.system_controls = false;
                     this.subscription = Some(cx.subscribe(&player, |_, _, event, cx| {
                         if let VideoPlayerEvent::StateChanged(state) = event {
                             log_state(state);
@@ -189,22 +182,61 @@ impl MediaDemo {
     }
 
     fn toggle_system_controls(&mut self, cx: &mut Context<Self>) {
-        let Some(player) = &self.player else {
+        if self.system_controls_pending {
+            return;
+        }
+        let Some(player) = self.player.clone() else {
             return;
         };
-        let enabled = !self.system_controls;
-        let metadata = enabled.then(|| gpui_media::SystemMediaMetadata {
-            title: self
-                .file
-                .as_ref()
-                .map_or("Media", |file| file.name())
-                .to_owned(),
-            ..Default::default()
-        });
-        match player.update(cx, |player, _| player.set_system_media_controls(metadata)) {
-            Ok(()) => self.system_controls = enabled,
-            Err(error) => self.status = error.to_string(),
+        if self.system_controls {
+            player.update(cx, |player, cx| {
+                player.set_system_media_session(None, Default::default(), cx)
+            });
+            self.system_controls = false;
+            cx.notify();
+            return;
         }
+        let request = cx.system_media_session(gpui::gpui_notifications::MediaSessionOptions {
+            app_id: "dev.gpui.media".into(),
+            app_name: "GPUI Media".into(),
+        });
+        self.system_controls_pending = true;
+        cx.spawn(async move |this, cx| {
+            let result = request.await;
+            let _ = this.update(cx, |this, cx| {
+                this.system_controls_pending = false;
+                if this.player.as_ref() != Some(&player) {
+                    return;
+                }
+                match result {
+                    Ok(session) => {
+                        let options = gpui_media::VideoSystemMediaOptions {
+                            metadata: gpui::gpui_notifications::MediaMetadata {
+                                track_id: this
+                                    .file
+                                    .as_ref()
+                                    .map_or("Media", |file| file.name())
+                                    .to_owned(),
+                                title: this
+                                    .file
+                                    .as_ref()
+                                    .map_or("Media", |file| file.name())
+                                    .to_owned(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        };
+                        player.update(cx, |player, cx| {
+                            player.set_system_media_session(Some(session), options, cx)
+                        });
+                        this.system_controls = true;
+                    }
+                    Err(error) => this.status = error.to_string(),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
         cx.notify();
     }
 }

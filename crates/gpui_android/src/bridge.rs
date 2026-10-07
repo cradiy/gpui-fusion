@@ -85,13 +85,31 @@ pub(crate) struct Host {
     object: GlobalRef,
 }
 impl Host {
+    pub fn notification_operation(&self, operation: &str, payload: &str) -> Result<String> {
+        self.with_env(|env| {
+            let operation = env.new_string(operation)?;
+            let payload = env.new_string(payload)?;
+            let result = env
+                .call_method(
+                    self.object.as_obj(),
+                    "notificationOperation",
+                    "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                    &[
+                        JValue::Object(operation.as_ref()),
+                        JValue::Object(payload.as_ref()),
+                    ],
+                )?
+                .l()?;
+            Ok(env.get_string(&JString::from(result))?.into())
+        })
+    }
     pub fn credential_store(&self) -> Result<(Arc<JavaVM>, GlobalRef)> {
         self.with_env(|env| {
             let store = env
                 .call_method(
                     self.object.as_obj(),
                     "credentialStore",
-                    "()Ldev/gpui/android/CredentialStore;",
+                    "()Ljava/lang/Object;",
                     &[],
                 )?
                 .l()?;
@@ -104,7 +122,7 @@ impl Host {
                 .call_method(
                     self.object.as_obj(),
                     "fileStore",
-                    "()Ldev/gpui/android/FileStore;",
+                    "()Ljava/lang/Object;",
                     &[],
                 )?
                 .l()?;
@@ -449,6 +467,16 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
     let mut env = vm.get_env()?;
     let methods = [
         method(
+            "nativeNotificationEvent",
+            "(JLjava/lang/String;)Z",
+            notification_event as *mut c_void,
+        ),
+        method(
+            "nativeMediaCommand",
+            "(JLjava/lang/String;)V",
+            media_command as *mut c_void,
+        ),
+        method(
             "nativeCreate",
             "(Ldev/gpui/android/GpuiSession;Landroid/view/Surface;IIF)J",
             create as *mut c_void,
@@ -491,7 +519,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         ),
         method(
             "nativeReceiveShare",
-            "(JLjava/lang/String;Ljava/lang/String;[Ldev/gpui/android/SelectedDocument;Ljava/lang/String;)V",
+            "(JLjava/lang/String;Ljava/lang/String;[Ljava/lang/Object;Ljava/lang/String;)V",
             receive_share as *mut c_void,
         ),
         method(
@@ -511,7 +539,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         ),
         method(
             "nativeFileResult",
-            "(JJ[Ldev/gpui/android/SelectedDocument;Ljava/lang/String;)V",
+            "(JJ[Ljava/lang/Object;Ljava/lang/String;)V",
             file_result as *mut c_void,
         ),
     ];
@@ -1236,6 +1264,29 @@ extern "system" fn close(mut env: JNIEnv, _: JClass, id: jlong) {
             session.platform.close();
         }
         Ok(())
+    });
+}
+
+extern "system" fn notification_event(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    event: JString,
+) -> jboolean {
+    let mut accepted = false;
+    call(&mut env, |env| {
+        let json: String = env.get_string(&event)?.into();
+        accepted = crate::notifications::deliver(&session(id)?.platform.host, &json)?;
+        Ok(())
+    });
+    accepted.into()
+}
+
+extern "system" fn media_command(mut env: JNIEnv, _: JClass, id: jlong, event: JString) {
+    call(&mut env, |env| {
+        let _ = session(id)?;
+        let json: String = env.get_string(&event)?.into();
+        crate::notifications::deliver_media(&json)
     });
 }
 

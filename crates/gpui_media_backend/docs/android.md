@@ -19,6 +19,7 @@ For network media, include the Internet permission in `gpuiforge.toml`:
 ```toml
 [platforms.android]
 application-id = "com.example.player"
+features = ["media", "files"]
 permissions = ["android.permission.INTERNET"]
 ```
 
@@ -148,6 +149,14 @@ Audio focus alone does not provide background playback or a media notification.
 
 ## Publish system media controls
 
+For a media notification together with cross-platform system controls, use
+[`App::system_media_session` and `VideoPlayer::set_system_media_session`](../../gpui_notifications/docs/media.md).
+The player owns the session and releases the native controls when dropped.
+Supply the notification drawable through `VideoSystemMediaOptions::icon`.
+
+The backend-only interface below publishes an Android session without a
+notification. Use it when a custom host already owns notification presentation.
+
 Choose the player that should receive system media buttons and publish its
 display metadata:
 
@@ -192,8 +201,7 @@ See [Android media sessions](https://developer.android.com/reference/android/med
 Use local or HTTP(S) progressive media supported by Media3 and the device's
 decoders. Track selection, subtitles, frame stepping, DRM, adaptive-streaming
 extensions, and HDR output are unsupported.
-Background playback, media notifications, and picture-in-picture
-require separate system integration.
+Background playback and picture-in-picture require separate system integration.
 
 Video uses CPU frame delivery, including GPU readback and upload. Check device
 performance before using high-resolution videos or several players at once.

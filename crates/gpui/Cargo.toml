@@ -66,6 +66,7 @@ futures.workspace = true
 futures-concurrency.workspace = true
 gpui_macros.workspace = true
 gpui_io.workspace = true
+gpui_notifications.workspace = true
 gpui_shared_string.workspace = true
 http_client.workspace = true
 image.workspace = true

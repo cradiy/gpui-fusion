@@ -9,6 +9,7 @@ mod file_dialog;
 mod file_system;
 mod input;
 mod logging;
+mod notifications;
 mod permissions;
 mod platform;
 mod share;

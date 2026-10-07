@@ -108,13 +108,17 @@ pub fn generate(project: &Project, name: &str) -> Result<PathBuf> {
     let mut files = BTreeMap::new();
     if platform.bundled {
         for &(name, bytes) in crate::ANDROID_FILES {
+            if !crate::android_features::included(name, platform) {
+                continue;
+            }
+            let bytes = crate::android_features::render(bytes, platform)?;
             let (path, bytes) = if let Some(path) = name.strip_suffix(".tmpl") {
                 (
                     path,
-                    expand(std::str::from_utf8(bytes)?, &vars)?.into_bytes(),
+                    expand(std::str::from_utf8(&bytes)?, &vars)?.into_bytes(),
                 )
             } else {
-                (name, bytes.to_vec())
+                (name, bytes)
             };
             #[cfg(unix)]
             let permissions = {
@@ -140,6 +144,44 @@ pub fn generate(project: &Project, name: &str) -> Result<PathBuf> {
     }
     for copy in &platform.copies {
         collect(&copy.from, &copy.to, None, &mut files)?;
+    }
+    if platform.bundled {
+        if platform.notification_icon.is_some() {
+            let path = PathBuf::from("app/src/main/res/raw/gpui_notification_keep.xml");
+            ensure!(
+                !files.contains_key(&path),
+                "duplicate generated path: {}",
+                path.display()
+            );
+            files.insert(path, File {
+                bytes: br#"<resources xmlns:tools="http://schemas.android.com/tools" tools:keep="@drawable/gpui_notification_icon" />"#.to_vec(),
+                permissions: None,
+            });
+        }
+        for (source, resource) in [
+            (&platform.icon, "gpui_app_icon"),
+            (&platform.notification_icon, "gpui_notification_icon"),
+        ] {
+            if let Some(source) = source {
+                let extension = source
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .context("Android icon needs a file extension")?;
+                ensure!(
+                    matches!(extension, "png" | "webp" | "xml"),
+                    "Android icons must be PNG, WebP or Android drawable XML: {}",
+                    source.display()
+                );
+                collect(
+                    source,
+                    &PathBuf::from(format!(
+                        "app/src/main/res/drawable-nodpi/{resource}.{extension}"
+                    )),
+                    None,
+                    &mut files,
+                )?;
+            }
+        }
     }
     ensure!(!files.is_empty(), "template contains no files");
     let state_path = directory.join(STATE);

@@ -145,6 +145,86 @@ fn bundled_android_generates_without_recipe_or_checkout() {
 }
 
 #[test]
+fn sync_prunes_disabled_modules_and_icons() {
+    let app = Fixture::new();
+    fs::write(
+        app.0.join("Cargo.toml"),
+        "[package]\nname = 'fixture-app'\nversion = '0.1.0'\n",
+    )
+    .unwrap();
+    fs::write(app.0.join("icon.xml"), "<vector />").unwrap();
+    let config = app.0.join("gpuiforge.toml");
+    fs::write(
+        &config,
+        r#"
+[app]
+name = "Example"
+[platforms.android]
+application-id = "dev.example.app"
+features = ["sharing", "notifications"]
+icon = "icon.xml"
+notification-icon = "icon.xml"
+"#,
+    )
+    .unwrap();
+    app.ok(&["sync"]);
+    let output = app.0.join("target/gpuiforge/android");
+    let host = output.join("host/src/main/kotlin/dev/gpui/android");
+    assert!(host.join("FileStore.kt").exists());
+    assert!(host.join("NotificationStore.kt").exists());
+    assert!(!host.join("MediaSession.kt").exists());
+    assert!(
+        !fs::read_to_string(output.join("host/build.gradle.kts"))
+            .unwrap()
+            .contains("media3")
+    );
+    assert!(
+        output
+            .join("app/src/main/res/drawable-nodpi/gpui_notification_icon.xml")
+            .exists()
+    );
+    assert!(
+        fs::read_to_string(output.join("app/src/main/AndroidManifest.xml"))
+            .unwrap()
+            .contains("@drawable/gpui_app_icon")
+    );
+    fs::write(
+        &config,
+        r#"
+[app]
+name = "Example"
+[platforms.android]
+application-id = "dev.example.app"
+features = []
+"#,
+    )
+    .unwrap();
+    app.ok(&["sync", "android"]);
+    for file in ["FileStore.kt", "NotificationStore.kt", "ShareIntent.kt"] {
+        assert!(!host.join(file).exists());
+    }
+    let manifest = fs::read_to_string(output.join("host/src/main/AndroidManifest.xml")).unwrap();
+    assert!(!manifest.contains("<receiver"));
+    assert!(!manifest.contains("<provider"));
+    assert!(
+        !output
+            .join("app/src/main/res/drawable-nodpi/gpui_notification_icon.xml")
+            .exists()
+    );
+    assert!(
+        !output
+            .join("app/src/main/res/raw/gpui_notification_keep.xml")
+            .exists()
+    );
+    fs::write(host.join("GpuiView.kt"), "user edit").unwrap();
+    assert!(!app.run(&["sync"]).status.success());
+    assert_eq!(
+        fs::read_to_string(host.join("GpuiView.kt")).unwrap(),
+        "user edit"
+    );
+}
+
+#[test]
 fn missing_android_tools_stop_before_generating_or_starting_gradle() {
     let app = Fixture::new();
     fs::write(

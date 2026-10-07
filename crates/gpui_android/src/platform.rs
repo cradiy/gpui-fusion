@@ -173,6 +173,27 @@ fn unsupported<T>() -> oneshot::Receiver<Result<T>> {
 }
 
 impl Platform for AndroidPlatform {
+    fn system_media_session(
+        &self,
+        options: gpui::gpui_notifications::MediaSessionOptions,
+    ) -> futures::future::LocalBoxFuture<
+        'static,
+        Result<gpui::gpui_notifications::SystemMediaSession>,
+    > {
+        let host = self.host.clone();
+        Box::pin(async move { crate::notifications::create_media(host, options) })
+    }
+    fn notifications(
+        &self,
+        options: gpui::gpui_notifications::NotificationOptions,
+    ) -> futures::future::LocalBoxFuture<
+        'static,
+        Result<gpui::gpui_notifications::NotificationCenter>,
+    > {
+        let host = self.host.clone();
+        let permissions = self.permissions();
+        Box::pin(async move { crate::notifications::create(host, permissions, options) })
+    }
     fn background_executor(&self) -> BackgroundExecutor {
         BackgroundExecutor::new(self.dispatcher.clone())
     }

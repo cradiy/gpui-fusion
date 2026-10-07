@@ -1527,6 +1527,28 @@ impl App {
         self.platform.file_system(app_id)
     }
 
+    /// Creates system transport controls without owning a player or background service.
+    pub fn system_media_session(
+        &self,
+        options: crate::gpui_notifications::MediaSessionOptions,
+    ) -> futures::future::LocalBoxFuture<
+        'static,
+        Result<crate::gpui_notifications::SystemMediaSession>,
+    > {
+        self.platform.system_media_session(options)
+    }
+
+    /// Creates a system notification center for this application's identity.
+    pub fn notifications(
+        &self,
+        options: crate::gpui_notifications::NotificationOptions,
+    ) -> futures::future::LocalBoxFuture<
+        'static,
+        Result<crate::gpui_notifications::NotificationCenter>,
+    > {
+        self.platform.notifications(options)
+    }
+
     /// Choose a writable file through the platform save dialog. Cancellation returns `None`.
     ///
     /// Android creates a document during selection; desktop creation happens on the first write.

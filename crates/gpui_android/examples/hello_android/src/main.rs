@@ -766,6 +766,16 @@ impl Render for Counter {
             .flex_col()
             .gap_5()
             .child(div().text_3xl().child("GPUI on Android"))
+            .child(div().text_xs().text_color(rgb(muted)).child({
+                let insets = window.insets();
+                format!(
+                    "Insets · Safe {:.0}/{:.0} · IME {:.0} · Remaining {:.0}",
+                    f32::from(insets.safe_area.top),
+                    f32::from(insets.safe_area.bottom),
+                    f32::from(insets.ime.bottom),
+                    f32::from(insets.effective().bottom)
+                )
+            }))
             .when(cx.global::<SharedContent>().count > 0, |page| {
                 let shared = cx.global::<SharedContent>();
                 let content = shared.content.clone();

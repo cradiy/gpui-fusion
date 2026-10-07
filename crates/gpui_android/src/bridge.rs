@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use gpui::{AppLifecyclePhase, ApplicationHandle, TouchPhase};
 use jni::{
     JNIEnv, JavaVM, NativeMethod,
-    objects::{GlobalRef, JClass, JObject, JObjectArray, JString, JValue},
+    objects::{GlobalRef, JClass, JIntArray, JObject, JObjectArray, JString, JValue},
     sys::{jboolean, jfloat, jint, jlong, jobject},
 };
 use std::{
@@ -427,7 +427,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         ),
         method("nativeDetach", "(J)V", detach as *mut c_void),
         method("nativeFrame", "(J)Z", frame as *mut c_void),
-        method("nativeViewport", "(JIIF)V", viewport as *mut c_void),
+        method("nativeViewport", "(JIIF[I)V", viewport as *mut c_void),
         method(
             "nativeInputState",
             "(J)Ldev/gpui/android/TextInputState;",
@@ -710,12 +710,39 @@ extern "system" fn viewport(
     width: jint,
     height: jint,
     density: jfloat,
+    insets: JIntArray,
 ) {
-    call(&mut env, |_| {
-        session(id)?
-            .platform
-            .window
-            .set_viewport(width, height, density)
+    call(&mut env, |env| {
+        anyhow::ensure!(
+            density.is_finite() && density > 0.,
+            "invalid viewport density"
+        );
+        anyhow::ensure!(
+            env.get_array_length(&insets)? == 12,
+            "invalid viewport insets"
+        );
+        let mut values = [0; 12];
+        env.get_int_array_region(&insets, 0, &mut values)?;
+        anyhow::ensure!(
+            values.iter().all(|value| *value >= 0),
+            "negative viewport inset"
+        );
+        let edges = |offset| gpui::Edges {
+            left: gpui::px(values[offset] as f32 / density),
+            top: gpui::px(values[offset + 1] as f32 / density),
+            right: gpui::px(values[offset + 2] as f32 / density),
+            bottom: gpui::px(values[offset + 3] as f32 / density),
+        };
+        session(id)?.platform.window.set_viewport(
+            width,
+            height,
+            density,
+            gpui::WindowInsets {
+                safe_area: edges(0),
+                ime: edges(4),
+                consumed: edges(8),
+            },
+        )
     });
 }
 

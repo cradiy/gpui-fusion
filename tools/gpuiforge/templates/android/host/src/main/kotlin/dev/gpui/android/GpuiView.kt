@@ -33,6 +33,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     private var surfaceWidth = 0
     private var surfaceHeight = 0
     private var bottomInset = 0
+    private var windowInsets = GpuiWindowInsets()
     private var framePosted = false
     private var frameRequested = true
     private var framesActive = false
@@ -97,12 +98,16 @@ class GpuiView(context: Context, private val session: GpuiSession) :
 
     override fun surfaceDestroyed(holder: SurfaceHolder) = releaseSurface()
 
-    /** Excludes an occluded bottom region from GPUI layout without resizing the GPU surface. Uses physical pixels. */
-    fun setViewportBottomInset(inset: Int) {
+    /**
+     * Publishes host-window insets in physical pixels. Consumed edges must include host placement
+     * and avoidance. viewportBottomInset additionally reduces GPUI layout without resizing the Surface.
+     */
+    fun setWindowInsets(insets: GpuiWindowInsets, viewportBottomInset: Int = 0) {
         GpuiSession.checkThread()
-        require(inset >= 0)
-        if (bottomInset == inset) return
-        bottomInset = inset
+        require(viewportBottomInset >= 0)
+        if (bottomInset == viewportBottomInset && windowInsets == insets) return
+        bottomInset = viewportBottomInset
+        windowInsets = insets
         if (surfaceReady) {
             try { updateViewport(); session.redraw() }
             catch (error: RuntimeException) { session.fail(error) }
@@ -110,7 +115,8 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     }
 
     private fun updateViewport() {
-        session.viewport(surfaceWidth, (surfaceHeight - bottomInset).coerceAtLeast(1), resources.displayMetrics.density)
+        session.viewport(surfaceWidth, (surfaceHeight - bottomInset).coerceAtLeast(1),
+            resources.displayMetrics.density, windowInsets)
     }
 
     internal fun viewportHeight() = (height - bottomInset).coerceAtLeast(0)

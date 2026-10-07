@@ -29,7 +29,13 @@ internal class KeyboardInsets(
     private fun apply(insets: WindowInsets) {
         val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
         val keyboard = insets.getInsets(WindowInsets.Type.ime())
-        gpui.setViewportBottomInset((keyboard.bottom - safe.bottom).coerceAtLeast(0))
+        val bottom = (keyboard.bottom - container.paddingBottom).coerceAtLeast(0)
+        gpui.setWindowInsets(GpuiWindowInsets(
+            safeArea = EdgeInsets(safe.left, safe.top, safe.right, safe.bottom),
+            ime = EdgeInsets(keyboard.left, keyboard.top, keyboard.right, keyboard.bottom),
+            consumed = EdgeInsets(container.paddingLeft, container.paddingTop,
+                container.paddingRight, container.paddingBottom + bottom),
+        ), bottom)
     }
 
     override fun onPrepare(animation: WindowInsetsAnimation) {

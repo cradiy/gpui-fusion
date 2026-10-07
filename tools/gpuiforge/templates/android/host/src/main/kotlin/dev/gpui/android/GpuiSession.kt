@@ -147,9 +147,9 @@ class GpuiSession : AutoCloseable {
     internal fun detachSurface() { checkThread(); if (id != 0L) nativeDetach(id) }
     internal fun frame(): Boolean { checkThread(); return id != 0L && nativeFrame(id) }
     internal fun redraw() { checkThread(); if (!closed && id != 0L) nativeRedraw(id) }
-    internal fun viewport(width: Int, height: Int, density: Float) {
+    internal fun viewport(width: Int, height: Int, density: Float, insets: GpuiWindowInsets) {
         checkThread()
-        if (!closed && id != 0L) nativeViewport(id, width, height, density)
+        if (!closed && id != 0L) nativeViewport(id, width, height, density, insets.values())
     }
 
     private fun systemFontPaths(): Array<String> {
@@ -442,6 +442,6 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativePermissionResult(id: Long, token: Long, status: Int)
         @JvmStatic private external fun nativeFileResult(id: Long, token: Long, documents: Array<SelectedDocument>?, error: String?)
         @JvmStatic private external fun nativeRedraw(id: Long)
-        @JvmStatic private external fun nativeViewport(id: Long, width: Int, height: Int, density: Float)
+        @JvmStatic private external fun nativeViewport(id: Long, width: Int, height: Int, density: Float, insets: IntArray)
     }
 }

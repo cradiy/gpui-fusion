@@ -20,8 +20,8 @@ use crate::{
     Style, SubscriberSet, Subscription, SystemDragOptions, SystemWindowTab,
     SystemWindowTabController, TaffyLayoutEngine, Task, TextRenderingMode, TextStyle,
     TextStyleRefinement, ThermalState, WindowAppearance, WindowBackgroundAppearance, WindowBounds,
-    WindowControls, WindowDecorations, WindowOptions, WindowParams, WindowTextSystem, point,
-    prelude::*, profiler, px, size,
+    WindowControls, WindowDecorations, WindowInsets, WindowOptions, WindowParams, WindowTextSystem,
+    point, prelude::*, profiler, px, size,
 };
 #[cfg(not(target_family = "wasm"))]
 use crate::{MouseButton, MouseUpEvent};
@@ -632,6 +632,7 @@ pub struct Window {
     raster_full_viewport_regions: FxHashSet<[u32; 4]>,
     raster_budget_retrying: bool,
     pub(crate) bounds_observers: SubscriberSet<(), AnyObserver>,
+    pub(crate) insets_observers: SubscriberSet<(), AnyObserver>,
     appearance: WindowAppearance,
     pub(crate) appearance_observers: SubscriberSet<(), AnyObserver>,
     pub(crate) button_layout_observers: SubscriberSet<(), AnyObserver>,
@@ -1062,6 +1063,20 @@ impl Window {
                     .log_err();
             }
         }));
+        platform_window.on_insets_changed(Box::new({
+            let mut cx = cx.to_async();
+            move |_| {
+                handle
+                    .update(&mut cx, |_, window, cx| {
+                        window.refresh();
+                        window
+                            .insets_observers
+                            .clone()
+                            .retain(&(), |callback| callback(window, cx));
+                    })
+                    .log_err();
+            }
+        }));
         platform_window.on_appearance_changed(Box::new({
             let mut cx = cx.to_async();
             move || {
@@ -1236,6 +1251,7 @@ impl Window {
             raster_full_viewport_regions: FxHashSet::default(),
             raster_budget_retrying: false,
             bounds_observers: SubscriberSet::new(),
+            insets_observers: SubscriberSet::new(),
             appearance,
             appearance_observers: SubscriberSet::new(),
             button_layout_observers: SubscriberSet::new(),
@@ -1615,6 +1631,12 @@ impl Window {
     /// Returns the bounds of the current window in the global coordinate space, which could span across multiple displays.
     pub fn bounds(&self) -> Bounds<Pixels> {
         self.platform_window.bounds()
+    }
+
+    /// System occlusion and host avoidance in logical pixels.
+    /// `effective()` returns the additional padding needed inside the current viewport.
+    pub fn insets(&self) -> WindowInsets {
+        self.platform_window.insets()
     }
 
     /// Promotes the active process-local drag to the platform drag-and-drop protocol.

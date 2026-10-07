@@ -68,6 +68,10 @@ abstract class GpuiActivity : Activity() {
                 @Suppress("DEPRECATION")
                 view.setPadding(insets.systemWindowInsetLeft, insets.systemWindowInsetTop,
                     insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
+                @Suppress("DEPRECATION")
+                val safe = EdgeInsets(insets.systemWindowInsetLeft, insets.systemWindowInsetTop,
+                    insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
+                gpui.setWindowInsets(GpuiWindowInsets(safeArea = safe, consumed = safe))
                 insets
             }
         }

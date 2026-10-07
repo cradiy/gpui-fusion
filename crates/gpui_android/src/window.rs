@@ -44,12 +44,14 @@ struct Callbacks {
     hover: Option<Box<dyn FnMut(bool)>>,
     appearance: Option<Box<dyn FnMut()>>,
     resize: Option<Box<dyn FnMut(Size<Pixels>, f32)>>,
+    insets: Option<Box<dyn FnMut(WindowInsets)>>,
     close: Option<Box<dyn FnOnce()>>,
 }
 
 pub(crate) struct AndroidWindow {
     host: Arc<crate::bridge::Host>,
     back_enabled: Cell<bool>,
+    insets: RefCell<WindowInsets>,
     // Renderer must be dropped before the last native window reference.
     renderer: RefCell<WgpuRenderer>,
     native: RefCell<Option<NativeWindow>>,
@@ -83,6 +85,7 @@ impl AndroidWindow {
         Self {
             host,
             back_enabled: Cell::new(false),
+            insets: RefCell::default(),
             renderer: RefCell::new(renderer),
             native: RefCell::new(Some(native)),
             display: Rc::new(AndroidDisplay {
@@ -163,25 +166,44 @@ impl AndroidWindow {
             *self.native.borrow_mut() = Some(native);
         }
         self.force_frame.set(true);
-        self.set_viewport(width, height, density)
+        let insets = self.insets.borrow().clone();
+        self.set_viewport(width, height, density, insets)
     }
 
-    pub fn set_viewport(&self, width: i32, height: i32, density: f32) -> Result<()> {
+    pub fn set_viewport(
+        &self,
+        width: i32,
+        height: i32,
+        density: f32,
+        insets: WindowInsets,
+    ) -> Result<()> {
         anyhow::ensure!(
             width > 0 && height > 0 && density.is_finite() && density > 0.,
             "invalid Android viewport geometry"
         );
         let logical = size(px(width as f32 / density), px(height as f32 / density));
-        if self.display.size.get() == logical && self.display.scale.get() == density {
+        let resized = self.display.size.get() != logical || self.display.scale.get() != density;
+        let insets_changed = *self.insets.borrow() != insets;
+        if !resized && !insets_changed {
             return Ok(());
         }
+        *self.insets.borrow_mut() = insets.clone();
         self.display.scale.set(density);
         self.display.size.set(logical);
         self.force_frame.set(true);
-        let callback = self.callbacks.borrow_mut().resize.take();
-        if let Some(mut callback) = callback {
-            callback(logical, density);
-            self.callbacks.borrow_mut().resize = Some(callback);
+        if resized {
+            let callback = self.callbacks.borrow_mut().resize.take();
+            if let Some(mut callback) = callback {
+                callback(logical, density);
+                self.callbacks.borrow_mut().resize = Some(callback);
+            }
+        }
+        if insets_changed {
+            let callback = self.callbacks.borrow_mut().insets.take();
+            if let Some(mut callback) = callback {
+                callback(insets);
+                self.callbacks.borrow_mut().insets = Some(callback);
+            }
         }
         Ok(())
     }
@@ -456,6 +478,12 @@ impl PlatformWindow for AndroidWindowHandle {
     }
     fn on_resize(&self, callback: Box<dyn FnMut(Size<Pixels>, f32)>) {
         self.callbacks.borrow_mut().resize = Some(callback);
+    }
+    fn insets(&self) -> WindowInsets {
+        self.insets.borrow().clone()
+    }
+    fn on_insets_changed(&self, callback: Box<dyn FnMut(WindowInsets)>) {
+        self.callbacks.borrow_mut().insets = Some(callback);
     }
     fn on_moved(&self, _: Box<dyn FnMut()>) {}
     fn on_should_close(&self, _: Box<dyn FnMut() -> bool>) {}

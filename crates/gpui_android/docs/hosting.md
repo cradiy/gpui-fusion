@@ -151,17 +151,35 @@ to Android. Hiding the View or backgrounding the host stops frame callbacks.
 On Android 11 and later, the full-page host keeps the Surface at its safe-area
 size and animates GPUI's layout viewport with the keyboard insets. Keyboard
 visibility does not resize the swapchain. Embedded hosts can use
-`GpuiView.setViewportBottomInset` with a physical-pixel occlusion relative to the
-View's bottom edge. Android 8 through 10 use the system's resize behavior.
+`GpuiView.setWindowInsets(insets, viewportBottomInset)` to publish geometry and
+exclude a physical-pixel bottom region from layout. Android 8 through 10 use
+the system's resize behavior.
+
+`Window::insets()` reports system occlusion in logical pixels. `safe_area` and
+`ime` are measured from the host window edges; `consumed` records the space
+already excluded by host placement, padding, or viewport resizing. Use
+`insets.effective()` for additional padding inside GPUI. The full-page host
+already avoids system bars and the bottom keyboard, so these edges need no
+additional padding. Floating keyboards do not necessarily produce edge insets.
+`Context::observe_window_insets` observes changes, and inset changes refresh
+the window even when its viewport size is unchanged.
+
+Embedded hosts supply `GpuiWindowInsets` with physical-pixel `EdgeInsets` for
+`safeArea`, `ime`, and `consumed`, all measured from the same host window edges.
+Include the View's placement and any `viewportBottomInset` in `consumed`.
+Passing a zero bottom inset leaves the full Surface available for GPUI layout;
+the application can then use `effective()` to avoid remaining occlusion.
+Android 11 and later publish separate safe-area and IME geometry throughout
+keyboard animations. The Android 8–10 full-page host publishes the legacy
+combined system insets as consumed safe area; separate IME geometry is unavailable.
 
 Text rendering loads the device's available system font files, including CJK
 and emoji fonts, alongside the embedded default font. Android 10 and later use
 `SystemFonts`; Android 8 and 9 use `/system/fonts`. Applications can also register
 their own fonts through GPUI's text system.
 
-The host must handle its own embedding insets. `PlatformWindow::insets` does not
-yet publish Android keyboard or safe-area geometry. SurfaceView hosting does
-not provide arbitrary Android View clipping or rotation semantics.
+The host handles its own embedding insets. SurfaceView hosting does not provide
+arbitrary Android View clipping or rotation semantics.
 
 Raw touches retain pointer IDs and include cancellation. A short single-finger
 tap also produces a mouse down/up pair for existing GPUI click handlers. A

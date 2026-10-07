@@ -818,12 +818,8 @@ pub enum AppLifecyclePhase {
     Foreground,
 }
 
-/// Regions of a window that are obscured or reserved by the system.
-///
-/// Mobile applications often share space in their window with system-specific
-/// geometry, from keyboards to camera notches. In GPUI, all this is abstracted
-/// into a single "inset" which should be overlaid on the window's bounds.
-/// It is up to the application develop to determine how to handle these cases.
+/// System occlusion and host avoidance, in logical pixels from the host window edges.
+/// Use [`Self::effective`] for additional padding inside GPUI's current viewport.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WindowInsets {
     /// Regions covered by system UI or hardware: status bar, display
@@ -835,16 +831,19 @@ pub struct WindowInsets {
     /// (iOS: derived from `keyboardWillShow`/frame-change notifications.
     /// Android: `WindowInsets.Type.ime()`.)
     pub ime: Edges<Pixels>,
+    /// Space already excluded from the GPUI viewport by the host's placement,
+    /// padding, or keyboard resizing, measured from the same edges as the insets.
+    pub consumed: Edges<Pixels>,
 }
 
 impl WindowInsets {
-    /// The combined inset content should avoid.
+    /// Additional space content should avoid, after host avoidance.
     pub fn effective(&self) -> Edges<Pixels> {
         Edges {
-            top: self.safe_area.top.max(self.ime.top),
-            right: self.safe_area.right.max(self.ime.right),
-            bottom: self.safe_area.bottom.max(self.ime.bottom),
-            left: self.safe_area.left.max(self.ime.left),
+            top: (self.safe_area.top.max(self.ime.top) - self.consumed.top).max(px(0.)),
+            right: (self.safe_area.right.max(self.ime.right) - self.consumed.right).max(px(0.)),
+            bottom: (self.safe_area.bottom.max(self.ime.bottom) - self.consumed.bottom).max(px(0.)),
+            left: (self.safe_area.left.max(self.ime.left) - self.consumed.left).max(px(0.)),
         }
     }
 }
@@ -3068,6 +3067,35 @@ mod image_tests {
         for pixel in bytes.chunks_exact(4) {
             assert_eq!(pixel, &[0xF8, 0xBD, 0x38, 0xFF]);
         }
+    }
+}
+
+#[cfg(test)]
+mod inset_tests {
+    #[test]
+    fn insets_account_for_overlapping_occlusion_and_host_avoidance() {
+        let mut insets = super::WindowInsets {
+            safe_area: crate::Edges {
+                top: crate::px(24.),
+                bottom: crate::px(20.),
+                ..Default::default()
+            },
+            ime: crate::Edges {
+                bottom: crate::px(300.),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(insets.effective().bottom, crate::px(300.));
+        insets.consumed = crate::Edges {
+            top: crate::px(40.),
+            bottom: crate::px(20.),
+            ..Default::default()
+        };
+        assert_eq!(insets.effective().top, crate::px(0.));
+        assert_eq!(insets.effective().bottom, crate::px(280.));
+        insets.consumed.bottom = crate::px(300.);
+        assert_eq!(insets.effective(), crate::Edges::default());
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::{FileHandle, IoExecutor, unsupported};
+use crate::{FileBookmark, FileHandle, IoExecutor, unsupported};
 use anyhow::{Result, ensure};
 use futures::future::LocalBoxFuture;
 use std::{path::Path, sync::Arc};
@@ -68,12 +68,30 @@ impl LocationHandle {
 
 /// Location discovery performs no permission prompts or fallback to a different destination.
 pub trait PlatformLocations: Send + Sync {
+    fn restore_file(&self, _bookmark: FileBookmark) -> LocalBoxFuture<'static, Result<FileHandle>> {
+        Box::pin(async { Err(unsupported("file bookmark provider is unavailable")) })
+    }
+    fn release_file(&self, _bookmark: FileBookmark) -> LocalBoxFuture<'static, Result<()>> {
+        Box::pin(async { Err(unsupported("file bookmark provider is unavailable")) })
+    }
     fn location(&self, kind: SystemLocation) -> LocalBoxFuture<'static, Result<LocationHandle>>;
 }
 
 #[derive(Clone)]
 pub struct FileSystem(Arc<dyn PlatformLocations>);
 impl FileSystem {
+    /// Restore a file without opening a picker. Missing files or lost grants return errors.
+    pub fn restore_file(
+        &self,
+        bookmark: &FileBookmark,
+    ) -> LocalBoxFuture<'static, Result<FileHandle>> {
+        self.0.restore_file(bookmark.clone())
+    }
+    /// Release the bookmark's persistent permissions without deleting the file.
+    /// Grants can be shared by other handles or bookmarks within the application.
+    pub fn release_file(&self, bookmark: &FileBookmark) -> LocalBoxFuture<'static, Result<()>> {
+        self.0.release_file(bookmark.clone())
+    }
     pub fn new(locations: impl PlatformLocations + 'static) -> Self {
         Self(Arc::new(locations))
     }

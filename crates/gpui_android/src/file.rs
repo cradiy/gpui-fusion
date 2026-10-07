@@ -1,8 +1,8 @@
 use anyhow::{Result, anyhow, ensure};
 use futures::future::LocalBoxFuture;
 use gpui::gpui_io::{
-    BlockingWrite, FileHandle, FileMetadata, FileReader, FileWriter, IoExecutor, PlatformFile,
-    WriteMode, WriteOptions,
+    BlockingWrite, FileBookmark, FileHandle, FileMetadata, FileReader, FileWriter, IoExecutor,
+    PlatformFile, WriteMode, WriteOptions,
 };
 use jni::{
     JNIEnv, JavaVM,
@@ -118,6 +118,26 @@ impl std::fmt::Debug for AndroidFile {
     }
 }
 impl PlatformFile for AndroidFile {
+    fn persist(&self) -> LocalBoxFuture<'static, Result<FileBookmark>> {
+        let document = self.document.clone();
+        let writable = self.writable;
+        self.executor.run(move || {
+            let uri: String = document.call(|env| {
+                let value = env
+                    .call_method(
+                        document.object.as_obj(),
+                        "persist",
+                        "()Ljava/lang/String;",
+                        &[],
+                    )?
+                    .l()?;
+                Ok(env.get_string(&JString::from(value))?.into())
+            })?;
+            let mut data = vec![u8::from(writable)];
+            data.extend_from_slice(uri.as_bytes());
+            Ok(FileBookmark::new("android-document", data))
+        })
+    }
     fn name(&self) -> &str {
         &self.name
     }

@@ -12,6 +12,7 @@ workspace = true
 anyhow.workspace = true
 futures.workspace = true
 log.workspace = true
+serde.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]
 dirs = "6"

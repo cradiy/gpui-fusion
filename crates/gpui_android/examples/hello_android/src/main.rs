@@ -178,6 +178,13 @@ struct Counter {
     reply: Entity<TextInput>,
 }
 
+#[derive(Clone, Copy)]
+enum BookmarkAction {
+    Remember,
+    Restore,
+    Release,
+}
+
 fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
     div()
         .id(id)
@@ -189,6 +196,105 @@ fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
 }
 
 impl Counter {
+    fn file_bookmark(&mut self, action: BookmarkAction, cx: &mut Context<Self>) {
+        if self.file_pending {
+            return;
+        }
+        let io = match cx.file_system("dev.gpui.example") {
+            Ok(io) => io,
+            Err(error) => {
+                self.file_status = error.to_string();
+                cx.notify();
+                return;
+            }
+        };
+        let document = self.document.clone();
+        self.file_pending = true;
+        self.file_status = "Updating file access...".into();
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result: anyhow::Result<_> = async {
+                use gpui::gpui_io::{CreateOptions, FileBookmark, SystemLocation};
+                let location = io.location(SystemLocation::AppData).await?;
+                let storage = location.file("document-bookmark.json")?;
+                let previous: Option<FileBookmark> = match storage.read_limited(128 * 1024).await {
+                    Ok(bytes) => serde_json::from_slice(&bytes)?,
+                    Err(error)
+                        if error
+                            .downcast_ref::<std::io::Error>()
+                            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+                    {
+                        None
+                    }
+                    Err(error) => return Err(error),
+                };
+                match action {
+                    BookmarkAction::Remember => {
+                        anyhow::ensure!(
+                            previous.is_none(),
+                            "Forget the saved file before remembering another"
+                        );
+                        let document = document.ok_or_else(|| {
+                            anyhow::anyhow!("Open a document or use Save as first")
+                        })?;
+                        // Ensure private storage exists before retaining a system grant.
+                        if let Err(error) = location
+                            .create_file("document-bookmark.json", CreateOptions::default())
+                            .await
+                            && !error.downcast_ref::<std::io::Error>().is_some_and(|error| {
+                                error.kind() == std::io::ErrorKind::AlreadyExists
+                            })
+                        {
+                            return Err(error);
+                        }
+                        storage.write(b"null".to_vec()).await?;
+                        let bookmark = document.persist().await?;
+                        storage.write(serde_json::to_vec(&Some(bookmark))?).await?;
+                        Ok((
+                            "File access retained. Restart the app, then choose Restore file."
+                                .into(),
+                            None,
+                        ))
+                    }
+                    BookmarkAction::Restore => {
+                        let bookmark =
+                            previous.ok_or_else(|| anyhow::anyhow!("No saved file bookmark"))?;
+                        let file = io.restore_file(&bookmark).await?;
+                        let text = String::from_utf8(file.read_limited(4 * 1024 * 1024).await?)?;
+                        Ok((format!("Restored {}", file.name()), Some((file, text))))
+                    }
+                    BookmarkAction::Release => {
+                        let bookmark =
+                            previous.ok_or_else(|| anyhow::anyhow!("No saved file bookmark"))?;
+                        io.release_file(&bookmark).await?;
+                        storage.write(b"null".to_vec()).await?;
+                        Ok((
+                            "Persistent access released. The file was not deleted.".into(),
+                            None,
+                        ))
+                    }
+                }
+            }
+            .await;
+            let _ = this.update(cx, |this, cx| {
+                this.file_pending = false;
+                match result {
+                    Ok((status, restored)) => {
+                        this.file_status = status;
+                        if let Some((file, text)) = restored {
+                            this.file_text
+                                .update(cx, |input, cx| input.set_value(text, cx));
+                            this.document = Some(file);
+                        }
+                    }
+                    Err(error) => this.file_status = format!("File access: {error}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn check_credentials(&mut self, cx: &mut Context<Self>) {
         if self.credential_pending {
             return;
@@ -717,6 +823,19 @@ impl Render for Counter {
                             .child(button("save-document", "Save").on_click(
                                 cx.listener(|this, _, _, cx| this.save_document(false, cx)),
                             ))
+                            .child(
+                                button("remember-file", "Remember file").on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.file_bookmark(BookmarkAction::Remember, cx)
+                                    },
+                                )),
+                            )
+                            .child(button("restore-file", "Restore file").on_click(cx.listener(
+                                |this, _, _, cx| this.file_bookmark(BookmarkAction::Restore, cx),
+                            )))
+                            .child(button("forget-file", "Forget file").on_click(cx.listener(
+                                |this, _, _, cx| this.file_bookmark(BookmarkAction::Release, cx),
+                            )))
                             .child(
                                 button("save-app-data", "Save app data").on_click(cx.listener(
                                     |this, _, _, cx| {

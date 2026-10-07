@@ -3,6 +3,36 @@ use anyhow::Result;
 use futures::{Stream, StreamExt, future::LocalBoxFuture, stream::BoxStream};
 use std::{fmt::Debug, path::Path, sync::Arc, time::SystemTime};
 
+/// Serializable, provider-specific file reference. It is not a portable access token.
+#[derive(Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct FileBookmark {
+    provider: String,
+    data: Vec<u8>,
+}
+
+impl FileBookmark {
+    pub fn new(provider: impl Into<String>, data: Vec<u8>) -> Self {
+        Self {
+            provider: provider.into(),
+            data,
+        }
+    }
+    pub fn provider(&self) -> &str {
+        &self.provider
+    }
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+impl Debug for FileBookmark {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileBookmark")
+            .field("provider", &self.provider)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Ordered byte chunks; an error stops the write.
 pub type FileWriteStream = BoxStream<'static, Result<Vec<u8>>>;
 
@@ -42,6 +72,13 @@ impl WriteOptions {
 
 /// Platform resource behind a file handle. Sessions own their resources independently.
 pub trait PlatformFile: Debug + Send + Sync {
+    fn persist(&self) -> LocalBoxFuture<'static, Result<FileBookmark>> {
+        Box::pin(async {
+            Err(unsupported(
+                "file provider does not support persistent access",
+            ))
+        })
+    }
     fn name(&self) -> &str;
     fn path(&self) -> Option<&Path> {
         None
@@ -65,6 +102,11 @@ pub trait PlatformFile: Debug + Send + Sync {
 pub struct FileHandle(Arc<dyn PlatformFile>);
 
 impl FileHandle {
+    /// Retain access explicitly. The application must store the returned bookmark.
+    /// Dropping a handle or bookmark does not release persistent permissions.
+    pub fn persist(&self) -> LocalBoxFuture<'static, Result<FileBookmark>> {
+        self.0.persist()
+    }
     pub fn new(file: Arc<dyn PlatformFile>) -> Self {
         Self(file)
     }

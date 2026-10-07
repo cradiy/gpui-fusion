@@ -2749,6 +2749,7 @@ dependencies = [
  "dirs",
  "futures",
  "log",
+ "serde",
  "tempfile",
 ]
 
@@ -3360,6 +3361,7 @@ dependencies = [
  "gpui",
  "gpui_android",
  "gpui_platform",
+ "serde_json",
  "uic",
 ]
 

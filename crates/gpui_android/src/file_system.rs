@@ -2,11 +2,11 @@ use crate::{
     bridge::Host,
     file::{Document, selected_file},
 };
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use futures::future::LocalBoxFuture;
 use gpui::gpui_io::{
-    CreateOptions, FileHandle, FileSystem, IoExecutor, LocationHandle, PlatformLocation,
-    PlatformLocations, SystemLocation,
+    CreateOptions, FileBookmark, FileHandle, FileSystem, IoExecutor, LocationHandle,
+    PlatformLocation, PlatformLocations, SystemLocation,
 };
 use jni::objects::{JString, JValue};
 use std::{io, path::PathBuf, sync::Arc};
@@ -58,6 +58,42 @@ struct AndroidLocations {
     executor: IoExecutor,
 }
 impl PlatformLocations for AndroidLocations {
+    fn restore_file(&self, bookmark: FileBookmark) -> LocalBoxFuture<'static, Result<FileHandle>> {
+        let store = self.store.clone();
+        let executor = self.executor.clone();
+        self.executor.run(move || {
+            let (uri, writable) = document_bookmark(&bookmark)?;
+            let object = store.call(|env| {
+                let uri = env.new_string(uri)?;
+                let file = env
+                    .call_method(
+                        store.object.as_obj(),
+                        "restore",
+                        "(Ljava/lang/String;Z)Ldev/gpui/android/SelectedDocument;",
+                        &[JValue::Object(uri.as_ref()), JValue::Bool(writable.into())],
+                    )?
+                    .l()?;
+                Ok(env.new_global_ref(file)?)
+            })?;
+            selected_file(store.vm.clone(), object, executor)
+        })
+    }
+    fn release_file(&self, bookmark: FileBookmark) -> LocalBoxFuture<'static, Result<()>> {
+        let store = self.store.clone();
+        self.executor.run(move || {
+            let (uri, writable) = document_bookmark(&bookmark)?;
+            store.call(|env| {
+                let uri = env.new_string(uri)?;
+                env.call_method(
+                    store.object.as_obj(),
+                    "release",
+                    "(Ljava/lang/String;Z)V",
+                    &[JValue::Object(uri.as_ref()), JValue::Bool(writable.into())],
+                )?;
+                Ok(())
+            })
+        })
+    }
     fn location(&self, kind: SystemLocation) -> LocalBoxFuture<'static, Result<LocationHandle>> {
         let code = match kind {
             SystemLocation::AppData => {
@@ -105,6 +141,19 @@ impl PlatformLocations for AndroidLocations {
             }))
         })
     }
+}
+
+fn document_bookmark(bookmark: &FileBookmark) -> Result<(&str, bool)> {
+    ensure!(
+        bookmark.provider() == "android-document",
+        "unsupported file bookmark provider"
+    );
+    let data = bookmark.data();
+    ensure!(
+        (2..=16385).contains(&data.len()) && data[0] <= 1,
+        "invalid document bookmark"
+    );
+    Ok((std::str::from_utf8(&data[1..])?, data[0] == 1))
 }
 
 struct Collection {

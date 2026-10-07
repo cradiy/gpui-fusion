@@ -13,6 +13,9 @@ internal class FileStore(context: Context) {
     private val context = context.applicationContext
     private val resolver = this.context.contentResolver
 
+    fun restore(value: String, writable: Boolean): SelectedDocument = DocumentGrants.restore(resolver, value, writable)
+    fun release(value: String, writable: Boolean) = DocumentGrants.release(resolver, value, writable)
+
     fun privatePath(kind: Int): String = when (kind) {
         0 -> File(context.filesDir, "Data")
         1 -> File(context.filesDir, "Config")

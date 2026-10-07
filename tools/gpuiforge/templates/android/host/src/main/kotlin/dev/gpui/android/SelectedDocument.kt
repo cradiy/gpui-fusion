@@ -9,10 +9,14 @@ import java.io.FileNotFoundException
 import java.io.OutputStream
 
 /** Owns no Activity. Metadata and descriptor access run on Rust background workers. */
-internal class SelectedDocument(private val resolver: ContentResolver, private val uri: Uri, private val writable: Boolean, private var pending: Boolean = false) {
+internal class SelectedDocument(private val resolver: ContentResolver, private val uri: Uri, private val writable: Boolean, private var pending: Boolean = false, private val persistableFlags: Int = 0) {
     private var outputOpen = false
     private var discarded = false
     fun canWrite(): Boolean = writable
+    @Synchronized fun persist(): String {
+        check(!pending && !discarded) { "File is not published" }
+        return DocumentGrants.persist(resolver, uri, writable, persistableFlags)
+    }
     fun mimeType(): String? = resolver.getType(uri)
     fun byteLength(): Long {
         resolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->

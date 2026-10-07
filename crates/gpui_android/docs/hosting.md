@@ -350,8 +350,8 @@ workers, including documents backed by a pipe or a remote provider.
 Android documents do not expose a GPUI filesystem path or browser URL. Use
 `SelectedFile::read()` instead; it loads the complete contents into memory. Each
 read opens a fresh descriptor. Reading can fail if the provider is unavailable or
-access has been revoked. Grants are not persisted for use after application
-restart. The picker requires no broad storage permission. Directory selection
+access has been revoked. Persistent access is explicit through file bookmarks.
+The picker requires no broad storage permission. Directory selection
 and `prompt_for_paths` are not supported.
 
 To edit an existing document, set `FilePromptOptions::writable` to `true`.
@@ -397,6 +397,30 @@ and call `detachFileHost(activity)` on destruction. Request codes
 `0x8000..0xbfff` are reserved for GPUI. A retained session preserves its pending
 selection across Activity configuration recreation; final host detachment
 completes it with an error. Results from earlier requests are ignored.
+
+### Persistent file access
+
+Call `file.persist().await?` while a picked document's access is valid, then save
+the returned `gpui_io::FileBookmark` using Serde. After restarting, obtain
+`App::file_system(app_id)` and call `restore_file(&bookmark).await?`. Restore checks
+the retained permissions and opens the document for reading before returning a
+handle. It does not display a picker or request broader access. Missing files,
+revoked permissions and unavailable providers return errors.
+
+`release_file(&bookmark).await?` releases the bookmark's retained read/write
+permissions without deleting the document. Releasing an already absent grant
+succeeds. Grants belong to the Android application, not to a handle: releasing
+one can invalidate other bookmarks for the same URI. Temporary picker grants or
+already-open descriptors may remain usable. Dropping a handle does not release a
+persistent grant.
+
+The adapter persists only permissions requested by the handle and offered by the
+picker. Providers without persistable grants return an error. Public collection
+items and private path handles do not support this document-bookmark mechanism.
+Bookmarks do not preserve access after uninstall, app-data clearing, document
+removal, or movement to a provider that changes its URI. The application owns
+bookmark storage and decides when to retain or release access; GPUI maintains no
+recent-files list.
 
 ## Credentials
 

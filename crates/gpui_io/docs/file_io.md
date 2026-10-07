@@ -118,7 +118,31 @@ attempts to remove the pending item. Cleanup failures are reported by `abort()`
 or logged during drop; process termination cannot guarantee immediate cleanup.
 Published files and ordinary picker documents are not deleted on write failure.
 Android document handles allow one active writer at a time. Handle access grants
-are not persisted for use across application restarts.
+are persisted only by an explicit `persist()` call.
+
+## File bookmarks
+
+`file.persist().await?` retains supported platform access and returns a serializable
+`FileBookmark`. Store it in application settings or a database using Serde. A
+bookmark identifies its provider and contains opaque bytes; do not edit its payload.
+It does not contain the document contents or independently grant access to a file.
+
+`file_system.restore_file(&bookmark).await?` returns a file handle after validating
+the platform grant and file availability. `release_file(&bookmark).await?` releases
+retained access without deleting the file. Dropping a bookmark or file handle does
+not release permissions. The application owns bookmark persistence and cleanup.
+
+Android document-picker handles support bookmarks when the provider offers
+persistable grants. Read-only handles retain only read access. Grants are shared
+within an application, so release can affect other bookmarks for the same document;
+temporary grants and open streams may remain usable. Restore never silently reduces
+the requested access. Deleted documents, revoked grants and unavailable providers
+return errors. See [Android hosting](../../gpui_android/docs/hosting.md#persistent-file-access).
+
+Native path handles, Android public collection handles and browser files currently
+return `Unsupported` from `persist()`. Save ordinary native paths separately where
+the operating system does not require a persistent document grant. Bookmarks are
+platform-specific and are not portable between apps or devices.
 
 ## Browser
 

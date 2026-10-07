@@ -51,6 +51,7 @@ internal class FilePickerHost(private val deliver: (Long, Array<SelectedDocument
             activity.startActivityForResult(intent.apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
                 if (writable) addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             }, request.code)
         } catch (error: RuntimeException) { finish(null, error.message ?: "Unable to open file picker") }
@@ -73,7 +74,11 @@ internal class FilePickerHost(private val deliver: (Long, Array<SelectedDocument
                 "The document provider did not grant write access"
             }
             val resolver = activity.applicationContext.contentResolver
-            finish(uris.map { SelectedDocument(resolver, it, request.writable) }.toTypedArray(), null)
+            val flags = data?.flags ?: 0
+            val persistent = if (flags and Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION != 0) {
+                flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            } else 0
+            finish(uris.map { SelectedDocument(resolver, it, request.writable, persistableFlags = persistent) }.toTypedArray(), null)
         } catch (error: RuntimeException) { finish(null, error.message ?: "Invalid file selection") }
         return true
     }

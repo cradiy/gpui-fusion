@@ -207,6 +207,19 @@ to take ownership. Both `sync` and `generate` are disabled in manual mode.
 These feature and icon settings apply to the bundled Android template; custom
 templates define their own sources and resources.
 
+## Android layout insets
+
+`platforms.android.inset-handling` defaults to `"application"`. The bundled
+Activity leaves the GPUI viewport at the window's full size and publishes
+system-bar, display-cutout and keyboard geometry through `Window::insets()`.
+The Rust application decides which content needs padding, using
+`window.insets().effective()` in logical pixels.
+
+Set `"inset-handling": "host"` for automatic avoidance. System bars remain
+visible in both modes. Run `gpuiforge sync android` after changing this setting.
+The [Android hosting guide](../../../crates/gpui_android/docs/hosting.md#safe-areas-and-the-keyboard)
+shows Rust layout code and the equivalent custom Activity configuration.
+
 ## Recipes and templates
 
 A recipe is an optional custom JSON platform definition. Android uses bundled

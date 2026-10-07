@@ -12,10 +12,15 @@ import android.window.OnBackAnimationCallback
 import android.window.BackEvent
 import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import kotlin.math.roundToInt
 
 /** Full-page host retaining the Rust application across configuration changes. */
 abstract class GpuiActivity : Activity() {
+    enum class InsetHandling { APPLICATION, HOST }
+    protected open fun insetHandling() = InsetHandling.APPLICATION
     private lateinit var session: GpuiSession
     private lateinit var fullscreen: FullscreenHost
     private var backEnabled = false
@@ -29,6 +34,8 @@ abstract class GpuiActivity : Activity() {
 // gpuiforge:if notifications
         NotificationStore.receive(this, intent)
 // gpuiforge:endif
+        val hostInsets = insetHandling() == InsetHandling.HOST
+        if (!hostInsets) WindowCompat.enableEdgeToEdge(window)
         if (Build.VERSION.SDK_INT >= 30) {
             window.setDecorFitsSystemWindows(false)
             window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
@@ -72,10 +79,23 @@ abstract class GpuiActivity : Activity() {
         val gpui = GpuiView(this, session)
         content.addView(gpui, FrameLayout.LayoutParams(-1, -1))
         if (Build.VERSION.SDK_INT >= 30) {
-            KeyboardInsets(content, gpui) { visible ->
+            KeyboardInsets(content, gpui, hostInsets) { visible ->
                 imeVisible = visible
                 if (visible) session.cancelBackGesture()
                 updateBackRegistration()
+            }
+        } else if (!hostInsets) {
+            ViewCompat.setOnApplyWindowInsetsListener(content) { _, insets ->
+                val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+                val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
+                imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
+                if (imeVisible) session.cancelBackGesture()
+                updateBackRegistration()
+                gpui.setWindowInsets(GpuiWindowInsets(
+                    safeArea = EdgeInsets(safe.left, safe.top, safe.right, safe.bottom),
+                    ime = EdgeInsets(keyboard.left, keyboard.top, keyboard.right, keyboard.bottom),
+                ))
+                insets
             }
         } else {
             content.setOnApplyWindowInsetsListener { view, insets ->

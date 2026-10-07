@@ -241,7 +241,14 @@ fn init(
             );
         }
         doc["platforms"]["android"]["application-id"] = serde_json::Value::String(id);
-        for field in ["abis", "features", "permissions", "build", "run"] {
+        for field in [
+            "abis",
+            "features",
+            "inset-handling",
+            "permissions",
+            "build",
+            "run",
+        ] {
             if let Some(value) = defaults.get(field) {
                 doc["platforms"]["android"][field] = value.clone();
             }

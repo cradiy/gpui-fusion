@@ -31,6 +31,16 @@ pub enum Management {
     Manual,
 }
 
+#[derive(schemars::JsonSchema, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InsetHandling {
+    /// Draw behind system bars and the keyboard. Rust uses Window::insets() to arrange content.
+    #[default]
+    Application,
+    /// The Android host avoids system bars, display cutouts and the keyboard before GPUI layout.
+    Host,
+}
+
 #[derive(schemars::JsonSchema, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Platform {
@@ -77,6 +87,8 @@ pub struct Platform {
     pub artifact: Option<String>,
     /// Android package identity, such as com.example.app. Required directly or through a recipe. Use at least two dot-separated segments starting with ASCII letters; remaining characters may be letters, digits or underscores. This is independent of the Kotlin host namespace and Rust package name.
     pub application_id: Option<String>,
+    /// Who applies safe-area and keyboard avoidance in the bundled Android Activity. Defaults to application: the GPUI viewport fills the window and Window::insets() reports occlusion in logical pixels without consumed padding. Use host for automatic avoidance; Rust can use insets.effective() in either mode without double padding. This does not hide system bars. Regenerate managed Android sources with gpuiforge sync after changing it.
+    pub inset_handling: Option<InsetHandling>,
     /// Android Activity class used by launch steps through {{activity}}. Bundled default: dev.gpuiforge.app.MainActivity. Changing this value does not rename generated Kotlin classes or Manifest entries; keep it aligned with a custom or manually maintained host.
     pub activity: Option<String>,
     /// Android architectures enabled for packaging. Bundled defaults: arm64-v8a and x86_64. Builds package all enabled ABIs unless --abi selects one; device runs choose a compatible enabled ABI. At least one is required, and 32-bit Android targets are not supported.
@@ -439,10 +451,11 @@ impl Project {
                         && platform.features.is_empty()
                         && platform.icon.is_none()
                         && platform.notification_icon.is_none()
+                        && platform.inset_handling.is_none()
                         && platform.signing.is_none()
                         && platform.url_schemes.is_empty()
                         && platform.share_mime_types.is_empty(),
-                    "features, icons, permissions, signing, url-schemes and share-mime-types are Android-only settings"
+                    "features, icons, inset-handling, permissions, signing, url-schemes and share-mime-types are Android-only settings"
                 );
             }
             platforms.insert(name, platform);
@@ -511,6 +524,14 @@ impl Project {
                 abi.map(str::to_owned).unwrap_or_else(|| p.abis.join(",")),
             ),
         ]);
+        vars.insert(
+            "android_inset_handling".into(),
+            match p.inset_handling.unwrap_or_default() {
+                InsetHandling::Application => "APPLICATION",
+                InsetHandling::Host => "HOST",
+            }
+            .into(),
+        );
         vars.insert(
             "android_permissions".into(),
             p.permissions

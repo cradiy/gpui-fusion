@@ -19,6 +19,7 @@
     }
   ],
   "features": [],
+  "inset-handling": "application",
   "permissions": [],
   "run": [
     {

@@ -4,4 +4,5 @@ import dev.gpui.android.GpuiActivity
 
 class MainActivity : GpuiActivity() {
     override fun nativeLibraryName() = "{{var.native_library|kotlin}}"
+    override fun insetHandling() = InsetHandling.{{android_inset_handling}}
 }

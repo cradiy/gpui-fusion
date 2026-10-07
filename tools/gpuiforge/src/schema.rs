@@ -6,6 +6,7 @@ pub fn text(recipe: bool) -> Result<String> {
     let mut platform = serde_json::to_value(schemars::schema_for!(Platform))?;
     non_null_options(&mut platform);
     let properties = platform["properties"].as_object_mut().unwrap();
+    properties.get_mut("inset-handling").unwrap()["default"] = "application".into();
     properties.get_mut("abis").unwrap()["items"] = json!({"oneOf":[
         {"type":"string", "const":"arm64-v8a", "description":"64-bit ARM Android devices. Uses Rust target aarch64-linux-android; commonly used for physical phones and ARM emulators."},
         {"type":"string", "const":"x86_64", "description":"64-bit x86 Android devices or emulators. Uses Rust target x86_64-linux-android; select it for an x86_64 emulator."}
@@ -91,6 +92,7 @@ pub fn text(recipe: bool) -> Result<String> {
         "features",
         "icon",
         "notification-icon",
+        "inset-handling",
         "permissions",
         "signing",
         "url-schemes",

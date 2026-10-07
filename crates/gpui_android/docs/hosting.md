@@ -158,7 +158,7 @@ mode survives Activity configuration changes; `is_fullscreen()` reports the
 requested mode, including while transient bars are visible. The system may
 retain window controls in multi-window environments.
 
-Safe-area and keyboard insets continue to apply. Fullscreen does not lock device
+Safe-area and keyboard insets remain available through `Window::insets()`. Fullscreen does not lock device
 orientation, change your view layout, or register a Back action. To make Back
 exit fullscreen, use `on_system_back` and enable Back handling only while that
 action is available; combine it with your application's navigation handler.
@@ -189,7 +189,8 @@ class MainActivity : GpuiActivity() {
 Load the application library before creating a `GpuiSession`. `GpuiActivity`
 does this through its `nativeLibraryName()` override and hosts a full-page View.
 It forwards lifecycle events and retains the session during configuration
-changes. The page is laid out inside system-bar, display-cutout, and keyboard insets.
+changes. The page fills the window; Rust controls safe-area and keyboard avoidance.
+Override `insetHandling()` with `InsetHandling.HOST` to let the host apply avoidance.
 
 For an embedded host, construct `GpuiView(context, session)`, forward the host's
 start/resume/pause/stop events through `session.setLifecycle(...)`, and call
@@ -208,30 +209,66 @@ window reference. Reattachment preserves the device, atlas, and logical GPUI
 window. Resizing an existing native window retains its WGPU surface.
 `GpuiView` completes `SurfaceHolder.Callback2` redraws before returning control
 to Android. Hiding the View or backgrounding the host stops frame callbacks.
-On Android 11 and later, the full-page host keeps the Surface at its safe-area
-size and animates GPUI's layout viewport with the keyboard insets. Keyboard
-visibility does not resize the swapchain. Embedded hosts can use
-`GpuiView.setWindowInsets(insets, viewportBottomInset)` to publish geometry and
-exclude a physical-pixel bottom region from layout. Android 8 through 10 use
-the system's resize behavior.
+
+### Safe areas and the keyboard
+
+The bundled Activity defaults to application-managed layout. Its GPUI viewport
+fills the window, including the area behind visible system bars and the keyboard.
+Configure ownership in `gpuiforge.json` and run `gpuiforge sync android`:
+
+```json
+{
+  "platforms": {
+    "android": {
+      "application-id": "com.example.app",
+      "inset-handling": "application"
+    }
+  }
+}
+```
+
+Use `"host"` for automatic safe-area and keyboard avoidance. This setting does
+not hide system bars; use the fullscreen API to control their visibility.
 
 `Window::insets()` reports system occlusion in logical pixels. `safe_area` and
 `ime` are measured from the host window edges; `consumed` records the space
 already excluded by host placement, padding, or viewport resizing. Use
-`insets.effective()` for additional padding inside GPUI. The full-page host
-already avoids system bars and the bottom keyboard, so these edges need no
-additional padding. Floating keyboards do not necessarily produce edge insets.
+`insets.effective()` for additional padding inside GPUI. In application mode,
+`consumed` is zero. In host mode, effective padding accounts for avoidance already
+applied by Android. Floating keyboards do not necessarily produce edge insets.
 `Context::observe_window_insets` observes changes, and inset changes refresh
 the window even when its viewport size is unchanged.
+
+Read the insets during rendering. Keep the background on the outer element and
+place scrollable content inside the padded region:
+
+```rust
+let padding = window.insets().effective();
+div()
+    .size_full()
+    .bg(rgb(0x101923))
+    .pt(padding.top)
+    .pr(padding.right)
+    .pb(padding.bottom)
+    .pl(padding.left)
+    .child(content)
+```
+
+For independent header and footer placement, use `safe_area.top` and
+`safe_area.bottom`; `ime.bottom` describes keyboard occlusion. These are logical
+pixels and must not be scaled by display density again. Insets can change with
+rotation, navigation mode, system-bar visibility and keyboard animation.
 
 Embedded hosts supply `GpuiWindowInsets` with physical-pixel `EdgeInsets` for
 `safeArea`, `ime`, and `consumed`, all measured from the same host window edges.
 Include the View's placement and any `viewportBottomInset` in `consumed`.
 Passing a zero bottom inset leaves the full Surface available for GPUI layout;
 the application can then use `effective()` to avoid remaining occlusion.
-Android 11 and later publish separate safe-area and IME geometry throughout
-keyboard animations. The Android 8–10 full-page host publishes the legacy
-combined system insets as consumed safe area; separate IME geometry is unavailable.
+On Android 11 and later, keyboard animation updates insets without resizing the
+rendering Surface. Host mode reduces GPUI's layout viewport; application mode
+leaves it intact. On Android 8–10, application mode uses AndroidX inset reporting;
+host mode uses legacy system resizing and reports combined system insets as
+consumed safe area without separate IME geometry.
 
 Text rendering loads the device's available system font files, including CJK
 and emoji fonts, alongside the embedded default font. Android 10 and later use

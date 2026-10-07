@@ -755,7 +755,16 @@ impl Render for MediaDemo {
                     .child(surface(frame.clone()).absolute().size_full()),
             );
         }
-        column.into_any_element()
+        let padding = window.insets().effective();
+        div()
+            .size_full()
+            .bg(rgb(0x101923))
+            .pt(padding.top)
+            .pr(padding.right)
+            .pb(padding.bottom)
+            .pl(padding.left)
+            .child(column)
+            .into_any_element()
     }
 }
 

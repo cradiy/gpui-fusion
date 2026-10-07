@@ -62,6 +62,20 @@
       ],
       "type": "object"
     },
+    "InsetHandling": {
+      "oneOf": [
+        {
+          "const": "application",
+          "description": "Draw behind system bars and the keyboard. Rust uses Window::insets() to arrange content.",
+          "type": "string"
+        },
+        {
+          "const": "host",
+          "description": "The Android host avoids system bars, display cutouts and the keyboard before GPUI layout.",
+          "type": "string"
+        }
+      ]
+    },
     "Management": {
       "oneOf": [
         {
@@ -222,6 +236,11 @@
         "assets/app.png"
       ],
       "type": "string"
+    },
+    "inset-handling": {
+      "$ref": "#/$defs/InsetHandling",
+      "default": "application",
+      "description": "Who applies safe-area and keyboard avoidance in the bundled Android Activity. Defaults to application: the GPUI viewport fills the window and Window::insets() reports occlusion in logical pixels without consumed padding. Use host for automatic avoidance; Rust can use insets.effective() in either mode without double padding. This does not hide system bars. Regenerate managed Android sources with gpuiforge sync after changing it."
     },
     "management": {
       "$ref": "#/$defs/Management",

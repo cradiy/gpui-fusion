@@ -9,6 +9,7 @@ import android.view.WindowInsetsAnimation
 internal class KeyboardInsets(
     private val container: View,
     private val gpui: GpuiView,
+    private val hostInsets: Boolean,
     private val visibilityChanged: (Boolean) -> Unit,
 ) : WindowInsetsAnimation.Callback(DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
     private val animations = mutableSetOf<WindowInsetsAnimation>()
@@ -19,7 +20,7 @@ internal class KeyboardInsets(
         container.setOnApplyWindowInsetsListener { view, insets ->
             finalInsets = insets
             val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
-            view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+            if (hostInsets) view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
             visibilityChanged(insets.isVisible(WindowInsets.Type.ime()))
             if (animations.isEmpty()) apply(insets)
             insets
@@ -29,7 +30,7 @@ internal class KeyboardInsets(
     private fun apply(insets: WindowInsets) {
         val safe = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
         val keyboard = insets.getInsets(WindowInsets.Type.ime())
-        val bottom = (keyboard.bottom - container.paddingBottom).coerceAtLeast(0)
+        val bottom = if (hostInsets) (keyboard.bottom - container.paddingBottom).coerceAtLeast(0) else 0
         gpui.setWindowInsets(GpuiWindowInsets(
             safeArea = EdgeInsets(safe.left, safe.top, safe.right, safe.bottom),
             ime = EdgeInsets(keyboard.left, keyboard.top, keyboard.right, keyboard.bottom),

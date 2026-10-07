@@ -774,6 +774,24 @@ impl Counter {
 
 impl Render for Counter {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let padding = window.insets().effective();
+        let dark = matches!(
+            window.appearance(),
+            WindowAppearance::Dark | WindowAppearance::VibrantDark
+        );
+        div()
+            .size_full()
+            .bg(rgb(if dark { 0x101923 } else { 0xf4f7fb }))
+            .pt(padding.top)
+            .pr(padding.right)
+            .pb(padding.bottom)
+            .pl(padding.left)
+            .child(self.render_content(window, cx))
+    }
+}
+
+impl Counter {
+    fn render_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dark = matches!(
             window.appearance(),
             WindowAppearance::Dark | WindowAppearance::VibrantDark

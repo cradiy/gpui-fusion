@@ -143,6 +143,19 @@ fn bundled_android_generates_without_recipe_or_checkout() {
         fs::read_to_string(generated.join("app/src/main/kotlin/dev/gpuiforge/app/MainActivity.kt"))
             .unwrap();
     assert!(activity.contains("fixture_app"));
+    assert!(activity.contains("InsetHandling.APPLICATION"));
+    let mut config = config;
+    config["platforms"]["android"]["inset-handling"] = "host".into();
+    fs::write(
+        app.0.join("gpuiforge.json"),
+        serde_json::to_vec(&config).unwrap(),
+    )
+    .unwrap();
+    app.ok(&["sync", "android"]);
+    let activity =
+        fs::read_to_string(generated.join("app/src/main/kotlin/dev/gpuiforge/app/MainActivity.kt"))
+            .unwrap();
+    assert!(activity.contains("InsetHandling.HOST"));
     let host = generated.join("host/src/main/kotlin/dev/gpui/android/GpuiActivity.kt");
     fs::write(&host, "user-owned host").unwrap();
     assert!(!app.run(&["generate", "android"]).status.success());

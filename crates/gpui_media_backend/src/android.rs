@@ -160,6 +160,10 @@ fn open_session(
     let object = runtime.with_env(|env| {
         let class = runtime.load_class(env, CLASS)?;
         let uri = env.new_string(source.uri())?;
+        let mime_type = match source.mime_type() {
+            Some(mime) => jni::objects::JObject::from(env.new_string(mime)?),
+            None => jni::objects::JObject::null(),
+        };
         let mut headers = network.headers().clone();
         if let Some(agent) = network.user_agent() {
             headers.retain(|key, _| !key.eq_ignore_ascii_case("User-Agent"));
@@ -176,8 +180,9 @@ fn open_session(
             env.delete_local_ref(value)?;
         }
         let timeout = network.timeout().unwrap_or(Duration::from_secs(30)).as_millis().clamp(1, i32::MAX as u128) as i32;
-        let object = env.new_object(class, "(Landroid/content/Context;JLjava/lang/String;[Ljava/lang/String;[Ljava/lang/String;IJ)V", &[
+        let object = env.new_object(class, "(Landroid/content/Context;JLjava/lang/String;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;IJ)V", &[
             JValue::Object(runtime.context()), JValue::Long(id), JValue::Object(&uri),
+            JValue::Object(&mime_type),
             JValue::Object(&keys), JValue::Object(&values), JValue::Int(timeout),
             JValue::Long(position),
         ])?;

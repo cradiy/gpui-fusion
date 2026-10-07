@@ -13,6 +13,7 @@ pub struct MediaSource {
     uri: String,
     display_name: String,
     network: NetworkSourceOptions,
+    mime_type: Option<String>,
 }
 
 impl fmt::Debug for MediaSource {
@@ -22,6 +23,7 @@ impl fmt::Debug for MediaSource {
             .field("uri", &redacted_uri(&self.uri))
             .field("display_name", &self.display_name)
             .field("network", &self.network)
+            .field("mime_type", &self.mime_type)
             .finish()
     }
 }
@@ -276,6 +278,7 @@ impl MediaSource {
             uri,
             display_name,
             network: NetworkSourceOptions::default(),
+            mime_type: None,
         })
     }
 
@@ -310,6 +313,7 @@ impl MediaSource {
             uri,
             display_name,
             network: NetworkSourceOptions::default(),
+            mime_type: None,
         })
     }
 
@@ -353,6 +357,38 @@ impl MediaSource {
 
     pub fn network_options(&self) -> &NetworkSourceOptions {
         &self.network
+    }
+
+    /// Sets a MIME type hint, such as `application/x-mpegURL` or `application/dash+xml`.
+    /// Accepts a type/subtype without parameters. Android uses the hint to select
+    /// a source parser for extensionless URLs; other backends may use detection instead.
+    /// This does not set an HTTP header or add codec support.
+    pub fn with_mime_type(mut self, mime_type: impl AsRef<str>) -> MediaResult<Self> {
+        let mime_type = mime_type.as_ref().trim();
+        let valid_token = |token: &str| {
+            !token.is_empty()
+                && token.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric()
+                        || matches!(
+                            byte,
+                            b'!' | b'#' | b'$' | b'&' | b'^' | b'_' | b'.' | b'+' | b'-'
+                        )
+                })
+        };
+        if !mime_type
+            .split_once('/')
+            .is_some_and(|(kind, subtype)| valid_token(kind) && valid_token(subtype))
+        {
+            return Err(MediaError::invalid_input(
+                "expected a MIME type/subtype without parameters",
+            ));
+        }
+        self.mime_type = Some(mime_type.to_ascii_lowercase());
+        Ok(self)
+    }
+
+    pub fn mime_type(&self) -> Option<&str> {
+        self.mime_type.as_deref()
     }
 
     /// Redacts the source URI credentials and configured network secrets from
@@ -460,6 +496,32 @@ impl TryFrom<PathBuf> for MediaSource {
 mod tests {
     use super::{MediaSource, NetworkSourceOptions};
     use crate::MediaErrorKind;
+
+    #[test]
+    fn mime_hint_preserves_extensionless_source_and_rejects_invalid_types() {
+        let uri = "https://example.com/watch?token=123";
+        let source = MediaSource::from_uri(uri)
+            .unwrap()
+            .with_mime_type(" Application/X-MpegURL ")
+            .unwrap();
+        assert_eq!(source.uri(), uri);
+        assert_eq!(source.mime_type(), Some("application/x-mpegurl"));
+        for invalid in [
+            "",
+            "hls",
+            "video/",
+            "*/mp4",
+            "video/mp4; codecs=avc1",
+            "video/mp4\r\nX-Test: yes",
+        ] {
+            assert!(
+                MediaSource::from_uri(uri)
+                    .unwrap()
+                    .with_mime_type(invalid)
+                    .is_err()
+            );
+        }
+    }
 
     #[test]
     fn parses_remote_uri() {

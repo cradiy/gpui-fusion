@@ -20,6 +20,35 @@ finish. To reopen a document after restarting the application, persist and
 restore its access through the file API. A provider URL alone does not grant
 access. Use `MediaSource::from_path` for application-owned filesystem paths.
 
+## Network sources
+
+Pass an HTTP(S) URL to `MediaSource::from_uri`. For HLS or DASH URLs without a
+recognizable `.m3u8` or `.mpd` suffix, provide a MIME type hint:
+
+```rust
+use gpui_media::{MediaSource, NetworkSourceOptions};
+
+let source = MediaSource::from_uri("https://example.com/watch/123")?
+    .with_mime_type("application/vnd.apple.mpegurl")?
+    .with_network_options(
+        NetworkSourceOptions::default().with_header("Authorization", "Bearer token")?,
+    );
+```
+
+Use `application/dash+xml` for DASH. The hint accepts a type/subtype without
+parameters; it does not set an HTTP header. Android uses it to select the media
+parser and retains it when reloading or extracting a frame. Other backends may
+detect the content themselves; a hint does not add format or codec support.
+Use this source with the ordinary `VideoPlayer` builder. HLS/DASH variants adapt
+automatically; audio and text tracks use the shared stream-selection API.
+
+On Android, configured headers, user agent and timeouts apply to manifests and
+their segment requests. Only use credential headers with trusted playlists,
+since a playlist can reference other hosts. The GPUiForge `media` feature
+includes both protocols; network access requires `android.permission.INTERNET`.
+Desktop support depends on installed media components, and browser playback on
+native browser support; GPUI does not install a JavaScript streaming player.
+
 ## Audio focus
 
 Observe `VideoPlayerEvent::StateChanged` to keep controls synchronized with

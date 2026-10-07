@@ -9,14 +9,19 @@ native NV12 modifiers. macOS can deliver CoreVideo frames and CPU frames.
 Windows delivers CPU frames through Media Foundation and WIC. Decoder and
 container support depend on the system's installed media components.
 
-Android supports device-decodable progressive local and HTTP(S) media, audio
-track selection, embedded text subtitles, and CPU frame delivery. Frame stepping, DRM,
-adaptive-streaming extensions and HDR output are unavailable. Extraction uses
+Android supports device-decodable progressive local and HTTP(S) media, HLS/DASH
+on-demand streams, audio track selection, text subtitles, and CPU frame delivery.
+Frame stepping, DRM and HDR output are unavailable. Extraction uses
 `VideoDecoderPolicy::Auto` and `SeekMode::Accurate`; explicit decoder policies,
 other seek modes, audio-only sources and positions beyond a known video duration
 return errors. HTTP options support headers, user agent and connect/read timeout;
 other explicit options return unsupported-operation errors. Video readback and
 upload costs should be measured for high-resolution or simultaneous players.
+
+HLS/DASH use the same source, playback, seeking and stream-selection APIs as
+other media. See [network sources](playback-lifecycle.md#network-sources) for
+extensionless URLs. Live-edge controls and moving seek-window geometry are not
+exposed by the shared timeline.
 
 Android exposes embedded SubRip, WebVTT, SSA/ASS, TTML and tx3g text tracks
 supported by Media3. Bitmap subtitles are not exposed. Text is delivered as

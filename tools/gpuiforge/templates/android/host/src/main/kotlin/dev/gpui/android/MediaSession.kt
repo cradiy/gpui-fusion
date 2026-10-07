@@ -7,6 +7,7 @@ import android.os.HandlerThread
 import androidx.media3.common.C
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
@@ -26,13 +27,18 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal class MediaSession(
     context: Context,
     private val id: Long,
-    private val uri: String,
+    uri: String,
+    mimeType: String?,
     keys: Array<String>,
     values: Array<String>,
     timeout: Int,
     private val extractionPosition: Long,
 ) : AutoCloseable {
     private val application = context.applicationContext
+    private val mediaItem = MediaItem.Builder().setUri(uri).setMimeType(when (mimeType) {
+        "application/vnd.apple.mpegurl", "application/x-mpegurl", "audio/mpegurl", "audio/x-mpegurl" -> MimeTypes.APPLICATION_M3U8
+        else -> mimeType
+    }).build()
     private val thread = HandlerThread("gpui-media").apply { start() }
     private val handler = Handler(thread.looper)
     private val closed = AtomicBoolean(false)
@@ -170,7 +176,7 @@ internal class MediaSession(
                         if (rotated) format.height else width, if (rotated) width else format.height)
                 }
                 current.setVideoSurface(output.surface)
-                current.setMediaItem(MediaItem.fromUri(uri), extractionPosition.coerceAtLeast(0))
+                current.setMediaItem(mediaItem, extractionPosition.coerceAtLeast(0))
                 current.prepare()
             }
         }
@@ -220,7 +226,7 @@ internal class MediaSession(
                         current.trackSelectionParameters = current.trackSelectionParameters.buildUpon()
                             .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
                             .clearOverridesOfType(C.TRACK_TYPE_TEXT).build()
-                        current.setMediaItem(MediaItem.fromUri(uri))
+                        current.setMediaItem(mediaItem)
                         current.playWhenReady = value != 0.0
                         current.prepare()
                     }

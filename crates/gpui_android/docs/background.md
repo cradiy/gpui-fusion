@@ -105,6 +105,8 @@ pauses the player itself and does not restart after process death. Other
 platforms currently return an unsupported error from this method.
 
 This service is session-bound. Keeping playback alive after the owning Activity
-finishes requires an application-owned host lifecycle. Wake locks, audio focus
-and network policy are separate from foreground execution. See Android's
+finishes requires an application-owned host lifecycle. Configure the player's
+[wake mode](../../gpui_media_backend/docs/android.md#keep-playback-running-with-the-screen-off)
+separately for screen-off playback. Audio focus and network policy are also
+separate from foreground execution. See Android's
 [background playback guide](https://developer.android.com/media/media3/session/background-playback).

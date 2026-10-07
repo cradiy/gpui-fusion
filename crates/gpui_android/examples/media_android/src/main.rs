@@ -1,6 +1,7 @@
 use gpui::{prelude::*, *};
 use gpui_media::{
-    MediaSource, SeekMode, VideoFrameExtractor, VideoPlayer, VideoPlayerEvent, VideoSurface,
+    MediaSource, PlaybackWakeMode, SeekMode, VideoFrameExtractor, VideoPlayer, VideoPlayerEvent,
+    VideoSurface,
 };
 use std::{sync::Arc, time::Duration};
 
@@ -20,6 +21,7 @@ fn main() {
                 system_controls: false,
                 system_controls_pending: false,
                 background_task: None,
+                wake_mode: PlaybackWakeMode::None,
             });
             window.on_system_back(
                 cx,
@@ -49,6 +51,7 @@ struct MediaDemo {
     system_controls: bool,
     system_controls_pending: bool,
     background_task: Option<Task<()>>,
+    wake_mode: PlaybackWakeMode,
 }
 
 impl MediaDemo {
@@ -81,6 +84,7 @@ impl MediaDemo {
                             .expect("create media session")
                     });
                     this.system_controls = false;
+                    this.wake_mode = PlaybackWakeMode::None;
                     this.background_task = None;
                     this.subscription = Some(cx.subscribe(&player, |_, _, event, cx| {
                         if let VideoPlayerEvent::StateChanged(state) = event {
@@ -182,6 +186,20 @@ impl MediaDemo {
         });
         if let Err(error) = result {
             self.status = error.to_string();
+        }
+        cx.notify();
+    }
+
+    fn cycle_wake_mode(&mut self, cx: &mut Context<Self>) {
+        let Some(player) = &self.player else { return };
+        let mode = match self.wake_mode {
+            PlaybackWakeMode::None => PlaybackWakeMode::Local,
+            PlaybackWakeMode::Local => PlaybackWakeMode::Network,
+            PlaybackWakeMode::Network => PlaybackWakeMode::None,
+        };
+        match player.update(cx, |player, _| player.set_wake_mode(mode)) {
+            Ok(()) => self.wake_mode = mode,
+            Err(error) => self.status = error.to_string(),
         }
         cx.notify();
     }
@@ -347,6 +365,19 @@ impl Render for MediaDemo {
                             "Enable system controls"
                         })
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_system_controls(cx))),
+                )
+                .child(
+                    div()
+                        .id("wake-mode")
+                        .p_3()
+                        .rounded_lg()
+                        .bg(rgb(0x30475c))
+                        .child(match self.wake_mode {
+                            PlaybackWakeMode::None => "Wake: Off",
+                            PlaybackWakeMode::Local => "Wake: CPU",
+                            PlaybackWakeMode::Network => "Wake: CPU + Wi-Fi",
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| this.cycle_wake_mode(cx))),
                 )
                 .child(
                     div()

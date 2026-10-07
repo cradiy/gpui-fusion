@@ -152,6 +152,35 @@ requests only from the top application or an eligible foreground service.
 See [Android audio focus](https://developer.android.com/media/optimize/audio-focus).
 Audio focus alone does not provide background playback or a media notification.
 
+## Keep playback running with the screen off
+
+Declare `android.permission.WAKE_LOCK` in `gpuiforge.json` permissions and run
+`gpuiforge sync`. This is a manifest permission; it does not show a runtime dialog.
+Select the player's power mode explicitly:
+
+```rust
+use gpui_media::PlaybackWakeMode;
+
+player.update(cx, |player, _| player.set_wake_mode(PlaybackWakeMode::Local))?;
+```
+
+`None` is the default. `Local` lets Media3 hold a CPU wake lock while playback
+requires it, including for network sources. `Network` also requests a Wi-Fi lock;
+use it for low-latency Wi-Fi playback or devices that need it for Wi-Fi stability.
+It is not required merely because a source is a URL. Locks follow the player's
+state and are released on pause, end, failure or player release. Switching to
+`None` disables both locks. The display may still turn off.
+
+Missing permission returns an error without changing playback. Unsupported
+backends return an unsupported-operation error. Independent frame extraction
+does not acquire these locks.
+
+For background playback, also retain a
+[background playback lease](../../gpui_android/docs/background.md#media-playback).
+Wake locks do not replace foreground execution or restore playback after process
+termination, and do not bypass all device power-saving policies. See
+[Media3 wake modes](https://developer.android.com/reference/androidx/media3/exoplayer/ExoPlayer#setWakeMode(int)).
+
 ## Publish system media controls
 
 For a media notification together with cross-platform system controls, use

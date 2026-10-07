@@ -50,6 +50,18 @@ pub enum SystemMediaCommand {
     SeekTo(Duration),
 }
 
+/// Power resources held during active playback by supporting backends.
+/// This does not keep the display on or grant background execution.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PlaybackWakeMode {
+    #[default]
+    None,
+    /// Keep the CPU awake while playback requires it.
+    Local,
+    /// Also request a Wi-Fi lock for playback requiring it.
+    Network,
+}
+
 /// Media capabilities exposed by one opened playback session.
 ///
 /// Capabilities belong to the session rather than the factory because support
@@ -235,6 +247,13 @@ pub trait MediaPlaybackSession: Send {
     fn set_audio_focus_enabled(&mut self, _enabled: bool) -> MediaResult<()> {
         Err(MediaError::unsupported(
             "this media backend does not expose audio-focus management",
+        ))
+    }
+
+    /// Selects playback power management. Disabled by default.
+    fn set_wake_mode(&mut self, _mode: PlaybackWakeMode) -> MediaResult<()> {
+        Err(MediaError::unsupported(
+            "this media backend does not expose playback power management",
         ))
     }
 

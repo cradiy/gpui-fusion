@@ -629,6 +629,35 @@ impl MediaPlaybackSession for AndroidSession {
     fn set_audio_focus_enabled(&mut self, enabled: bool) -> MediaResult<()> {
         self.command(7, if enabled { 1. } else { 0. }, false)
     }
+    fn set_wake_mode(&mut self, mode: PlaybackWakeMode) -> MediaResult<()> {
+        let mode = match mode {
+            PlaybackWakeMode::None => 0,
+            PlaybackWakeMode::Local => 1,
+            PlaybackWakeMode::Network => 2,
+        };
+        let message = AndroidRuntime::get()
+            .map_err(error)?
+            .with_env(|env| {
+                let message = env
+                    .call_method(
+                        self.object.as_obj(),
+                        "setWakeMode",
+                        "(I)Ljava/lang/String;",
+                        &[JValue::Int(mode)],
+                    )?
+                    .l()?;
+                if message.is_null() {
+                    Ok(None)
+                } else {
+                    Ok(Some(String::from(env.get_string(&JString::from(message))?)))
+                }
+            })
+            .map_err(error)?;
+        match message {
+            Some(message) => Err(error(message)),
+            None => Ok(()),
+        }
+    }
     fn set_system_media_controls(
         &mut self,
         metadata: Option<SystemMediaMetadata>,

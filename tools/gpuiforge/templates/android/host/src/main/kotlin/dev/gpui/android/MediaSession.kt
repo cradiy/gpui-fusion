@@ -1,6 +1,7 @@
 package dev.gpui.android
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.HandlerThread
 import androidx.media3.common.C
@@ -49,6 +50,19 @@ internal class MediaSession(
         }
     }
 
+    fun setWakeMode(mode: Int): String? {
+        if (closed.get()) return "Media session closed"
+        if (extractionPosition >= 0) return "Frame extraction does not support playback wake locks"
+        if (mode != C.WAKE_MODE_NONE && mode != C.WAKE_MODE_LOCAL && mode != C.WAKE_MODE_NETWORK) {
+            return "Invalid playback wake mode"
+        }
+        if (mode != C.WAKE_MODE_NONE && application.checkSelfPermission(android.Manifest.permission.WAKE_LOCK) != PackageManager.PERMISSION_GRANTED) {
+            return "Playback wake locks require android.permission.WAKE_LOCK in gpuiforge.json permissions"
+        }
+        if (!handler.post { guarded { player?.setWakeMode(mode) } }) return "Media session closed"
+        return null
+    }
+
     init {
         handler.post {
             guarded {
@@ -73,6 +87,7 @@ internal class MediaSession(
                     renderers.forceDisableMediaCodecAsynchronousQueueing()
                 }
                 val current = ExoPlayer.Builder(application, renderers)
+                    .setWakeMode(C.WAKE_MODE_NONE)
                     .setLooper(thread.looper)
                     .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(application, http)))
                     .build()

@@ -12,9 +12,9 @@ use gpui::{DmaBufImportStatus, SurfaceFrameBacking};
 use crate::{
     FrameTransport, FrameTransportPreference, MediaBackend, MediaBackendEvent, MediaCapabilities,
     MediaInfo, MediaOutputSink, MediaPlaybackRequest, MediaPlaybackSession, MediaResult,
-    MediaSource, MediaStreamId, PlaybackState, PlaybackTimeline, SeekMode, SubtitleEvent,
-    SystemMediaCommand, SystemMediaMetadata, TransportChange, VideoFrame, VideoFrameExtractor,
-    VideoPlaybackStats,
+    MediaSource, MediaStreamId, PlaybackState, PlaybackTimeline, PlaybackWakeMode, SeekMode,
+    SubtitleEvent, SystemMediaCommand, SystemMediaMetadata, TransportChange, VideoFrame,
+    VideoFrameExtractor, VideoPlaybackStats,
 };
 
 use super::surface::VideoSurface;
@@ -701,6 +701,13 @@ impl VideoPlayer {
     /// Create with autoplay disabled to configure this before first playback.
     pub fn set_audio_focus_enabled(&mut self, enabled: bool) -> MediaResult<()> {
         self.playback.set_audio_focus_enabled(enabled)
+    }
+
+    /// Selects playback power management; disabled by default.
+    /// Android requires `WAKE_LOCK` for Local/Network and a separate foreground
+    /// execution lease for background playback. Other backends return unsupported.
+    pub fn set_wake_mode(&mut self, mode: PlaybackWakeMode) -> MediaResult<()> {
+        self.playback.set_wake_mode(mode)
     }
 
     /// Enables or updates system media controls. Pass `None` to release them.

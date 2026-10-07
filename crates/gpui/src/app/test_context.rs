@@ -1205,6 +1205,53 @@ mod tests {
     }
 
     #[gpui::test]
+    async fn file_stream_writes_in_order_and_releases_after_failure_or_cancellation(
+        cx: &mut TestAppContext,
+    ) {
+        use futures::StreamExt;
+        let path = std::env::temp_dir().join(format!("gpui-stream-{}", uuid::Uuid::new_v4()));
+        let file =
+            crate::SelectedFile::from_path(path.clone(), cx.background_executor.clone(), true);
+        std::fs::write(&path, b"previous longer contents").unwrap();
+        let check_path = path.clone();
+        file.write_stream(futures::stream::iter(0..3).map(move |index| {
+            // Polling input must not run ahead of writes, and the old file must be truncated.
+            assert_eq!(std::fs::read(&check_path).unwrap(), vec![b'x'; index]);
+            Ok(vec![b'x'])
+        }))
+        .await
+        .unwrap();
+        assert_eq!(file.read().await.unwrap(), b"xxx");
+
+        let chunks = futures::stream::iter([
+            Ok(b"partial".to_vec()),
+            Err(anyhow::anyhow!("input failed")),
+        ])
+        .chain(futures::stream::poll_fn(|_| {
+            panic!("polled after input failure")
+        }));
+        assert_eq!(
+            file.write_stream(chunks).await.unwrap_err().to_string(),
+            "input failed"
+        );
+        assert_eq!(file.read().await.unwrap(), b"partial");
+
+        let write = file.write_stream(
+            futures::stream::once(async { Ok(b"cancelled".to_vec()) })
+                .chain(futures::stream::pending()),
+        );
+        let write = cx.foreground_executor.spawn(write);
+        cx.run_until_parked();
+        assert_eq!(std::fs::read(&path).unwrap(), b"cancelled");
+        drop(write);
+        file.write(b"recovered".to_vec()).await.unwrap();
+        assert_eq!(file.read().await.unwrap(), b"recovered");
+        file.write_stream(futures::stream::empty()).await.unwrap();
+        assert!(file.read().await.unwrap().is_empty());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[gpui::test]
     async fn test_simulate_path_prompt_response(cx: &mut TestAppContext) {
         assert!(!cx.did_prompt_for_paths());
 

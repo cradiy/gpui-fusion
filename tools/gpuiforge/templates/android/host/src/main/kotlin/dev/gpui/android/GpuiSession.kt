@@ -67,6 +67,8 @@ class GpuiSession : AutoCloseable {
         }, this, SystemClock.uptimeMillis())
     }
 
+    private fun fileStore(): FileStore = FileStore(requireContext())
+
     init { checkThread() }
 
     internal fun bind(next: GpuiView) {

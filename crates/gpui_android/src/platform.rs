@@ -34,6 +34,13 @@ pub struct AndroidPlatform {
 }
 
 impl AndroidPlatform {
+    /// App-private files excluded from Android system backup.
+    pub fn no_backup_directory(
+        &self,
+    ) -> futures::future::LocalBoxFuture<'static, Result<gpui_io::LocationHandle>> {
+        let request = crate::file_system::no_backup(&self.host, crate::file::io_executor());
+        Box::pin(async move { request?.await })
+    }
     pub(crate) fn new(
         host: Arc<Host>,
         native: NativeWindow,
@@ -244,6 +251,10 @@ impl Platform for AndroidPlatform {
         options: FilePromptOptions,
     ) -> oneshot::Receiver<Result<Option<Vec<SelectedFile>>>> {
         self.files.prompt(options)
+    }
+    fn file_system(&self, app_id: &str) -> Result<gpui_io::FileSystem> {
+        gpui_io::validate_app_id(app_id)?;
+        crate::file_system::file_system(&self.host, crate::file::io_executor())
     }
     fn can_select_mixed_files_and_dirs(&self) -> bool {
         false

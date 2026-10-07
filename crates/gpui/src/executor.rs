@@ -25,6 +25,18 @@ pub struct ForegroundExecutor {
     not_send: PhantomData<Rc<()>>,
 }
 
+impl From<BackgroundExecutor> for gpui_io::IoExecutor {
+    fn from(executor: BackgroundExecutor) -> Self {
+        Self::new(move |work| {
+            executor
+                .spawn(async move {
+                    work();
+                })
+                .detach()
+        })
+    }
+}
+
 /// Extension trait for `Task<Result<T, E>>` that adds `detach_and_log_err` with an `&App` context.
 ///
 /// This trait is automatically implemented for all `Task<Result<T, E>>` types.

@@ -1502,6 +1502,11 @@ impl App {
         self.platform.prompt_for_files(options)
     }
 
+    /// Obtain file I/O with app-specific locations identified by a stable application ID.
+    pub fn file_system(&self, app_id: &str) -> Result<gpui_io::FileSystem> {
+        self.platform.file_system(app_id)
+    }
+
     /// Choose a writable file through the platform save dialog. Cancellation returns `None`.
     ///
     /// Android creates a document during selection; desktop creation happens on the first write.

@@ -185,6 +185,70 @@ fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
 }
 
 impl Counter {
+    fn save_in_location(
+        &mut self,
+        location: gpui::gpui_io::SystemLocation,
+        cx: &mut Context<Self>,
+    ) {
+        if self.file_pending {
+            return;
+        }
+        let io = match cx.file_system("dev.gpui.example") {
+            Ok(io) => io,
+            Err(error) => {
+                self.file_status = format!("Storage: {error}");
+                cx.notify();
+                return;
+            }
+        };
+        let contents = self.file_text.read(cx).value().as_bytes().to_vec();
+        self.file_pending = true;
+        self.file_status = "Writing file...".into();
+        cx.spawn(async move |this, cx| {
+            let result = async {
+                let target = io.location(location).await?;
+                let name = format!(
+                    "gpui-note-{}.txt",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)?
+                        .as_millis()
+                );
+                let file = target
+                    .create_file(
+                        name,
+                        gpui::gpui_io::CreateOptions {
+                            mime_type: Some("text/plain".into()),
+                        },
+                    )
+                    .await?;
+                let mut writer = file
+                    .open_write(gpui::gpui_io::WriteOptions::truncate())
+                    .await?;
+                for chunk in contents.chunks(4096) {
+                    writer.write_all(chunk).await?;
+                }
+                writer.close().await?;
+                anyhow::ensure!(file.read().await? == contents, "file read-back differs");
+                Ok::<_, anyhow::Error>(file)
+            }
+            .await;
+            let _ = this.update(cx, |this, cx| {
+                this.file_pending = false;
+                this.file_status = match result {
+                    Ok(file) => {
+                        let status = format!("Saved to {location:?}: {}", file.name());
+                        this.document = Some(file);
+                        status
+                    }
+                    Err(error) => format!("Storage: {error}"),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
     fn choose_files(&mut self, multiple: bool, cx: &mut Context<Self>) {
         if self.file_pending {
             return;
@@ -581,6 +645,24 @@ impl Render for Counter {
                             ))
                             .child(button("save-document", "Save").on_click(
                                 cx.listener(|this, _, _, cx| this.save_document(false, cx)),
+                            ))
+                            .child(
+                                button("save-app-data", "Save app data").on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.save_in_location(
+                                            gpui::gpui_io::SystemLocation::AppData,
+                                            cx,
+                                        )
+                                    },
+                                )),
+                            )
+                            .child(button("save-downloads", "Save to Downloads").on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    this.save_in_location(
+                                        gpui::gpui_io::SystemLocation::Downloads,
+                                        cx,
+                                    )
+                                }),
                             )),
                     )
                     .child(

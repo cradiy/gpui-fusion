@@ -85,6 +85,20 @@ pub(crate) struct Host {
     object: GlobalRef,
 }
 impl Host {
+    pub fn file_store(&self) -> Result<(Arc<JavaVM>, GlobalRef)> {
+        self.with_env(|env| {
+            let store = env
+                .call_method(
+                    self.object.as_obj(),
+                    "fileStore",
+                    "()Ldev/gpui/android/FileStore;",
+                    &[],
+                )?
+                .l()?;
+            Ok((self.vm.clone(), env.new_global_ref(store)?))
+        })
+    }
+
     pub fn request_files(&self, token: u64, multiple: bool, writable: bool) -> Result<()> {
         self.with_env(|env| {
             env.call_method(

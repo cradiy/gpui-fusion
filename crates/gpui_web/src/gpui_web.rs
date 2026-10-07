@@ -4,6 +4,7 @@ mod clipboard;
 mod dispatcher;
 mod display;
 mod events;
+mod file;
 mod file_dialog;
 mod http_client;
 mod keyboard;

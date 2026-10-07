@@ -1,12 +1,8 @@
 package dev.gpui.android
 
 import android.app.Activity
-import android.content.ContentResolver
 import android.content.Intent
 import android.net.Uri
-import android.provider.OpenableColumns
-import java.io.FileNotFoundException
-import java.io.OutputStream
 import java.lang.ref.WeakReference
 
 internal class FilePickerHost(private val deliver: (Long, Array<SelectedDocument>?, String?) -> Unit) {
@@ -91,24 +87,4 @@ internal class FilePickerHost(private val deliver: (Long, Array<SelectedDocument
     }
 
     companion object { private var nextCode = 0x8000 }
-}
-
-/** Owns no Activity. Metadata and descriptor access run on Rust background workers. */
-internal class SelectedDocument(private val resolver: ContentResolver, private val uri: Uri, private val writable: Boolean) {
-    fun canWrite(): Boolean = writable
-    fun displayName(): String {
-        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst() && !cursor.isNull(0)) return cursor.getString(0)
-        }
-        return uri.lastPathSegment ?: "document"
-    }
-
-    fun openRead(): Int = (resolver.openFileDescriptor(uri, "r")
-        ?: throw FileNotFoundException("Document provider returned no descriptor")).use { it.detachFd() }
-
-    fun openWrite(): OutputStream {
-        check(writable) { "File handle is read-only" }
-        return resolver.openOutputStream(uri, "wt")
-            ?: throw FileNotFoundException("Document provider returned no output stream")
-    }
 }

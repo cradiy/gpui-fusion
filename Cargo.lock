@@ -2550,6 +2550,7 @@ dependencies = [
  "getrandom 0.3.4",
  "gif",
  "gpui-scap",
+ "gpui_io",
  "gpui_macros",
  "gpui_platform",
  "gpui_shared_string",
@@ -2738,6 +2739,17 @@ version = "0.1.0"
 dependencies = [
  "gpui",
  "gpui_platform",
+]
+
+[[package]]
+name = "gpui_io"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "futures",
+ "log",
+ "tempfile",
 ]
 
 [[package]]

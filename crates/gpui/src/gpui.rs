@@ -123,6 +123,8 @@ pub use fluid::*;
 pub use geometry::*;
 pub use gestures::*;
 pub use global::*;
+pub use gpui_io;
+pub use gpui_io::{FileHandle, FileHandle as SelectedFile, FileWriteStream, PlatformFile};
 pub use gpui_macros::{
     AppContext, IntoElement, Render, VisualContext, bench, property_test, register_action, test,
 };

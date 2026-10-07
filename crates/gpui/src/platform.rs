@@ -132,6 +132,10 @@ pub fn guess_compositor() -> &'static str {
 #[expect(missing_docs)]
 pub trait Platform: 'static {
     fn background_executor(&self) -> BackgroundExecutor;
+    /// Platform file I/O and location discovery, independently of file dialogs.
+    fn file_system(&self, app_id: &str) -> Result<gpui_io::FileSystem> {
+        gpui_io::FileSystem::desktop(app_id, self.background_executor())
+    }
     fn foreground_executor(&self) -> ForegroundExecutor;
     fn text_system(&self) -> Arc<dyn PlatformTextSystem>;
 

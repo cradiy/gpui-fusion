@@ -375,18 +375,17 @@ handle and call `write()` again to save subsequent edits to that document.
 The `directory` option is a desktop hint and is ignored on Android.
 
 Read-only selections reject writes. Writable selection fails if the provider
-does not grant write access; `can_write()` reports the handle's permitted access,
-not whether a future provider operation will succeed. Writes replace and truncate
-the complete contents, including when saving an empty buffer. Opening, writing,
-flushing, and closing run on background workers, with bounded JNI transfer chunks.
-Operations through the same handle or its clones are serialized. Await each write
-before starting the next to preserve save order.
+does not grant write access; `can_write()` reports permitted access, not whether
+a later provider operation will succeed. `SelectedFile` is the GPUI name for
+`gpui_io::FileHandle`. It supports metadata, independent reader sessions, writer
+sessions, and incremental `write_stream()`. One writer can be open per document
+handle; await completion before opening another.
 
-Writes are not atomic. An error may leave a partial file, and a newly created
-document is not automatically deleted on failure. Success means the provider's
-output stream completed and closed, not that remote storage has finished syncing.
-Save data before dropping the handle; URI grants are not persisted for reopening
-documents after a restart. Browser writable handles are not supported.
+Writes replace and truncate contents. An error can leave an ordinary picker
+document partially written; provider completion does not imply cloud synchronization.
+Use `App::file_system(app_id)` for app-private storage and supported public
+collections. See [file I/O](../../gpui_io/docs/file_io.md) for location mappings,
+streaming, cancellation, and publication of new collection items.
 
 Only one file selection can be pending per session. Dropping its receiver discards
 the result without dismissing the system picker. Closing the session completes

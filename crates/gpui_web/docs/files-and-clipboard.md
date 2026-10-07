@@ -4,11 +4,13 @@ Call `cx.prompt_for_files(FilePromptOptions { multiple: true, ..Default::default
 handler. Await the returned receiver: cancellation yields `Ok(None)`, and a
 selection yields `Ok(Some(files))`. The same API works on desktop and Web.
 
-Each `SelectedFile` exposes its name and asynchronous `read()` method. Desktop
-files also expose `path()`; browser files expose `url()`. Contents are read only
+Each `SelectedFile` (`gpui_io::FileHandle`) exposes its name, metadata and asynchronous
+`read()` method. Desktop files also expose `path()`; browser files expose `url()`. Contents are read only
 when requested. Retain the file handle while using its URL for images or media.
-Dropping the final handle releases the URL. `prompt_for_paths` and save-path
-prompts remain native-only: browsers do not expose filesystem paths.
+`open_read()` provides incremental Blob-slice reads; open readers also retain the
+resource and URL. Dropping the final handle and reader releases the URL.
+`prompt_for_paths` and save-path prompts remain native-only: browsers do not expose
+filesystem paths.
 Writable selections, `prompt_for_file_save`, and handle writes return an unsupported
 or read-only error in browsers.
 

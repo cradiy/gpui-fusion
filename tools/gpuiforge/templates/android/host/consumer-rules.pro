@@ -1,3 +1,5 @@
 -keep class dev.gpui.android.GpuiSession { *; }
 -keep class dev.gpui.android.TextInputState { *; }
 -keep class dev.gpui.android.SelectedDocument { *; }
+-keep class dev.gpui.android.DocumentOutput { *; }
+-keep class dev.gpui.android.FileStore { *; }

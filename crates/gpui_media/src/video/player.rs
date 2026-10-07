@@ -13,7 +13,8 @@ use crate::{
     FrameTransport, FrameTransportPreference, MediaBackend, MediaBackendEvent, MediaCapabilities,
     MediaInfo, MediaOutputSink, MediaPlaybackRequest, MediaPlaybackSession, MediaResult,
     MediaSource, MediaStreamId, PlaybackState, PlaybackTimeline, SeekMode, SubtitleEvent,
-    TransportChange, VideoFrame, VideoFrameExtractor, VideoPlaybackStats,
+    SystemMediaCommand, SystemMediaMetadata, TransportChange, VideoFrame, VideoFrameExtractor,
+    VideoPlaybackStats,
 };
 
 use super::surface::VideoSurface;
@@ -223,6 +224,22 @@ impl VideoPlayer {
                     break;
                 };
                 this.update(cx, |player, cx| match event {
+                    MediaBackendEvent::SystemCommand(command) => {
+                        let result = match command {
+                            SystemMediaCommand::Play => player.play(cx),
+                            SystemMediaCommand::Pause => player.pause(cx),
+                            SystemMediaCommand::Stop if player.timeline.is_seekable() => {
+                                player.stop(cx)
+                            }
+                            SystemMediaCommand::Stop => player.pause(cx),
+                            SystemMediaCommand::SeekTo(position) => {
+                                player.seek_to(position, SeekMode::Accurate, cx)
+                            }
+                        };
+                        if let Err(error) = result {
+                            player.set_state(PlaybackState::Error(Arc::new(error)), cx);
+                        }
+                    }
                     MediaBackendEvent::Ready => {
                         player.finish_pending_transition(cx);
                         player.refresh_timeline(cx);
@@ -656,6 +673,15 @@ impl VideoPlayer {
         self.playback.set_audio_focus_enabled(enabled)
     }
 
+    /// Enables or updates system media controls. Pass `None` to release them.
+    /// Commands follow the same playback and seek paths as application controls.
+    pub fn set_system_media_controls(
+        &mut self,
+        metadata: Option<SystemMediaMetadata>,
+    ) -> MediaResult<()> {
+        self.playback.set_system_media_controls(metadata)
+    }
+
     pub fn toggle_muted(&mut self, cx: &mut Context<Self>) {
         self.set_muted(!self.muted, cx);
     }
@@ -939,6 +965,33 @@ mod tests {
             PlaybackState::Paused
         );
         assert_eq!(*backend.commands.lock().unwrap(), ["play", "pause", "seek"]);
+
+        send(
+            vec![MediaBackendEvent::SystemCommand(SystemMediaCommand::Play)],
+            cx,
+        );
+        send(
+            vec![MediaBackendEvent::SystemCommand(SystemMediaCommand::Pause)],
+            cx,
+        );
+        send(
+            vec![MediaBackendEvent::SystemCommand(
+                SystemMediaCommand::SeekTo(Duration::from_secs(1)),
+            )],
+            cx,
+        );
+        assert_eq!(
+            player.read_with(cx, |p, _| p.state().clone()),
+            PlaybackState::Seeking
+        );
+        assert_eq!(
+            player.read_with(cx, |p, _| p.timeline().position()),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            *backend.commands.lock().unwrap(),
+            ["play", "pause", "seek", "play", "pause", "seek"]
+        );
     }
 
     #[test]

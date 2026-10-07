@@ -25,10 +25,29 @@ pub enum MediaBackendEvent {
     /// Authoritative state from a backend that manages buffering and system
     /// interruptions. Emit after `Buffering` and `Ready` for the same update.
     PlaybackStateChanged(PlaybackState),
+    /// A system controller command to execute through the consumer's playback API.
+    SystemCommand(SystemMediaCommand),
     MediaInfoChanged(Arc<MediaInfo>),
     Subtitle(SubtitleEvent),
     Ended,
     Error(Arc<MediaError>),
+}
+
+/// User-visible metadata for an opt-in system media session.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SystemMediaMetadata {
+    pub title: String,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+}
+
+/// Transport operations received from system media controls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SystemMediaCommand {
+    Play,
+    Pause,
+    Stop,
+    SeekTo(Duration),
 }
 
 /// Media capabilities exposed by one opened playback session.
@@ -216,6 +235,17 @@ pub trait MediaPlaybackSession: Send {
     fn set_audio_focus_enabled(&mut self, _enabled: bool) -> MediaResult<()> {
         Err(MediaError::unsupported(
             "this media backend does not expose audio-focus management",
+        ))
+    }
+
+    /// Enables or updates system media controls; `None` releases them.
+    /// This does not start a background service or publish a notification.
+    fn set_system_media_controls(
+        &mut self,
+        _metadata: Option<SystemMediaMetadata>,
+    ) -> MediaResult<()> {
+        Err(MediaError::unsupported(
+            "this media backend does not expose system media controls",
         ))
     }
 

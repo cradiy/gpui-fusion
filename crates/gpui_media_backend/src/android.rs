@@ -54,6 +54,11 @@ pub(super) fn initialize() -> MediaResult<()> {
                             "(JJILjava/lang/String;)V",
                             failed as *mut c_void,
                         ),
+                        method(
+                            "nativeSystemCommand",
+                            "(JIJ)V",
+                            system_command as *mut c_void,
+                        ),
                     ],
                 )?;
                 Ok(())
@@ -297,6 +302,31 @@ fn with_state(id: i64, generation: i64, operation: impl FnOnce(&mut State)) {
             if state.generation == generation {
                 operation(&mut state);
             }
+        }
+    }
+}
+
+extern "system" fn system_command(
+    _: JNIEnv,
+    _: JClass,
+    id: jlong,
+    operation: jint,
+    position: jlong,
+) {
+    let command = match operation {
+        0 => SystemMediaCommand::Play,
+        1 => SystemMediaCommand::Pause,
+        2 => SystemMediaCommand::Stop,
+        3 if position >= 0 => SystemMediaCommand::SeekTo(Duration::from_millis(position as u64)),
+        _ => return,
+    };
+    let state = sessions()
+        .lock()
+        .ok()
+        .and_then(|sessions| sessions.get(&id).and_then(Weak::upgrade));
+    if let Some(state) = state {
+        if let Ok(mut state) = state.lock() {
+            state.emit(MediaBackendEvent::SystemCommand(command));
         }
     }
 }
@@ -598,6 +628,42 @@ impl MediaPlaybackSession for AndroidSession {
     }
     fn set_audio_focus_enabled(&mut self, enabled: bool) -> MediaResult<()> {
         self.command(7, if enabled { 1. } else { 0. }, false)
+    }
+    fn set_system_media_controls(
+        &mut self,
+        metadata: Option<SystemMediaMetadata>,
+    ) -> MediaResult<()> {
+        AndroidRuntime::get()
+            .map_err(error)?
+            .with_env(|env| {
+                let title = metadata
+                    .as_ref()
+                    .map(|m| env.new_string(&m.title))
+                    .transpose()?;
+                let artist = metadata
+                    .as_ref()
+                    .and_then(|m| m.artist.as_ref())
+                    .map(|s| env.new_string(s))
+                    .transpose()?;
+                let album = metadata
+                    .as_ref()
+                    .and_then(|m| m.album.as_ref())
+                    .map(|s| env.new_string(s))
+                    .transpose()?;
+                let null = jni::objects::JObject::null();
+                env.call_method(
+                    self.object.as_obj(),
+                    "setSystemControls",
+                    "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+                    &[
+                        JValue::Object(title.as_ref().map_or(&null, |s| s.as_ref())),
+                        JValue::Object(artist.as_ref().map_or(&null, |s| s.as_ref())),
+                        JValue::Object(album.as_ref().map_or(&null, |s| s.as_ref())),
+                    ],
+                )?;
+                Ok(())
+            })
+            .map_err(error)
     }
     fn media_info(&self) -> Option<Arc<MediaInfo>> {
         self.state.lock().ok().and_then(|s| s.info.clone())

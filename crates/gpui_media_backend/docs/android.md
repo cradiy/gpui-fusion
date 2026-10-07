@@ -146,6 +146,47 @@ requests only from the top application or an eligible foreground service.
 See [Android audio focus](https://developer.android.com/media/optimize/audio-focus).
 Audio focus alone does not provide background playback or a media notification.
 
+## Publish system media controls
+
+Choose the player that should receive system media buttons and publish its
+display metadata:
+
+```rust
+use gpui_media::SystemMediaMetadata;
+
+player.update(cx, |player, _| {
+    player.set_system_media_controls(Some(SystemMediaMetadata {
+        title: "Example track".into(),
+        artist: Some("Example artist".into()),
+        album: None,
+    }))
+})?;
+```
+
+Calling the method again updates the metadata. Duration, position, playback
+speed, buffering, and audio-focus pauses follow the active player. System play,
+pause, stop, and seek requests use the same GPUI control paths as your own UI.
+Stop returns seekable media to the beginning; non-seekable media is paused.
+Seeking is advertised only when the source supports it.
+
+Release the controls before assigning another player, or when the player no
+longer represents the application's active media:
+
+```rust
+player.update(cx, |player, _| player.set_system_media_controls(None))?;
+```
+
+Controls are disabled by default and released when the player is dropped.
+Activity recreation retains them with the player. Frame extraction does not
+register a session. Unsupported backends return an unsupported-operation error.
+Do not register separate sessions for incidental previews.
+
+This API publishes an Android media session, not a notification or foreground
+service. It does not keep the application alive in the background, provide a
+persistent playback queue, or restart playback after process death. A host
+integration must supply notification and service ownership for those uses.
+See [Android media sessions](https://developer.android.com/reference/android/media/session/MediaSession).
+
 ## Supported media
 
 Use local or HTTP(S) progressive media supported by Media3 and the device's

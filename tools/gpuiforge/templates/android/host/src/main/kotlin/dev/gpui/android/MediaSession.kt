@@ -29,11 +29,13 @@ internal class MediaSession(
     timeout: Int,
     private val extractionPosition: Long,
 ) : AutoCloseable {
+    private val application = context.applicationContext
     private val thread = HandlerThread("gpui-media").apply { start() }
     private val handler = Handler(thread.looper)
     private val closed = AtomicBoolean(false)
     private var player: ExoPlayer? = null
     private var frames: MediaFrames? = null
+    private var systemControls: SystemMediaControls? = null
     @Volatile private var generation = 0L
     private var failed = false
     private val tick = object : Runnable {
@@ -48,7 +50,6 @@ internal class MediaSession(
     }
 
     init {
-        val application = context.applicationContext
         handler.post {
             guarded {
                 val output = MediaFrames(handler) { pixels, width, height, pts, revision ->
@@ -168,12 +169,31 @@ internal class MediaSession(
 
     private fun reportState() {
         val current = player ?: return
+        systemControls?.update(current)
         nativeState(id, generation, current.currentPosition,
             current.duration.takeUnless { it == C.TIME_UNSET } ?: -1L,
             current.isCurrentMediaItemSeekable, current.playbackState,
             frames?.width ?: 0, frames?.height ?: 0,
             current.currentTracks.isTypeSelected(C.TRACK_TYPE_AUDIO),
             current.playWhenReady, current.playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE)
+    }
+
+    fun setSystemControls(title: String?, artist: String?, album: String?) {
+        if (closed.get()) return
+        handler.post {
+            guarded {
+                if (title == null) {
+                    systemControls?.close()
+                    systemControls = null
+                } else if (extractionPosition < 0) {
+                    val controls = systemControls ?: SystemMediaControls(application, handler, id) { operation, position ->
+                        if (!closed.get() && !failed) nativeSystemCommand(id, operation, position)
+                    }.also { systemControls = it }
+                    controls.setMetadata(title, artist, album)
+                    player?.let(controls::update)
+                }
+            }
+        }
     }
 
     private fun guarded(block: () -> Unit) {
@@ -188,6 +208,7 @@ internal class MediaSession(
         failed = true
         handler.removeCallbacks(tick)
         runCatching { player?.pause() }
+        runCatching { systemControls?.setError(message) }
         nativeError(id, generation, code, message)
     }
 
@@ -195,6 +216,9 @@ internal class MediaSession(
         if (!closed.compareAndSet(false, true)) return
         handler.post {
             handler.removeCallbacksAndMessages(null)
+            runCatching { systemControls?.close() }
+                .onFailure { android.util.Log.w("GPUI", "System media controls release failed", it) }
+            systemControls = null
             runCatching { player?.release() }
                 .onFailure { android.util.Log.w("GPUI", "Media player release failed", it) }
             player = null
@@ -214,4 +238,5 @@ internal class MediaSession(
         playWhenReady: Boolean, suppressed: Boolean)
     private external fun nativeFrame(id: Long, generation: Long, pixels: ByteBuffer, width: Int, height: Int, timestamp: Long)
     private external fun nativeError(id: Long, generation: Long, code: Int, message: String)
+    private external fun nativeSystemCommand(id: Long, operation: Int, position: Long)
 }

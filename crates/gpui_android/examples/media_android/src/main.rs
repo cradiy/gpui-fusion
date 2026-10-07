@@ -17,6 +17,7 @@ fn main() {
                 thumbnail: VideoSurface::new(),
                 thumbnail_position: Duration::ZERO,
                 thumbnail_request: 0,
+                system_controls: false,
             });
             window.on_system_back(
                 cx,
@@ -43,6 +44,7 @@ struct MediaDemo {
     thumbnail: VideoSurface,
     thumbnail_position: Duration,
     thumbnail_request: u64,
+    system_controls: bool,
 }
 
 impl MediaDemo {
@@ -74,6 +76,16 @@ impl MediaDemo {
                             .build(cx)
                             .expect("create media session")
                     });
+                    if this.system_controls {
+                        player.update(cx, |player, _| {
+                            player.set_system_media_controls(Some(
+                                gpui_media::SystemMediaMetadata {
+                                    title: file.name().to_owned(),
+                                    ..Default::default()
+                                },
+                            ))
+                        })?;
+                    }
                     this.subscription = Some(cx.subscribe(&player, |_, _, event, cx| {
                         if let VideoPlayerEvent::StateChanged(state) = event {
                             log_state(state);
@@ -175,6 +187,26 @@ impl MediaDemo {
         }
         cx.notify();
     }
+
+    fn toggle_system_controls(&mut self, cx: &mut Context<Self>) {
+        let Some(player) = &self.player else {
+            return;
+        };
+        let enabled = !self.system_controls;
+        let metadata = enabled.then(|| gpui_media::SystemMediaMetadata {
+            title: self
+                .file
+                .as_ref()
+                .map_or("Media", |file| file.name())
+                .to_owned(),
+            ..Default::default()
+        });
+        match player.update(cx, |player, _| player.set_system_media_controls(metadata)) {
+            Ok(()) => self.system_controls = enabled,
+            Err(error) => self.status = error.to_string(),
+        }
+        cx.notify();
+    }
 }
 
 fn log_state(state: &gpui_media::PlaybackState) {
@@ -225,6 +257,19 @@ impl Render for MediaDemo {
         if let Some(player) = &self.player {
             let timeline = player.read(cx).timeline();
             column = column
+                .child(
+                    div()
+                        .id("system-controls")
+                        .p_3()
+                        .rounded_lg()
+                        .bg(rgb(0x30475c))
+                        .child(if self.system_controls {
+                            "Disable system controls"
+                        } else {
+                            "Enable system controls"
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_system_controls(cx))),
+                )
                 .child(
                     div()
                         .h(px(240.))

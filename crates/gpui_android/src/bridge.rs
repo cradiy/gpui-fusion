@@ -253,6 +253,27 @@ impl Host {
         })
     }
 
+    pub fn perform_haptic_feedback(&self, feedback: gpui::HapticFeedback) -> Result<bool> {
+        let kind = match feedback {
+            gpui::HapticFeedback::Selection => 0,
+            gpui::HapticFeedback::Confirm => 1,
+            gpui::HapticFeedback::Reject => 2,
+            gpui::HapticFeedback::LongPress => 3,
+            gpui::HapticFeedback::GestureStart => 4,
+            gpui::HapticFeedback::GestureEnd => 5,
+        };
+        self.with_env(|env| {
+            Ok(env
+                .call_method(
+                    self.object.as_obj(),
+                    "performHaptic",
+                    "(I)Z",
+                    &[JValue::Int(kind)],
+                )?
+                .z()?)
+        })
+    }
+
     pub fn set_back_enabled(&self, enabled: bool) -> Result<()> {
         self.with_env(|env| {
             env.call_method(

@@ -551,6 +551,18 @@ impl PlatformWindow for AndroidWindowHandle {
     }
     fn update_ime_position(&self, _: Bounds<Pixels>) {}
 
+    fn perform_haptic_feedback(&self, feedback: HapticFeedback) -> bool {
+        if !self.active.get() || self.native.borrow().is_none() {
+            return false;
+        }
+        self.host
+            .perform_haptic_feedback(feedback)
+            .unwrap_or_else(|error| {
+                log::error!("Unable to perform Android haptic feedback: {error:#}");
+                false
+            })
+    }
+
     fn show_soft_keyboard(&self) {
         if let Err(error) = self.host.set_keyboard_visible(true) {
             log::error!("Unable to show Android keyboard: {error:#}");

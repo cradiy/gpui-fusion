@@ -83,6 +83,7 @@ fn main() {
                 zoom: 1.,
                 pinch_phase: TouchPhase::Ended,
                 long_presses: 0,
+                haptic_status: "Try feedback on a physical device.".into(),
                 scroll: ScrollHandle::new(),
                 clipboard_status: "Copy the counter or paste text from another app.".into(),
                 file_status: "Choose a file to read its contents.".into(),
@@ -204,6 +205,7 @@ struct Counter {
     zoom: f32,
     pinch_phase: TouchPhase,
     long_presses: usize,
+    haptic_status: String,
     scroll: ScrollHandle,
     clipboard_status: String,
     file_status: String,
@@ -840,6 +842,56 @@ impl Render for Counter {
                             .size(px(36. * self.zoom))
                             .rounded_full()
                             .bg(rgb(0x5e96e8)),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .p_5()
+                    .rounded_xl()
+                    .bg(rgb(surface))
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(div().text_xl().child("Touch feedback"))
+                    .child(
+                        div().flex().flex_wrap().gap_3().children(
+                            [
+                                (
+                                    "haptic-selection",
+                                    "Selection",
+                                    gpui::HapticFeedback::Selection,
+                                ),
+                                ("haptic-confirm", "Confirm", gpui::HapticFeedback::Confirm),
+                                ("haptic-reject", "Reject", gpui::HapticFeedback::Reject),
+                                ("haptic-hold", "Long press", gpui::HapticFeedback::LongPress),
+                                ("haptic-start", "Start", gpui::HapticFeedback::GestureStart),
+                                ("haptic-end", "End", gpui::HapticFeedback::GestureEnd),
+                            ]
+                            .into_iter()
+                            .map(|(id, label, feedback)| {
+                                button(id, label).on_click(cx.listener(
+                                    move |this, _, window, cx| {
+                                        let accepted = window.perform_haptic_feedback(feedback);
+                                        this.haptic_status = format!(
+                                            "{feedback:?}: {}",
+                                            if accepted {
+                                                "accepted by system"
+                                            } else {
+                                                "unavailable or disabled"
+                                            }
+                                        );
+                                        cx.notify();
+                                    },
+                                ))
+                            }),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .whitespace_normal()
+                            .child(self.haptic_status.clone()),
                     ),
             )
             .when(cx.global::<SharedContent>().count > 0, |page| {

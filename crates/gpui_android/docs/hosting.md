@@ -616,6 +616,22 @@ For predictive previews, forward `OnBackAnimationCallback` through
 and `cancelBackGesture()` on the main thread. Commit through `handleSystemBack()`
 and cancel any unfinished preview before unregistering the host callback.
 
+## Touch feedback
+
+Call `window.perform_haptic_feedback(HapticFeedback::Selection)` from an
+interaction handler to request system feedback. The available intents are
+`Selection`, `Confirm`, `Reject`, `LongPress`, `GestureStart`, and `GestureEnd`.
+Android selects the waveform through AndroidX's compatible View feedback API;
+availability and feel depend on the device and OS version.
+
+Requests require an active, focused View with a live Surface and honor the
+system and View feedback settings. They need no `VIBRATE` permission. `false`
+means the request was unavailable or declined; `true` means it was accepted,
+not that physical vibration was verified. Other current backends return false.
+GPUI does not queue feedback for later activation or attach it to ordinary
+buttons automatically. Accepted long presses already request their native
+feedback, so handlers should not request a second pulse for the same action.
+
 ## Clipboard and links
 
 The standard GPUI clipboard APIs read and write plain text through the Android

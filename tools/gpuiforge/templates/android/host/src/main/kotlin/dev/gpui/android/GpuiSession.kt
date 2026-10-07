@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.Surface
+import androidx.core.view.HapticFeedbackConstantsCompat
 import java.lang.ref.WeakReference
 import java.util.function.Consumer
 import java.util.concurrent.atomic.AtomicBoolean
@@ -373,6 +374,21 @@ class GpuiSession : AutoCloseable {
                 target.requestSoftKeyboard(visible)
             }
         }, this, SystemClock.uptimeMillis())
+    }
+
+    private fun performHaptic(kind: Int): Boolean {
+        checkThread()
+        if (!active()) return false
+        val feedback = when (kind) {
+            0 -> HapticFeedbackConstantsCompat.SEGMENT_TICK
+            1 -> HapticFeedbackConstantsCompat.CONFIRM
+            2 -> HapticFeedbackConstantsCompat.REJECT
+            3 -> HapticFeedbackConstantsCompat.LONG_PRESS
+            4 -> HapticFeedbackConstantsCompat.GESTURE_START
+            5 -> HapticFeedbackConstantsCompat.GESTURE_END
+            else -> return false
+        }
+        return view.get()?.systemHapticFeedback(feedback) ?: false
     }
 
     private fun setCursor(type: Int) {

@@ -7,6 +7,7 @@ import android.os.Build
 import android.util.SparseArray
 import android.view.Choreographer
 import android.view.HapticFeedbackConstants
+import androidx.core.view.ViewCompat
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -58,7 +59,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
                     tapCandidate = false
                     scroll.block()
                     pinch.cancel()
-                    performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    systemHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 }
             } catch (error: RuntimeException) {
                 textMenu.close()
@@ -344,6 +345,11 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     }
 
     internal fun inputManager(): InputMethodManager = context.getSystemService(InputMethodManager::class.java)
+
+    internal fun systemHapticFeedback(feedback: Int): Boolean {
+        if (!surfaceReady || !session.active() || !isAttachedToWindow || !hasWindowFocus() || !isShown) return false
+        return ViewCompat.performHapticFeedback(this, feedback)
+    }
     internal fun inputFailure(error: RuntimeException) { session.fail(error) }
 
     internal fun inputIndex(epoch: Long, x: Float, y: Float): Int {

@@ -818,6 +818,24 @@ pub enum AppLifecyclePhase {
     Foreground,
 }
 
+/// Semantic touch feedback requested from the operating system.
+/// The platform chooses the waveform and respects the user's feedback settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum HapticFeedback {
+    /// Moving between discrete choices, such as picker values.
+    Selection,
+    /// Successfully completing an interaction.
+    Confirm,
+    /// Rejecting an interaction.
+    Reject,
+    /// Recognizing a long press.
+    LongPress,
+    /// Beginning a continuous interaction, such as dragging.
+    GestureStart,
+    /// Finishing a continuous interaction.
+    GestureEnd,
+}
+
 /// System occlusion and host avoidance, in logical pixels from the host window edges.
 /// Use [`Self::effective`] for additional padding inside GPUI's current viewport.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1106,6 +1124,12 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn text_input_state_changed(&self, _change: TextInputStateChange) {}
 
     fn play_system_bell(&self) {}
+
+    /// Requests semantic haptic feedback. Returns false when unsupported or declined.
+    /// A true result is not proof that the device physically vibrated.
+    fn perform_haptic_feedback(&self, _feedback: HapticFeedback) -> bool {
+        false
+    }
 
     /// Initialize the accessibility adapter with callbacks.
     fn a11y_init(&self, _callbacks: A11yCallbacks) {}

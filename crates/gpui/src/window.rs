@@ -2948,6 +2948,13 @@ impl Window {
         self.platform_window.play_system_bell()
     }
 
+    /// Requests system touch feedback for a user interaction. Call from an event
+    /// handler, not while rendering. Unsupported platforms and declined requests
+    /// return false; true only means the platform accepted the request.
+    pub fn perform_haptic_feedback(&self, feedback: crate::HapticFeedback) -> bool {
+        self.platform_window.perform_haptic_feedback(feedback)
+    }
+
     /// Returns whether accessibility features are active for this frame,
     /// i.e. whether assistive technology (such as a screen reader) is
     /// connected and an accessibility tree is being built.

@@ -2,8 +2,7 @@
 
 An independent command-line tool for generating, building and running GPUI
 applications. Projects use `gpuiforge.toml`; Android templates and build support
-are bundled in the executable. GPUiForge has its own Cargo workspace and
-lockfile and does not depend on GPUI crates.
+are bundled in the executable.
 
 Install from the repository root:
 

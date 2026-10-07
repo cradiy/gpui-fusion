@@ -1,7 +1,7 @@
 use crate::{FileReader, FileWriter, IoExecutor, unsupported};
 use anyhow::Result;
 use futures::{Stream, StreamExt, future::LocalBoxFuture, stream::BoxStream};
-use std::{fmt::Debug, path::Path, sync::Arc, time::SystemTime};
+use std::{any::Any, fmt::Debug, path::Path, sync::Arc, time::SystemTime};
 
 /// Serializable, provider-specific file reference. It is not a portable access token.
 #[derive(Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -71,7 +71,7 @@ impl WriteOptions {
 }
 
 /// Platform resource behind a file handle. Sessions own their resources independently.
-pub trait PlatformFile: Debug + Send + Sync {
+pub trait PlatformFile: Any + Debug + Send + Sync {
     fn persist(&self) -> LocalBoxFuture<'static, Result<FileBookmark>> {
         Box::pin(async {
             Err(unsupported(
@@ -109,6 +109,10 @@ impl FileHandle {
     }
     pub fn new(file: Arc<dyn PlatformFile>) -> Self {
         Self(file)
+    }
+    /// Access the provider for platform integration without exposing its resource identifier.
+    pub fn downcast_ref<T: PlatformFile>(&self) -> Option<&T> {
+        (self.0.as_ref() as &dyn Any).downcast_ref()
     }
     pub fn name(&self) -> &str {
         self.0.name()

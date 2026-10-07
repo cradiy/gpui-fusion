@@ -196,6 +196,33 @@ fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
 }
 
 impl Counter {
+    fn open_document_with_system(&mut self, cx: &mut Context<Self>) {
+        if self.file_pending {
+            return;
+        }
+        let Some(document) = self.document.as_ref() else {
+            self.file_status = "Open or save a document first.".into();
+            cx.notify();
+            return;
+        };
+        let request = cx.open_file_with_system(document);
+        self.file_pending = true;
+        self.file_status = "Opening file...".into();
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = request.await;
+            let _ = this.update(cx, |this, cx| {
+                this.file_pending = false;
+                this.file_status = match result {
+                    Ok(()) => "Open request sent to the system.".into(),
+                    Err(error) => format!("Open with system: {error}"),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn file_bookmark(&mut self, action: BookmarkAction, cx: &mut Context<Self>) {
         if self.file_pending {
             return;
@@ -836,6 +863,9 @@ impl Render for Counter {
                             .child(button("forget-file", "Forget file").on_click(cx.listener(
                                 |this, _, _, cx| this.file_bookmark(BookmarkAction::Release, cx),
                             )))
+                            .child(button("open-with-system", "Open with system").on_click(
+                                cx.listener(|this, _, _, cx| this.open_document_with_system(cx)),
+                            ))
                             .child(
                                 button("save-app-data", "Save app data").on_click(cx.listener(
                                     |this, _, _, cx| {

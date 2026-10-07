@@ -324,6 +324,23 @@ impl Host {
         })
     }
 
+    pub fn open_file_intent(&self, intent: &GlobalRef) -> Result<()> {
+        self.with_env(|env| {
+            let error = env
+                .call_method(
+                    self.object.as_obj(),
+                    "openFileIntent",
+                    "(Landroid/content/Intent;)Ljava/lang/String;",
+                    &[JValue::Object(intent.as_obj())],
+                )?
+                .l()?;
+            if !error.is_null() {
+                anyhow::bail!(String::from(env.get_string(&JString::from(error))?));
+            }
+            Ok(())
+        })
+    }
+
     pub fn schedule(&self, token: u64, delay: Duration) {
         let result = (|| -> jni::errors::Result<()> {
             let mut env = self.vm.attach_current_thread()?;

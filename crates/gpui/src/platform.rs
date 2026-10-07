@@ -287,6 +287,18 @@ pub trait Platform: 'static {
     fn can_select_mixed_files_and_dirs(&self) -> bool;
     fn reveal_path(&self, path: &Path);
     fn open_with_system(&self, path: &Path);
+    fn open_file_with_system(&self, file: &crate::SelectedFile) -> Task<Result<()>> {
+        if let Some(path) = file.path() {
+            self.open_with_system(path);
+            Task::ready(Ok(()))
+        } else {
+            Task::ready(Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "file provider cannot be opened by the system",
+            )
+            .into()))
+        }
+    }
 
     fn on_quit(&self, callback: Box<dyn FnMut()>);
     fn on_reopen(&self, callback: Box<dyn FnMut()>);

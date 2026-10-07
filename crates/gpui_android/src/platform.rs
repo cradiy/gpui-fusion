@@ -270,6 +270,17 @@ impl Platform for AndroidPlatform {
     }
     fn reveal_path(&self, _: &Path) {}
     fn open_with_system(&self, _: &Path) {}
+    fn open_file_with_system(&self, file: &SelectedFile) -> Task<Result<()>> {
+        let intent = crate::file::view_intent(file);
+        let file = file.clone();
+        let host = self.host.clone();
+        self.foreground.spawn(async move {
+            let intent = intent.await?;
+            let result = host.open_file_intent(&intent);
+            drop(file);
+            result
+        })
+    }
     fn on_quit(&self, callback: Box<dyn FnMut()>) {
         *self.quit.borrow_mut() = Some(callback);
     }

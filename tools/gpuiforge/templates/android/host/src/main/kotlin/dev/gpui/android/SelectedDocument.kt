@@ -2,6 +2,8 @@ package dev.gpui.android
 
 import android.content.ContentResolver
 import android.content.ContentValues
+import android.content.ClipData
+import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
 import android.provider.OpenableColumns
@@ -13,6 +15,16 @@ internal class SelectedDocument(private val resolver: ContentResolver, private v
     private var outputOpen = false
     private var discarded = false
     fun canWrite(): Boolean = writable
+    @Synchronized fun viewIntent(): Intent {
+        check(!pending && !discarded && !outputOpen) { "Finish writing before opening the file" }
+        require(uri.scheme == "content" && !uri.authority.isNullOrEmpty()) { "A content URI is required" }
+        val mime = mimeType() ?: "application/octet-stream"
+        return Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime)
+            clipData = ClipData("", arrayOf(mime), ClipData.Item(uri))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
     @Synchronized fun persist(): String {
         check(!pending && !discarded) { "File is not published" }
         return DocumentGrants.persist(resolver, uri, writable, persistableFlags)

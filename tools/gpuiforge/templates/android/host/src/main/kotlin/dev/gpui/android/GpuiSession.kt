@@ -324,10 +324,13 @@ class GpuiSession : AutoCloseable {
     }
 
     private fun openUrl(url: String) {
-        val context = requireContext()
         val uri = Uri.parse(url)
         require(uri.scheme != null) { "URL must have a scheme" }
-        val intent = Intent(Intent.ACTION_VIEW, uri)
+        startIntent(Intent(Intent.ACTION_VIEW, uri))
+    }
+
+    private fun startIntent(intent: Intent) {
+        val context = requireContext()
         var owner = context
         while (owner !is Activity && owner is ContextWrapper) {
             val base = owner.baseContext
@@ -336,6 +339,13 @@ class GpuiSession : AutoCloseable {
         }
         if (owner !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
+    }
+
+    private fun openFileIntent(intent: Intent): String? = try {
+        startIntent(intent)
+        null
+    } catch (error: Exception) {
+        error.toString()
     }
 
     /** Releases the Rust application. Do not close during a retained Activity recreation. */

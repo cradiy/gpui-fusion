@@ -50,6 +50,32 @@ impl Document {
     }
 }
 
+pub(crate) fn view_intent(file: &FileHandle) -> LocalBoxFuture<'static, Result<GlobalRef>> {
+    let Some(file) = file.downcast_ref::<AndroidFile>() else {
+        return Box::pin(async {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Android system opening requires a document or published collection file",
+            )
+            .into())
+        });
+    };
+    let document = file.document.clone();
+    file.executor.run(move || {
+        document.call(|env| {
+            let intent = env
+                .call_method(
+                    document.object.as_obj(),
+                    "viewIntent",
+                    "()Landroid/content/Intent;",
+                    &[],
+                )?
+                .l()?;
+            Ok(env.new_global_ref(intent)?)
+        })
+    })
+}
+
 pub(crate) fn selected_file(
     vm: Arc<JavaVM>,
     object: GlobalRef,

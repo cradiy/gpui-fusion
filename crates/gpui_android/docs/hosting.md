@@ -398,6 +398,20 @@ and call `detachFileHost(activity)` on destruction. Request codes
 selection across Activity configuration recreation; final host detachment
 completes it with an error. Results from earlier requests are ignored.
 
+### Open with another application
+
+`App::open_file_with_system(&file)` dispatches `ACTION_VIEW` for a selected or
+restored document, or a published MediaStore file. Await the returned task to
+observe dispatch errors, including a missing viewer, rejected access, or a
+detached host view. Success does not report whether the receiving application
+finished reading the file.
+
+The intent includes the provider's MIME type and a temporary read-only URI grant.
+It does not request editing, persist access, copy contents, or add storage
+permissions. Finish writing before opening a file. Unpublished collection items
+and files with an active writer are rejected. App-private path handles are not
+exported by this API.
+
 ### Persistent file access
 
 Call `file.persist().await?` while a picked document's access is valid, then save

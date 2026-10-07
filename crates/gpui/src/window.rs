@@ -587,6 +587,7 @@ pub struct Window {
     pub(crate) invalidator: WindowInvalidator,
     pub(crate) removed: bool,
     pub(crate) platform_window: Box<dyn PlatformWindow>,
+    picture_in_picture_source: Option<ElementBounds>,
     display_id: Option<DisplayId>,
     sprite_atlas: Arc<dyn PlatformAtlas>,
     color_svg_renders: color_svg::ColorSvgRenders,
@@ -1213,6 +1214,7 @@ impl Window {
             invalidator,
             removed: false,
             platform_window,
+            picture_in_picture_source: None,
             display_id,
             sprite_atlas,
             color_svg_renders: Default::default(),
@@ -2735,6 +2737,15 @@ impl Window {
     /// Whether the system currently presents this window in picture-in-picture.
     pub fn is_picture_in_picture(&self) -> bool {
         self.platform_window.is_picture_in_picture()
+    }
+
+    /// Tracks the visible content area used by picture-in-picture transitions.
+    /// Register the handle with [`Self::track_element_bounds`] in the full-window
+    /// layout. Scrolling, transforms and cached views update its displayed bounds.
+    /// A missing or clipped source uses the whole host window. The compact layout
+    /// does not replace the return target. Unsupported platforms ignore this hint.
+    pub fn set_picture_in_picture_source(&mut self, source: Option<ElementBounds>) {
+        self.picture_in_picture_source = source;
     }
 
     /// Requests picture-in-picture using the content's width-to-height ratio.

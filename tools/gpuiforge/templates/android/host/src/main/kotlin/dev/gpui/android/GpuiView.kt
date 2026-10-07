@@ -87,6 +87,11 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         catch (error: RuntimeException) { session.fail(error) }
     }
 
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        if (changed) session.updatePictureInPictureSource()
+    }
+
     override fun onDetachedFromWindow() {
         releaseSurface()
         session.unbind(this)

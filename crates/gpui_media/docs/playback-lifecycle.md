@@ -91,6 +91,15 @@ refresh the view, and render a compact video surface and subtitles when
 across both layouts. The system provides controls for returning to the full
 window or closing it. Entry is explicit; going Home does not request it.
 
+For transition animations, retain an `ElementBounds` handle and select it with
+`window.set_picture_in_picture_source(Some(handle.clone()))`. In the full-window
+layout, call `window.track_element_bounds(&handle, bounds)` during prepaint with
+the video area, excluding letterboxing. Cached views, scrolling and transforms
+keep its visible region current. The compact layout does not replace the return
+target. Pass `None` to stop tracking; a removed or fully clipped element also
+uses the whole host window. The Android host converts density and View placement
+into window coordinates. Platforms without this hint ignore it.
+
 Android requires the GPUiForge `media` host feature. A visible picture-in-picture
 window continues rendering while the Activity is paused. Do not pause playback
 solely because it loses input focus. Bind a `SystemMediaSession` for system

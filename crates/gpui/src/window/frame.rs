@@ -306,6 +306,14 @@ impl Window {
         }
         self.dirty_views.clear();
         self.next_frame.window_active = self.active.get();
+        if !self.platform_window.is_picture_in_picture() {
+            let bounds = self
+                .picture_in_picture_source
+                .as_ref()
+                .and_then(|source| source.visible_bounds(self));
+            self.platform_window
+                .set_picture_in_picture_source_bounds(bounds);
+        }
 
         // Register requested input handler with the platform window.
         // Use .take() instead of .pop() to preserve Vec length, so that cached

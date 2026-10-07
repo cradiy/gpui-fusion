@@ -56,6 +56,8 @@ pub(crate) struct AndroidWindow {
     fullscreen: Cell<bool>,
     picture_in_picture: Cell<bool>,
     picture_in_picture_request: RefCell<Option<oneshot::Sender<Result<()>>>>,
+    picture_in_picture_source: Cell<Option<Bounds<Pixels>>>,
+    sent_picture_in_picture_source: Cell<Option<Option<Bounds<Pixels>>>>,
     insets: RefCell<WindowInsets>,
     // Renderer must be dropped before the last native window reference.
     renderer: RefCell<WgpuRenderer>,
@@ -93,6 +95,8 @@ impl AndroidWindow {
             fullscreen: Cell::new(false),
             picture_in_picture: Cell::new(false),
             picture_in_picture_request: RefCell::default(),
+            picture_in_picture_source: Cell::default(),
+            sent_picture_in_picture_source: Cell::default(),
             insets: RefCell::default(),
             renderer: RefCell::new(renderer),
             native: RefCell::new(Some(native)),
@@ -273,6 +277,22 @@ impl AndroidWindow {
         }
     }
 
+    fn flush_picture_in_picture_source(&self) {
+        if self.picture_in_picture.get() {
+            return;
+        }
+        let bounds = self.picture_in_picture_source.get();
+        if self.sent_picture_in_picture_source.get() == Some(bounds) {
+            return;
+        }
+        match self.host.set_picture_in_picture_source_bounds(bounds) {
+            Ok(()) => self.sent_picture_in_picture_source.set(Some(bounds)),
+            Err(error) => {
+                log::warn!("Unable to update picture-in-picture source bounds: {error:#}")
+            }
+        }
+    }
+
     pub fn set_appearance(&self, appearance: WindowAppearance) {
         if self.appearance.replace(appearance) == appearance {
             return;
@@ -308,6 +328,7 @@ impl AndroidWindow {
             });
             self.callbacks.borrow_mut().frame = Some(callback);
         }
+        self.flush_picture_in_picture_source();
         Ok(())
     }
 
@@ -542,6 +563,7 @@ impl PlatformWindow for AndroidWindowHandle {
             return receiver;
         }
         *self.picture_in_picture_request.borrow_mut() = Some(sender);
+        self.flush_picture_in_picture_source();
         if let Err(error) = self.host.enter_picture_in_picture(aspect_ratio) {
             self.picture_in_picture_result(Err(error));
         }
@@ -549,6 +571,11 @@ impl PlatformWindow for AndroidWindowHandle {
     }
     fn on_picture_in_picture_changed(&self, callback: Box<dyn FnMut(bool)>) {
         self.callbacks.borrow_mut().picture_in_picture = Some(callback);
+    }
+    fn set_picture_in_picture_source_bounds(&self, bounds: Option<Bounds<Pixels>>) {
+        if !self.picture_in_picture.get() {
+            self.picture_in_picture_source.set(bounds);
+        }
     }
     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>) {
         self.callbacks.borrow_mut().frame = Some(callback);

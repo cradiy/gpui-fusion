@@ -937,6 +937,7 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
         receiver
     }
     fn on_picture_in_picture_changed(&self, _callback: Box<dyn FnMut(bool)>) {}
+    fn set_picture_in_picture_source_bounds(&self, _bounds: Option<Bounds<Pixels>>) {}
     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>);
     /// Returns a non-reentrant wakeup for platforms that schedule frames on demand.
     /// Multiple requests may be coalesced; the callback must not render synchronously.

@@ -42,6 +42,8 @@ class GpuiSession : AutoCloseable {
     private var pictureInPicture = false
 // gpuiforge:if media
     private var pictureInPictureHost: PictureInPictureHost? = null
+    private var pictureInPictureSource: android.graphics.RectF? = null
+    private var pictureInPictureSourcePosted = false
 
     /** Attach an Activity declaring supportsPictureInPicture in its manifest. */
     fun attachPictureInPictureHost(activity: Activity) {
@@ -49,6 +51,7 @@ class GpuiSession : AutoCloseable {
         check(!closed)
         pictureInPictureHost = PictureInPictureHost(activity)
         onPictureInPictureModeChanged(activity.isInPictureInPictureMode)
+        updatePictureInPictureSource()
     }
 
     /** Detach the Activity before it is destroyed. */
@@ -64,7 +67,30 @@ class GpuiSession : AutoCloseable {
         if (closed || pictureInPicture == enabled) return
         pictureInPicture = enabled
         if (id != 0L) nativePictureInPictureChanged(id, enabled)
+        if (!enabled) updatePictureInPictureSource()
         view.get()?.requestFrame()
+    }
+
+    private fun setPictureInPictureSourceBounds(left: Float, top: Float, right: Float, bottom: Float, valid: Boolean) {
+        checkThread()
+// gpuiforge:if media
+        if (closed || pictureInPicture) return
+        val next = if (valid) android.graphics.RectF(left, top, right, bottom) else null
+        if (pictureInPictureSource == next) return
+        pictureInPictureSource = next
+        updatePictureInPictureSource()
+// gpuiforge:endif
+    }
+
+    internal fun updatePictureInPictureSource() {
+// gpuiforge:if media
+        if (closed || pictureInPicture || pictureInPictureSourcePosted) return
+        pictureInPictureSourcePosted = true
+        handler.postAtTime({
+            pictureInPictureSourcePosted = false
+            if (!closed) pictureInPictureHost?.updateSource(view.get(), pictureInPictureSource)
+        }, this, SystemClock.uptimeMillis())
+// gpuiforge:endif
     }
 
     internal fun inPictureInPicture() = !closed && pictureInPicture && phase != BACKGROUND
@@ -86,6 +112,7 @@ class GpuiSession : AutoCloseable {
 // gpuiforge:if media
                     check(active()) { "Picture-in-picture requires an active Activity" }
                     val host = checkNotNull(pictureInPictureHost) { "No picture-in-picture host attached" }
+                    host.updateSource(view.get(), pictureInPictureSource)
                     hideSoftKeyboard()
                     host.enter(width, height)
                     null
@@ -679,6 +706,8 @@ class GpuiSession : AutoCloseable {
                 pictureInPicture = false
 // gpuiforge:if media
                 pictureInPictureHost = null
+                pictureInPictureSource = null
+                pictureInPictureSourcePosted = false
 // gpuiforge:endif
                 closeRequested = null
                 errorHandler = null

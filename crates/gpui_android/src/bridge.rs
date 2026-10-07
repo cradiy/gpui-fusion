@@ -241,6 +241,29 @@ impl Host {
         })
     }
 
+    pub fn set_picture_in_picture_source_bounds(
+        &self,
+        bounds: Option<gpui::Bounds<gpui::Pixels>>,
+    ) -> Result<()> {
+        let valid = bounds.is_some();
+        let bounds = bounds.unwrap_or_default();
+        self.with_env(|env| {
+            env.call_method(
+                self.object.as_obj(),
+                "setPictureInPictureSourceBounds",
+                "(FFFFZ)V",
+                &[
+                    JValue::Float(bounds.left().into()),
+                    JValue::Float(bounds.top().into()),
+                    JValue::Float(bounds.right().into()),
+                    JValue::Float(bounds.bottom().into()),
+                    JValue::Bool(valid.into()),
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn window_appearance(&self) -> Result<gpui::WindowAppearance> {
         self.with_env(|env| {
             let dark = env

@@ -27,7 +27,10 @@ fn main() {
                 artwork_request: 0,
                 subtitles: Vec::new(),
                 picture_in_picture_pending: false,
+                scroll_handle: ScrollHandle::new(),
+                video_bounds: ElementBounds::default(),
             });
+            window.set_picture_in_picture_source(Some(view.read(cx).video_bounds.clone()));
             window.on_system_back(
                 cx,
                 window.handler_for(&view, |_, window, cx| {
@@ -66,23 +69,27 @@ struct MediaDemo {
     artwork_request: u64,
     subtitles: Vec<(MediaStreamId, Arc<SubtitleCue>)>,
     picture_in_picture_pending: bool,
+    scroll_handle: ScrollHandle,
+    video_bounds: ElementBounds,
 }
 
 impl MediaDemo {
-    fn enter_picture_in_picture(&mut self, window: &Window, cx: &mut Context<Self>) {
-        if self.picture_in_picture_pending {
-            return;
-        }
-        let ratio = self
-            .player
+    fn video_size(&self, cx: &App) -> Size<u32> {
+        self.player
             .as_ref()
             .and_then(|player| player.read(cx).media_info())
             .and_then(|info| info.video_streams.iter().find(|stream| stream.selected))
             .and_then(|stream| stream.display_size.or(stream.coded_size))
             .filter(|size| size.width > 0 && size.height > 0)
             .map(|size| gpui::size(size.width as u32, size.height as u32))
-            .unwrap_or(size(16, 9));
-        let request = window.enter_picture_in_picture(ratio, cx);
+            .unwrap_or(size(16, 9))
+    }
+
+    fn enter_picture_in_picture(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if self.picture_in_picture_pending {
+            return;
+        }
+        let request = window.enter_picture_in_picture(self.video_size(cx), cx);
         self.picture_in_picture_pending = true;
         cx.spawn(async move |this, cx| {
             let result = request.await;
@@ -468,6 +475,7 @@ impl Render for MediaDemo {
             .flex()
             .flex_col()
             .overflow_y_scroll()
+            .track_scroll(&self.scroll_handle)
             .gap_4()
             .p_5()
             .bg(rgb(0x101923))
@@ -524,23 +532,8 @@ impl Render for MediaDemo {
                     .child(video_with_subtitles(player.clone(), subtitle_text))
                     .into_any_element();
             }
-            if window.supports_picture_in_picture() {
-                column = column.child(
-                    div()
-                        .id("picture-in-picture")
-                        .p_3()
-                        .rounded_lg()
-                        .bg(rgb(0x30475c))
-                        .child(if self.picture_in_picture_pending {
-                            "Opening picture-in-picture…"
-                        } else {
-                            "Picture-in-picture"
-                        })
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.enter_picture_in_picture(window, cx)
-                        })),
-                );
-            }
+            let video_size = self.video_size(cx).map(|value| DevicePixels(value as i32));
+            let video_bounds_handle = self.video_bounds.clone();
             if player
                 .read(cx)
                 .media_info()
@@ -648,9 +641,24 @@ impl Render for MediaDemo {
                     div()
                         .h(px(240.))
                         .w_full()
+                        .relative()
                         .flex_shrink_0()
                         .bg(rgb(0x000000))
-                        .child(video_with_subtitles(player.clone(), subtitle_text)),
+                        .child(video_with_subtitles(player.clone(), subtitle_text))
+                        .child(
+                            canvas(
+                                move |bounds, window, _| {
+                                    let video_bounds =
+                                        ObjectFit::Contain.get_bounds(bounds, video_size);
+                                    window.track_element_bounds(&video_bounds_handle, video_bounds);
+                                },
+                                |_, _, _, _| {},
+                            )
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full(),
+                        ),
                 )
                 .child(format!(
                     "{:.1}s / {:.1}s · {:?}",
@@ -658,6 +666,23 @@ impl Render for MediaDemo {
                     timeline.duration().unwrap_or_default().as_secs_f64(),
                     player.read(cx).state()
                 ));
+            if window.supports_picture_in_picture() {
+                column = column.child(
+                    div()
+                        .id("picture-in-picture")
+                        .p_3()
+                        .rounded_lg()
+                        .bg(rgb(0x30475c))
+                        .child(if self.picture_in_picture_pending {
+                            "Opening picture-in-picture…"
+                        } else {
+                            "Picture-in-picture"
+                        })
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.enter_picture_in_picture(window, cx)
+                        })),
+                );
+            }
         }
         column = column
             .child(

@@ -190,7 +190,16 @@ from physical pixels to GPUI logical pixels.
 
 Preventing the default action in a raw touch handler suppresses synthesized
 clicking and scrolling for the rest of that contact sequence. Multiple fingers
-also suppress both. Touch cancellation, focus loss, Surface replacement, and
+also suppress both. Multi-contact scaling uses Android's `ScaleGestureDetector`
+and produces `PinchEvent` through `on_pinch`, with a logical-pixel focus position
+and incremental `delta` (`scale *= 1.0 + event.delta`). Begin and end events have
+zero delta. Quick-scale and stylus-button scaling are disabled. Raw touch
+handlers that prevent the default action cancel scaling for the rest of the
+contact sequence. Lifting back to one finger does not resume scrolling or
+produce a click; a fresh touch starts a new interaction. Pinch routing follows
+the current focus position and the standard GPUI hit-test rules.
+
+Touch cancellation, focus loss, Surface replacement, and
 backgrounding stop the gesture and its inertia. Touching during inertia stops
 it without activating a button. Long holds do not synthesize clicks. There is
 no mouse drag emulation or Android nested-scrolling integration.

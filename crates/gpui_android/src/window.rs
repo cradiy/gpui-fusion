@@ -301,6 +301,18 @@ impl AndroidWindow {
         .default_prevented
     }
 
+    pub fn pinch(&self, phase: TouchPhase, x: f32, y: f32, delta: f32) {
+        let scale = self.display.scale.get();
+        let position = point(px(x / scale), px(y / scale));
+        self.pointer.set(position);
+        self.input(PlatformInput::Pinch(PinchEvent {
+            position,
+            delta,
+            phase,
+            modifiers: self.modifiers.get(),
+        }));
+    }
+
     pub fn focus_text_input(&self, x: f32, y: f32) -> bool {
         let position = point(
             px(x / self.display.scale.get()),

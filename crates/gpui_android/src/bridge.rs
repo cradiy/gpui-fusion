@@ -447,6 +447,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         method("nativeAppearance", "(JZ)V", appearance as *mut c_void),
         method("nativeBack", "(J)Z", system_back as *mut c_void),
         method("nativeTouch", "(JIIFF)Z", touch as *mut c_void),
+        method("nativePinch", "(JIFFF)V", pinch as *mut c_void),
         method("nativeTap", "(JFF)V", tap as *mut c_void),
         method(
             "nativeOpenUrl",
@@ -989,6 +990,32 @@ extern "system" fn focus_text_input(
     call(&mut env, |_| {
         Ok(session(id)?.platform.window.focus_text_input(x, y) as u8)
     })
+}
+
+extern "system" fn pinch(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    phase: jint,
+    x: jfloat,
+    y: jfloat,
+    delta: jfloat,
+) {
+    call(&mut env, |_| {
+        let phase = match phase {
+            0 => TouchPhase::Started,
+            1 => TouchPhase::Moved,
+            2 => TouchPhase::Ended,
+            3 => TouchPhase::Cancelled,
+            _ => anyhow::bail!("invalid pinch phase"),
+        };
+        anyhow::ensure!(
+            x.is_finite() && y.is_finite() && delta.is_finite() && delta > -1.,
+            "invalid pinch geometry"
+        );
+        session(id)?.platform.window.pinch(phase, x, y, delta);
+        Ok(())
+    });
 }
 
 extern "system" fn tap(mut env: JNIEnv, _: JClass, id: jlong, x: jfloat, y: jfloat) {

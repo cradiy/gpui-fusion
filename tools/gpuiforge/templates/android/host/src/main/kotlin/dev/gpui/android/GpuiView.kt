@@ -25,6 +25,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     SurfaceView(context), SurfaceHolder.Callback2, Choreographer.FrameCallback {
     private val choreographer = Choreographer.getInstance()
     private val scroll = TouchScroll(context, session)
+    private val pinch = TouchPinch(context, session::pinch)
     private val mouse = MouseInput(context, session)
     private val contacts = SparseArray<PointF>()
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
@@ -51,6 +52,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     private val textMenu = TextEditMenu(this, { inputState }) {
         tapCandidate = false
         scroll.block()
+        pinch.cancel()
     }
 
     init {
@@ -243,6 +245,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         val index = event.actionIndex
         if (action == MotionEvent.ACTION_DOWN) {
             requestFocus()
+            pinch.begin()
             tapCandidate = !scroll.begin(event)
             downX = event.x
             downY = event.y
@@ -277,6 +280,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
                 }
             }
         }
+        pinch.event(event)
         textMenu.touch(event, tapCandidate)
         if (scroll.needsFrame()) requestFrame()
         return true
@@ -290,6 +294,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         if (session.touch(id, phase, x, y)) {
             tapCandidate = false
             scroll.block()
+            pinch.cancel()
         }
     }
 
@@ -298,6 +303,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         textMenu.close()
         tapCandidate = false
         scroll.cancel()
+        pinch.cancel()
         for (i in 0 until contacts.size()) {
             val point = contacts.valueAt(i)
             session.touch(contacts.keyAt(i), 3, point.x, point.y)

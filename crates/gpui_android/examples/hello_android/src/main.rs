@@ -79,6 +79,8 @@ fn main() {
             let view = cx.new(|cx| Counter {
                 details: false,
                 count: 0,
+                zoom: 1.,
+                pinch_phase: TouchPhase::Ended,
                 scroll: ScrollHandle::new(),
                 clipboard_status: "Copy the counter or paste text from another app.".into(),
                 file_status: "Choose a file to read its contents.".into(),
@@ -186,6 +188,8 @@ impl Global for SharedContent {}
 struct Counter {
     details: bool,
     count: usize,
+    zoom: f32,
+    pinch_phase: TouchPhase,
     scroll: ScrollHandle,
     clipboard_status: String,
     file_status: String,
@@ -776,6 +780,36 @@ impl Render for Counter {
                     f32::from(insets.effective().bottom)
                 )
             }))
+            .child(
+                div()
+                    .id("pinch-preview")
+                    .h(px(160.))
+                    .flex_shrink_0()
+                    .rounded_xl()
+                    .bg(rgb(surface))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap_3()
+                    .on_pinch(cx.listener(|this, event: &PinchEvent, _, cx| {
+                        this.zoom = (this.zoom * (1. + event.delta)).clamp(0.5, 2.5);
+                        this.pinch_phase = event.phase;
+                        cx.stop_propagation();
+                        cx.notify();
+                    }))
+                    .child(div().text_sm().child(format!(
+                        "Pinch to zoom · {:.0}% · {:?}",
+                        self.zoom * 100.,
+                        self.pinch_phase
+                    )))
+                    .child(
+                        div()
+                            .size(px(36. * self.zoom))
+                            .rounded_full()
+                            .bg(rgb(0x5e96e8)),
+                    ),
+            )
             .when(cx.global::<SharedContent>().count > 0, |page| {
                 let shared = cx.global::<SharedContent>();
                 let content = shared.content.clone();

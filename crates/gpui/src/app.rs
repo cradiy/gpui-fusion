@@ -1545,7 +1545,7 @@ impl App {
     /// Requests that the system open a file in an external application.
     /// Success reports dispatch, not completion in the receiving application.
     /// Desktop paths use the existing launcher; its later failures are not returned.
-    /// Android documents receive a temporary read grant. Unsupported providers return an error.
+    /// Android files receive a temporary read grant. Unsupported providers return an error.
     pub fn open_file_with_system(&self, file: &crate::SelectedFile) -> Task<Result<()>> {
         self.platform.open_file_with_system(file)
     }

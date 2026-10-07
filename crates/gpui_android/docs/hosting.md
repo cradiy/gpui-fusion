@@ -401,7 +401,8 @@ completes it with an error. Results from earlier requests are ignored.
 ### Open with another application
 
 `App::open_file_with_system(&file)` dispatches `ACTION_VIEW` for a selected or
-restored document, or a published MediaStore file. Await the returned task to
+restored document, a published MediaStore file, or a private path exposed by the
+host's FileProvider. Await the returned task to
 observe dispatch errors, including a missing viewer, rejected access, or a
 detached host view. Success does not report whether the receiving application
 finished reading the file.
@@ -409,8 +410,23 @@ finished reading the file.
 The intent includes the provider's MIME type and a temporary read-only URI grant.
 It does not request editing, persist access, copy contents, or add storage
 permissions. Finish writing before opening a file. Unpublished collection items
-and files with an active writer are rejected. App-private path handles are not
-exported by this API.
+and documents with an active writer are rejected. Path-based handles do not track
+other writers; the application must await its writes before opening them.
+
+The bundled host exposes `AppData` (`filesDir/Data`) and `Cache` through a
+non-exported, read-only `GpuiFileProvider` with authority
+`${applicationId}.gpui.files`. Only the requested file receives a temporary grant;
+other files in the directory remain inaccessible. Files are served in place,
+without copying. Keep them available while the viewer is using them. Missing
+files, directories, and paths resolving outside configured roots are rejected.
+`AppConfig`, `noBackupFilesDir`, databases, and shared preferences are not exposed
+by the default configuration. MIME types for path handles are inferred from the
+file extension, with `application/octet-stream` as the fallback.
+
+Hosts maintained outside GPUiForge must include the provider manifest entry,
+AndroidX Core dependency, and `gpui_file_paths.xml`. An application can override
+that XML resource with narrower directories. URI grants do not provide persistent
+bookmarks or report when a viewer has finished reading.
 
 ### Persistent file access
 

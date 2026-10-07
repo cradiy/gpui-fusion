@@ -8,8 +8,42 @@ use gpui::gpui_io::{
     CreateOptions, FileBookmark, FileHandle, FileSystem, IoExecutor, LocationHandle,
     PlatformLocation, PlatformLocations, SystemLocation,
 };
-use jni::objects::{JString, JValue};
-use std::{io, path::PathBuf, sync::Arc};
+use jni::objects::{GlobalRef, JString, JValue};
+use std::{
+    io,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
+pub(crate) fn view_path_intent(
+    host: &Host,
+    path: &Path,
+) -> LocalBoxFuture<'static, Result<GlobalRef>> {
+    let store = host.file_store();
+    let path = path.to_path_buf();
+    crate::dispatcher::io_executor().run(move || {
+        let (vm, object) = store?;
+        let store = Document { vm, object };
+        let path = path.to_str().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Android file paths must be valid UTF-8",
+            )
+        })?;
+        store.call(|env| {
+            let path = env.new_string(path)?;
+            let intent = env
+                .call_method(
+                    store.object.as_obj(),
+                    "viewPathIntent",
+                    "(Ljava/lang/String;)Landroid/content/Intent;",
+                    &[JValue::Object(path.as_ref())],
+                )?
+                .l()?;
+            Ok(env.new_global_ref(intent)?)
+        })
+    })
+}
 
 pub(crate) fn file_system(host: &Host, executor: IoExecutor) -> Result<FileSystem> {
     let (vm, object) = host.file_store()?;

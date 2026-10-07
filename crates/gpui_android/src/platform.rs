@@ -271,7 +271,11 @@ impl Platform for AndroidPlatform {
     fn reveal_path(&self, _: &Path) {}
     fn open_with_system(&self, _: &Path) {}
     fn open_file_with_system(&self, file: &SelectedFile) -> Task<Result<()>> {
-        let intent = crate::file::view_intent(file);
+        let intent = if let Some(path) = file.path() {
+            crate::file_system::view_path_intent(&self.host, path)
+        } else {
+            crate::file::view_intent(file)
+        };
         let file = file.clone();
         let host = self.host.clone();
         self.foreground.spawn(async move {

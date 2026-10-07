@@ -2,9 +2,12 @@ package dev.gpui.android
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.ClipData
+import android.content.Intent
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileNotFoundException
 
@@ -15,6 +18,22 @@ internal class FileStore(context: Context) {
 
     fun restore(value: String, writable: Boolean): SelectedDocument = DocumentGrants.restore(resolver, value, writable)
     fun release(value: String, writable: Boolean) = DocumentGrants.release(resolver, value, writable)
+
+    fun viewPathIntent(path: String): Intent {
+        require(!path.contains('\u0000')) { "Invalid file path" }
+        val original = File(path)
+        require(original.isAbsolute) { "An absolute file path is required" }
+        val file = original.canonicalFile
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.gpui.files", file)
+        if (!file.isFile) throw FileNotFoundException("File is missing or is not a regular file")
+        if (!file.canRead()) throw SecurityException("File is not readable")
+        val mime = resolver.getType(uri) ?: "application/octet-stream"
+        return Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime)
+            clipData = ClipData("", arrayOf(mime), ClipData.Item(uri))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
 
     fun privatePath(kind: Int): String = when (kind) {
         0 -> File(context.filesDir, "Data")

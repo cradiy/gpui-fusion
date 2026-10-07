@@ -8,3 +8,5 @@ android {
         consumerProguardFiles("consumer-rules.pro")
     }
 }
+
+dependencies { implementation("androidx.core:core:1.18.0") }

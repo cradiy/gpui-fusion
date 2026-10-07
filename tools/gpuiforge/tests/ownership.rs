@@ -167,8 +167,16 @@ notification-icon = "icon.xml"
 "#,
     )
     .unwrap();
-    app.ok(&["sync"]);
     let output = app.0.join("target/gpuiforge/android");
+    let check = app.run(&["sync", "--check"]);
+    assert!(!check.status.success());
+    assert!(String::from_utf8_lossy(&check.stderr).contains("create host/"));
+    assert!(!output.exists());
+    app.ok(&["sync"]);
+    let state = output.join(".gpuiforge-generated.json");
+    let modified = fs::metadata(&state).unwrap().modified().unwrap();
+    app.ok(&["sync", "--check"]);
+    assert_eq!(fs::metadata(&state).unwrap().modified().unwrap(), modified);
     let host = output.join("host/src/main/kotlin/dev/gpui/android");
     assert!(host.join("FileStore.kt").exists());
     assert!(host.join("NotificationStore.kt").exists());
@@ -199,7 +207,16 @@ features = []
 "#,
     )
     .unwrap();
+    let check = app.run(&["sync", "android", "--check"]);
+    assert!(!check.status.success());
+    assert!(
+        String::from_utf8_lossy(&check.stderr)
+            .contains("remove host/src/main/kotlin/dev/gpui/android/NotificationStore.kt")
+    );
+    assert!(host.join("NotificationStore.kt").exists());
+    assert_eq!(fs::metadata(&state).unwrap().modified().unwrap(), modified);
     app.ok(&["sync", "android"]);
+    app.ok(&["sync", "--check"]);
     for file in ["FileStore.kt", "NotificationStore.kt", "ShareIntent.kt"] {
         assert!(!host.join(file).exists());
     }
@@ -217,11 +234,40 @@ features = []
             .exists()
     );
     fs::write(host.join("GpuiView.kt"), "user edit").unwrap();
+    let check = app.run(&["sync", "--check"]);
+    assert!(!check.status.success());
+    assert!(String::from_utf8_lossy(&check.stderr).contains("GpuiView.kt"));
     assert!(!app.run(&["sync"]).status.success());
     assert_eq!(
         fs::read_to_string(host.join("GpuiView.kt")).unwrap(),
         "user edit"
     );
+}
+
+#[test]
+fn invalid_icon_does_not_modify_generated_project() {
+    let app = Fixture::new();
+    fs::write(
+        app.0.join("Cargo.toml"),
+        "[package]\nname = 'fixture-app'\nversion = '0.1.0'\n",
+    )
+    .unwrap();
+    let config = app.0.join("gpuiforge.toml");
+    let base = "[app]\nname = 'Example'\n[platforms.android]\napplication-id = 'dev.example.app'\n";
+    fs::write(&config, base).unwrap();
+    app.ok(&["sync"]);
+    let state = app
+        .0
+        .join("target/gpuiforge/android/.gpuiforge-generated.json");
+    let modified = fs::metadata(&state).unwrap().modified().unwrap();
+    fs::write(&config, format!("{base}icon = 'missing.png'\n")).unwrap();
+    for args in [&["sync", "--check"][..], &["sync"][..]] {
+        let result = app.run(args);
+        assert!(!result.status.success());
+        let message = String::from_utf8_lossy(&result.stderr);
+        assert!(message.contains("platforms.android.icon") && message.contains("missing.png"));
+        assert_eq!(fs::metadata(&state).unwrap().modified().unwrap(), modified);
+    }
 }
 
 #[test]

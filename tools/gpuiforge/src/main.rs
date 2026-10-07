@@ -41,6 +41,9 @@ enum Action {
     Sync {
         #[arg(default_value = "android")]
         platform: String,
+        /// Fail if synchronization is needed, without modifying any files.
+        #[arg(long)]
+        check: bool,
     },
     /// Build a configured platform (prompts when omitted).
     Build {
@@ -119,7 +122,17 @@ fn run(cli: Cli) -> Result<()> {
     }
     let project = Project::load(&cli.config)?;
     match cli.command {
-        Action::Generate { platform } | Action::Sync { platform } => {
+        Action::Sync {
+            platform,
+            check: true,
+        } => {
+            println!("{}", generate::check(&project, &platform)?.display())
+        }
+        Action::Generate { platform }
+        | Action::Sync {
+            platform,
+            check: false,
+        } => {
             println!("{}", generate::generate(&project, &platform)?.display())
         }
         Action::Build {

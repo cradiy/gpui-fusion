@@ -97,6 +97,14 @@ fn no_symlinks(path: &Path) -> Result<()> {
 }
 
 pub fn generate(project: &Project, name: &str) -> Result<PathBuf> {
+    synchronize(project, name, false)
+}
+
+pub fn check(project: &Project, name: &str) -> Result<PathBuf> {
+    synchronize(project, name, true)
+}
+
+fn synchronize(project: &Project, name: &str, check: bool) -> Result<PathBuf> {
     let platform = project.platform(name)?;
     ensure!(
         platform.management == Management::Managed,
@@ -158,11 +166,20 @@ pub fn generate(project: &Project, name: &str) -> Result<PathBuf> {
                 permissions: None,
             });
         }
-        for (source, resource) in [
-            (&platform.icon, "gpui_app_icon"),
-            (&platform.notification_icon, "gpui_notification_icon"),
+        for (setting, source, resource) in [
+            ("icon", &platform.icon, "gpui_app_icon"),
+            (
+                "notification-icon",
+                &platform.notification_icon,
+                "gpui_notification_icon",
+            ),
         ] {
             if let Some(source) = source {
+                ensure!(
+                    source.is_file(),
+                    "platforms.android.{setting} must point to an existing file: {}",
+                    source.display()
+                );
                 let extension = source
                     .extension()
                     .and_then(|s| s.to_str())
@@ -223,6 +240,36 @@ pub fn generate(project: &Project, name: &str) -> Result<PathBuf> {
             dest.display()
         );
     }
+    if check {
+        let mut changes = Vec::new();
+        if !state_path.exists() {
+            changes.push(format!("create {STATE}"));
+        }
+        for (path, file) in &files {
+            let action = match previous.files.get(path) {
+                None => Some("create"),
+                Some(hash) if *hash != digest(&file.bytes) => Some("update"),
+                Some(_) if permissions_differ(&directory.join(path), file)? => Some("permissions"),
+                Some(_) => None,
+            };
+            if let Some(action) = action {
+                changes.push(format!("{action} {}", path.display()));
+            }
+        }
+        for path in previous
+            .files
+            .keys()
+            .filter(|path| !files.contains_key(*path))
+        {
+            changes.push(format!("remove {}", path.display()));
+        }
+        ensure!(
+            changes.is_empty(),
+            "{name} needs synchronization; run `gpuiforge sync {name}`:\n{}",
+            changes.join("\n")
+        );
+        return Ok(directory);
+    }
     fs::create_dir_all(&directory)?;
     for (path, file) in &files {
         let dest = directory.join(path);
@@ -250,6 +297,22 @@ pub fn generate(project: &Project, name: &str) -> Result<PathBuf> {
     };
     fs::write(state_path, serde_json::to_vec_pretty(&state)?)?;
     Ok(directory)
+}
+
+fn permissions_differ(path: &Path, file: &File) -> Result<bool> {
+    let Some(expected) = &file.permissions else {
+        return Ok(false);
+    };
+    let actual = fs::metadata(path)?.permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        Ok(actual.mode() & 0o777 != expected.mode() & 0o777)
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(actual.readonly() != expected.readonly())
+    }
 }
 
 pub fn eject(project: &Project, name: &str, destination: &Path) -> Result<PathBuf> {

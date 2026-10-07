@@ -151,6 +151,12 @@ Run `gpuiforge sync` (or `gpuiforge sync android`) after editing the configurati
 It regenerates the managed project without building or requiring an Android SDK,
 and removes previously generated files for disabled features or removed icons.
 Build and run also synchronize managed projects automatically.
+Use `gpuiforge sync --check` to check without writing files or starting Gradle.
+It exits with 0 when the managed project matches the current configuration and
+bundled templates, or 1 with the paths that need creation, updating or removal.
+An absent generated project also needs synchronization. Modified generated files
+and invalid resources are reported as errors; the check does not repair them.
+On Unix, the check also detects changed executable permission bits.
 Modified generated files are protected: restore them or use `platform eject android`
 to take ownership. Both `sync` and `generate` are disabled in manual mode.
 These feature and icon settings apply to the bundled Android template; custom

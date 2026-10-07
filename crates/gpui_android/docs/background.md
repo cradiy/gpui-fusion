@@ -72,3 +72,39 @@ stops execution. A foreground service does not guarantee survival after process
 termination, network access during all power-saving modes, or task restoration.
 There is no automatic restart, boot receiver, wake lock or persistent scheduler.
 Applications own transfer queues, credentials, cancellation and recovery state.
+
+## Media playback
+
+Use `SystemMediaSession::start_background_playback()` for audio or video playback.
+Enable `background-media` and declare `android.permission.FOREGROUND_SERVICE`
+and `android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK`. The module includes
+`media-notifications`; add `media` separately when using GPUI's Media3 backend.
+
+```rust,no_run
+# async fn example(session: &gpui::gpui_notifications::SystemMediaSession, state: gpui::gpui_notifications::MediaSessionState) -> anyhow::Result<()> {
+session.update(state)?;
+let mut background = session.start_background_playback().await?;
+// Keep publishing metadata, playback state and position through `session.update`.
+// Monitor `background.stopped()` and pause the application's player if it resolves.
+drop(background); // Release execution; the media controls remain available.
+# Ok(())
+# }
+```
+
+Request the lease after a user action while the Activity is active, before leaving
+the application. Awaiting it confirms foreground promotion. The service reuses
+the session's MediaStyle notification, including custom icons and transport
+buttons. State updates keep that notification synchronized without publishing a
+second one. Releasing the lease restores the ordinary media notification.
+
+One media playback lease may run per process, independently of a data-sync lease.
+Closing its media session or GPUI session stops the service; retained Activity
+recreation preserves it. Release the guard when playback no longer requires
+foreground execution, including prolonged pauses. The service never starts or
+pauses the player itself and does not restart after process death. Other
+platforms currently return an unsupported error from this method.
+
+This service is session-bound. Keeping playback alive after the owning Activity
+finishes requires an application-owned host lifecycle. Wake locks, audio focus
+and network policy are separate from foreground execution. See Android's
+[background playback guide](https://developer.android.com/media/media3/session/background-playback).

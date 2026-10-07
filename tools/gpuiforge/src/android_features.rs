@@ -21,6 +21,7 @@ pub fn included(path: &str, platform: &Platform) -> bool {
         "NotificationStore.kt" => Notifications,
         "MediaNotification.kt" => MediaNotifications,
         "DataSyncService.kt" => DataSync,
+        "MediaPlaybackService.kt" => BackgroundMedia,
         _ => return true,
     };
     platform.feature(feature)

@@ -206,7 +206,9 @@ See [Android media sessions](https://developer.android.com/reference/android/med
 Use local or HTTP(S) progressive media supported by Media3 and the device's
 decoders. Track selection, subtitles, frame stepping, DRM, adaptive-streaming
 extensions, and HDR output are unsupported.
-Background playback and picture-in-picture require separate system integration.
+For session-bound background playback, attach a `SystemMediaSession` and retain
+its [background playback lease](../../gpui_android/docs/background.md#media-playback).
+Picture-in-picture requires separate system integration.
 
 Video uses CPU frame delivery, including GPU readback and upload. Check device
 performance before using high-resolution videos or several players at once.

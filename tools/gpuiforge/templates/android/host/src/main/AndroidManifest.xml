@@ -1,5 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
+<!-- gpuiforge:if background-media -->
+        <service android:name="dev.gpui.android.MediaPlaybackService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
+<!-- gpuiforge:endif -->
 <!-- gpuiforge:if data-sync -->
         <service android:name="dev.gpui.android.DataSyncService" android:exported="false" android:foregroundServiceType="dataSync" />
 <!-- gpuiforge:endif -->

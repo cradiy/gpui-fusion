@@ -30,6 +30,7 @@ pub(crate) fn deliver_media(json: &str) -> Result<()> {
 
 pub(crate) fn create_media(
     host: Arc<Host>,
+    background: crate::AndroidBackgroundExecution,
     options: MediaSessionOptions,
 ) -> Result<SystemMediaSession> {
     let id = uuid::Uuid::new_v4().to_string();
@@ -41,21 +42,47 @@ pub(crate) fn create_media(
     let (sender, receiver) = async_channel::unbounded();
     MEDIA.with(|sessions| sessions.borrow_mut().insert(id.clone(), sender));
     Ok(SystemMediaSession::from_backend(
-        Box::new(AndroidMedia { host, id }),
+        Box::new(AndroidMedia {
+            host,
+            id,
+            background,
+        }),
         receiver,
     ))
 }
 struct AndroidMedia {
+    background: crate::AndroidBackgroundExecution,
     host: Arc<Host>,
     id: String,
 }
 impl MediaSessionBackend for AndroidMedia {
+    fn start_background_playback(&self) -> LocalBoxFuture<'_, Result<BackgroundPlayback>> {
+        Box::pin(async move {
+            let lease = self.background.start_media_playback(&self.id).await?;
+            Ok(BackgroundPlayback::from_backend(AndroidBackgroundPlayback(
+                lease,
+            )))
+        })
+    }
     fn update(&self, state: MediaSessionState) -> Result<()> {
         self.host.notification_operation(
             "media_update",
             &serde_json::json!({"id": self.id, "state": state}).to_string(),
         )?;
         Ok(())
+    }
+}
+struct AndroidBackgroundPlayback(crate::BackgroundExecution);
+impl BackgroundPlaybackBackend for AndroidBackgroundPlayback {
+    fn stopped(&mut self) -> LocalBoxFuture<'_, BackgroundPlaybackStopReason> {
+        Box::pin(async move {
+            match self.0.stopped().await {
+                crate::BackgroundStopReason::SessionClosed => {
+                    BackgroundPlaybackStopReason::SessionClosed
+                }
+                _ => BackgroundPlaybackStopReason::ServiceStopped,
+            }
+        })
     }
 }
 impl Drop for AndroidMedia {

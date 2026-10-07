@@ -62,7 +62,7 @@ impl BackgroundState {
             let pending = self.pending.borrow_mut().remove(token);
             if let Some(pending) = pending {
                 if let Some(ready) = pending.ready {
-                    let _ = ready.send(Err(anyhow!("Android data-sync service: {error}")));
+                    let _ = ready.send(Err(anyhow!("Android foreground service: {error}")));
                 }
                 let reason = if event == "timeout" {
                     BackgroundStopReason::Timeout
@@ -105,6 +105,29 @@ impl AndroidBackgroundExecution {
                 && !notification.title.trim().is_empty(),
             "notification channel, channel name and title are required"
         );
+        self.start(
+            "start",
+            "stop",
+            serde_json::json!({"notification": notification}),
+        )
+        .await
+    }
+
+    pub(crate) async fn start_media_playback(&self, session: &str) -> Result<BackgroundExecution> {
+        self.start(
+            "media_start",
+            "media_stop",
+            serde_json::json!({"session": session}),
+        )
+        .await
+    }
+
+    async fn start(
+        &self,
+        operation: &str,
+        stop_operation: &'static str,
+        mut payload: serde_json::Value,
+    ) -> Result<BackgroundExecution> {
         let token = uuid::Uuid::new_v4().to_string();
         let (ready_tx, ready_rx) = oneshot::channel();
         let (stopped_tx, stopped_rx) = oneshot::channel();
@@ -119,11 +142,12 @@ impl AndroidBackgroundExecution {
             state: self.0.clone(),
             token,
             stopped: stopped_rx,
+            stop_operation,
         };
-        self.0.host.background_operation(
-            "start",
-            &serde_json::json!({"token": lease.token, "notification": notification}).to_string(),
-        )?;
+        payload["token"] = lease.token.clone().into();
+        self.0
+            .host
+            .background_operation(operation, &payload.to_string())?;
         ready_rx
             .await
             .map_err(|_| anyhow!("Android service start cancelled"))??;
@@ -138,11 +162,16 @@ pub struct BackgroundExecution {
     state: Rc<BackgroundState>,
     token: String,
     stopped: oneshot::Receiver<BackgroundStopReason>,
+    stop_operation: &'static str,
 }
 
 impl BackgroundExecution {
     /// Updates notification content. Keep the original channel and channel name.
     pub fn update(&self, notification: DataSyncNotification) -> Result<()> {
+        ensure!(
+            self.stop_operation == "stop",
+            "update media notifications through SystemMediaSession"
+        );
         self.state.host.background_operation(
             "update",
             &serde_json::json!({"token": self.token, "notification": notification}).to_string(),
@@ -167,7 +196,10 @@ impl Drop for BackgroundExecution {
             .remove(&self.token)
             .is_some()
         {
-            let _ = self.state.host.background_operation("stop", &self.token);
+            let _ = self
+                .state
+                .host
+                .background_operation(self.stop_operation, &self.token);
         }
     }
 }

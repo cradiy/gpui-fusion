@@ -19,6 +19,7 @@ fn main() {
                 thumbnail_request: 0,
                 system_controls: false,
                 system_controls_pending: false,
+                background_task: None,
             });
             window.on_system_back(
                 cx,
@@ -47,6 +48,7 @@ struct MediaDemo {
     thumbnail_request: u64,
     system_controls: bool,
     system_controls_pending: bool,
+    background_task: Option<Task<()>>,
 }
 
 impl MediaDemo {
@@ -79,6 +81,7 @@ impl MediaDemo {
                             .expect("create media session")
                     });
                     this.system_controls = false;
+                    this.background_task = None;
                     this.subscription = Some(cx.subscribe(&player, |_, _, event, cx| {
                         if let VideoPlayerEvent::StateChanged(state) = event {
                             log_state(state);
@@ -151,6 +154,8 @@ impl MediaDemo {
 
     fn control(&mut self, action: usize, cx: &mut Context<Self>) {
         if action == 5 {
+            self.background_task = None;
+            self.system_controls = false;
             self.subscription = None;
             self.player = None;
             self.file = None;
@@ -189,6 +194,7 @@ impl MediaDemo {
             return;
         };
         if self.system_controls {
+            self.background_task = None;
             player.update(cx, |player, cx| {
                 player.set_system_media_session(None, Default::default(), cx)
             });
@@ -201,35 +207,75 @@ impl MediaDemo {
             app_name: "GPUI Media".into(),
         });
         self.system_controls_pending = true;
+        let title = self
+            .file
+            .as_ref()
+            .map_or("Media", |file| file.name())
+            .to_owned();
         cx.spawn(async move |this, cx| {
-            let result = request.await;
+            let result: anyhow::Result<_> = async {
+                let session = request.await?;
+                let options = gpui_media::VideoSystemMediaOptions {
+                    metadata: gpui::gpui_notifications::MediaMetadata {
+                        track_id: title.clone(),
+                        title,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                #[cfg(target_os = "android")]
+                let background = {
+                    session.update(gpui::gpui_notifications::MediaSessionState {
+                        metadata: options.metadata.clone(),
+                        ..Default::default()
+                    })?;
+                    Some(session.start_background_playback().await?)
+                };
+                #[cfg(not(target_os = "android"))]
+                let background: Option<
+                    gpui::gpui_notifications::BackgroundPlayback,
+                > = None;
+                Ok((session, options, background))
+            }
+            .await;
             let _ = this.update(cx, |this, cx| {
                 this.system_controls_pending = false;
                 if this.player.as_ref() != Some(&player) {
                     return;
                 }
                 match result {
-                    Ok(session) => {
-                        let options = gpui_media::VideoSystemMediaOptions {
-                            metadata: gpui::gpui_notifications::MediaMetadata {
-                                track_id: this
-                                    .file
-                                    .as_ref()
-                                    .map_or("Media", |file| file.name())
-                                    .to_owned(),
-                                title: this
-                                    .file
-                                    .as_ref()
-                                    .map_or("Media", |file| file.name())
-                                    .to_owned(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        };
+                    Ok((session, options, background)) => {
                         player.update(cx, |player, cx| {
                             player.set_system_media_session(Some(session), options, cx)
                         });
                         this.system_controls = true;
+                        if let Some(mut background) = background {
+                            let player_id = player.entity_id();
+                            this.background_task = Some(cx.spawn(async move |this, cx| {
+                                let reason = background.stopped().await;
+                                let _ = this.update(cx, |this, cx| {
+                                    if let Some(player) = this
+                                        .player
+                                        .clone()
+                                        .filter(|player| player.entity_id() == player_id)
+                                    {
+                                        player.update(cx, |player, cx| {
+                                            let _ = player.pause(cx);
+                                            player.set_system_media_session(
+                                                None,
+                                                Default::default(),
+                                                cx,
+                                            );
+                                        });
+                                        this.system_controls = false;
+                                        this.status =
+                                            format!("Background playback stopped: {reason:?}");
+                                        this.background_task = None;
+                                        cx.notify();
+                                    }
+                                });
+                            }));
+                        }
                     }
                     Err(error) => this.status = error.to_string(),
                 }

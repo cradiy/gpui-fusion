@@ -90,8 +90,38 @@ pub enum MediaCommand {
 
 pub trait MediaSessionBackend {
     fn update(&self, state: MediaSessionState) -> Result<()>;
+    /// Requests platform foreground execution using this session's media notification.
+    fn start_background_playback(&self) -> LocalBoxFuture<'_, Result<BackgroundPlayback>> {
+        Box::pin(async {
+            anyhow::bail!("background playback execution is unavailable on this platform")
+        })
+    }
     fn seeked(&self, _position: Duration) -> Result<()> {
         Ok(())
+    }
+}
+
+/// Why a live process lost its background playback allowance.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BackgroundPlaybackStopReason {
+    ServiceStopped,
+    SessionClosed,
+}
+
+pub trait BackgroundPlaybackBackend {
+    fn stopped(&mut self) -> LocalBoxFuture<'_, BackgroundPlaybackStopReason>;
+}
+
+/// Keeps platform foreground execution alive. Drop to release it independently of media controls.
+/// This neither starts playback nor restores it after process termination.
+pub struct BackgroundPlayback(Box<dyn BackgroundPlaybackBackend>);
+impl BackgroundPlayback {
+    pub fn from_backend(backend: impl BackgroundPlaybackBackend + 'static) -> Self {
+        Self(Box::new(backend))
+    }
+    /// Waits for service or host closure. The application should pause its own player.
+    pub async fn stopped(&mut self) -> BackgroundPlaybackStopReason {
+        self.0.stopped().await
     }
 }
 
@@ -102,6 +132,13 @@ pub struct SystemMediaSession {
     commands: Option<async_channel::Receiver<MediaCommand>>,
 }
 impl SystemMediaSession {
+    /// Requests background execution after a user action. Publish a state snapshot first.
+    /// Android requires the `background-media` host module and an active Activity.
+    /// Resolves after service promotion; other platforms return an unsupported error.
+    /// Retain the guard while playing and release it when background execution is no longer needed.
+    pub async fn start_background_playback(&self) -> Result<BackgroundPlayback> {
+        self.backend.start_background_playback().await
+    }
     pub fn from_backend(
         backend: Box<dyn MediaSessionBackend>,
         commands: async_channel::Receiver<MediaCommand>,

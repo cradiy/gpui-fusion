@@ -174,6 +174,7 @@ Optional modules are:
 | `media` | Media playback and decoding, including the Media3 dependency |
 | `notifications` | General notifications, actions and inline replies |
 | `media-notifications` | System media session and playback notification; independent of `media` |
+| `background-media` | Explicit foreground playback leases; includes `media-notifications`; requires `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_MEDIA_PLAYBACK` in `permissions` |
 | `data-sync` | Session-bound foreground execution for application-owned transfers; requires `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_DATA_SYNC` in `permissions` |
 
 Disabled modules omit their Kotlin sources, Manifest components and module-specific

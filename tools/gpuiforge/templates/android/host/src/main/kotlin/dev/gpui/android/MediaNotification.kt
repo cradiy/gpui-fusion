@@ -24,6 +24,17 @@ internal class MediaNotification(private val context: Context, private val id: S
     private var canNext = false
     private var canPrevious = false
     private var lastNotification = ""
+// gpuiforge:if background-media
+    private var notification: Notification? = null
+    internal fun backgroundNotification(): Notification {
+        check(!closed) { "Media session closed" }
+        return checkNotNull(notification) { "Publish a media state before requesting background playback" }
+    }
+    internal fun hideStandaloneNotification() { manager.cancel("gpui.media:$id", 1) }
+    internal fun restoreStandaloneNotification() {
+        if (!closed) notification?.let { manager.notify("gpui.media:$id", 1, it) }
+    }
+// gpuiforge:endif
     init {
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Media playback", NotificationManager.IMPORTANCE_LOW))
         session.setCallback(object : MediaSession.Callback() {
@@ -88,12 +99,22 @@ internal class MediaNotification(private val context: Context, private val id: S
         if (canNext) { button("next", "Next", android.R.drawable.ic_media_next); count++ }
         button("stop", "Stop", android.R.drawable.ic_menu_close_clear_cancel)
         builder.setStyle(Notification.MediaStyle().setMediaSession(session.sessionToken).setShowActionsInCompactView(*IntArray(count) { it }))
-        manager.notify("gpui.media:$id", 1, builder.build())
+        val built = builder.build()
+// gpuiforge:if background-media
+        notification = built
+        if (!MediaPlaybackService.publish(this, built)) manager.notify("gpui.media:$id", 1, built)
+// gpuiforge:else
+        manager.notify("gpui.media:$id", 1, built)
+// gpuiforge:endif
         lastNotification = signature
     }
     override fun close() {
         if (closed) return
         closed = true
+// gpuiforge:if background-media
+        MediaPlaybackService.close(this)
+        notification = null
+// gpuiforge:endif
         sessions.remove(id)
         manager.cancel("gpui.media:$id", 1)
         session.isActive = false

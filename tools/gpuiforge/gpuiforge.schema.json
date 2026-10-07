@@ -36,6 +36,11 @@
           "const": "data-sync",
           "description": "Session-bound foreground execution for application-owned data transfers. Declare FOREGROUND_SERVICE and FOREGROUND_SERVICE_DATA_SYNC. Does not schedule work, survive session closure or restore tasks after process death.",
           "type": "string"
+        },
+        {
+          "const": "background-media",
+          "description": "Foreground execution using an existing media notification. Includes media-notifications, but not a player. Declare FOREGROUND_SERVICE and FOREGROUND_SERVICE_MEDIA_PLAYBACK; applications explicitly request and release execution. Does not restore playback after session closure or process death.",
+          "type": "string"
         }
       ]
     },

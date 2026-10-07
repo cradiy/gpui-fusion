@@ -112,10 +112,14 @@ pub enum AndroidFeature {
     MediaNotifications,
     /// Session-bound foreground execution for application-owned data transfers. Declare FOREGROUND_SERVICE and FOREGROUND_SERVICE_DATA_SYNC. Does not schedule work, survive session closure or restore tasks after process death.
     DataSync,
+    /// Foreground execution using an existing media notification. Includes media-notifications, but not a player. Declare FOREGROUND_SERVICE and FOREGROUND_SERVICE_MEDIA_PLAYBACK; applications explicitly request and release execution. Does not restore playback after session closure or process death.
+    BackgroundMedia,
 }
 impl Platform {
     pub fn feature(&self, feature: AndroidFeature) -> bool {
         self.features.contains(&feature)
+            || (feature == AndroidFeature::MediaNotifications
+                && self.features.contains(&AndroidFeature::BackgroundMedia))
             || (feature == AndroidFeature::Files
                 && self.features.contains(&AndroidFeature::Sharing))
     }
@@ -337,15 +341,25 @@ impl Project {
                         "invalid Android permission name: {permission}"
                     );
                 }
-                if platform.feature(AndroidFeature::DataSync) {
-                    for required in [
-                        "android.permission.FOREGROUND_SERVICE",
+                for (feature, name, permission) in [
+                    (
+                        AndroidFeature::DataSync,
+                        "data-sync",
                         "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
-                    ] {
-                        ensure!(
-                            platform.permissions.iter().any(|value| value == required),
-                            "data-sync requires {required} in permissions"
-                        );
+                    ),
+                    (
+                        AndroidFeature::BackgroundMedia,
+                        "background-media",
+                        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+                    ),
+                ] {
+                    if platform.feature(feature) {
+                        for required in ["android.permission.FOREGROUND_SERVICE", permission] {
+                            ensure!(
+                                platform.permissions.iter().any(|value| value == required),
+                                "{name} requires {required} in permissions"
+                            );
+                        }
                     }
                 }
                 platform.permissions.sort();

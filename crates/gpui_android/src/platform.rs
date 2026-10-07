@@ -187,7 +187,8 @@ impl Platform for AndroidPlatform {
         Result<gpui::gpui_notifications::SystemMediaSession>,
     > {
         let host = self.host.clone();
-        Box::pin(async move { crate::notifications::create_media(host, options) })
+        let background = self.background_execution();
+        Box::pin(async move { crate::notifications::create_media(host, background, options) })
     }
     fn notifications(
         &self,

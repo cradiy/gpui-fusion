@@ -14,9 +14,9 @@
           "program": "bash"
         }
       ],
-      "features": ["files", "media", "media-notifications"],
+      "features": ["files", "media", "background-media"],
       "notification-icon": "assets/ic_media_notification.xml",
-      "permissions": ["android.permission.INTERNET"],
+      "permissions": ["android.permission.INTERNET", "android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"],
       "run": [
         {
           "args": ["-s", "{{device}}", "install", "-r", "{{artifact}}"],

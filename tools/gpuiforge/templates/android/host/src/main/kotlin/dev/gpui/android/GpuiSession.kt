@@ -95,15 +95,35 @@ class GpuiSession : AutoCloseable {
     private fun backgroundOperation(operation: String, payload: String): String? = try {
         checkThread()
         check(!closed) { "GPUI session is closed" }
-// gpuiforge:if data-sync
-        val host = dataSync ?: DataSyncHost(requireContext().applicationContext) { token, event, error ->
-            handler.post { if (!closed && id != 0L) nativeBackgroundEvent(id, token, event, error) }
-        }.also { dataSync = it }
-        host.operation(operation, payload, active())
-        null
+        if (operation.startsWith("media_")) {
+// gpuiforge:if background-media
+            when (operation) {
+                "media_start" -> {
+                    check(active()) { "Start background playback from an active Activity after a user action" }
+                    val request = org.json.JSONObject(payload)
+                    val media = checkNotNull(mediaNotifications[request.getString("session")]) { "Media session closed" }
+                    MediaPlaybackService.start(requireContext().applicationContext, media, request.getString("token")) { token, event, error ->
+                        handler.post { if (!closed && id != 0L) nativeBackgroundEvent(id, token, event, error) }
+                    }
+                }
+                "media_stop" -> MediaPlaybackService.stop(payload)
+                else -> error("Unknown background media operation")
+            }
+            null
 // gpuiforge:else
-        unsupported("data-sync")
+            unsupported("background-media")
 // gpuiforge:endif
+        } else {
+// gpuiforge:if data-sync
+            val host = dataSync ?: DataSyncHost(requireContext().applicationContext) { token, event, error ->
+                handler.post { if (!closed && id != 0L) nativeBackgroundEvent(id, token, event, error) }
+            }.also { dataSync = it }
+            host.operation(operation, payload, active())
+            null
+// gpuiforge:else
+            unsupported("data-sync")
+// gpuiforge:endif
+        }
     } catch (error: RuntimeException) { error.message ?: error.javaClass.simpleName }
 // gpuiforge:if notifications
     private var notificationStore: NotificationStore? = null

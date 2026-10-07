@@ -1,5 +1,8 @@
 # System media controls
 
+For Android foreground playback leases that reuse the media notification, see
+[background execution](../../gpui_android/docs/background.md#media-playback).
+
 `SystemMediaSession` publishes an application's active playback to Android
 MediaSession and MediaStyle notifications, Linux MPRIS, Windows system media
 transport controls, macOS Now Playing, or the browser Media Session API.
@@ -94,5 +97,7 @@ and Web have one active system media owner per application/page. Their system
 surfaces use the application identity instead of an Android drawable.
 
 A session controls presentation and command delivery. It does not decode media,
-request a foreground service, persist a playlist, or resume after process death.
-Background playback requires application-specific lifecycle/service ownership.
+persist a playlist, or resume after process death. Android foreground execution
+is requested explicitly through `start_background_playback()`; merely creating
+or updating a media session does not start a service. Applications retain
+ownership of playback and its host lifecycle.

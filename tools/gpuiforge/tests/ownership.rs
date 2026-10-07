@@ -179,9 +179,10 @@ fn sync_prunes_disabled_modules_and_icons() {
       "features": [
         "sharing",
         "notifications",
-        "data-sync"
+        "data-sync",
+        "background-media"
       ],
-      "permissions": ["android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_DATA_SYNC"],
+      "permissions": ["android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_DATA_SYNC", "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"],
       "icon": "icon.xml",
       "notification-icon": "icon.xml"
     }
@@ -203,6 +204,8 @@ fn sync_prunes_disabled_modules_and_icons() {
     assert!(host.join("FileStore.kt").exists());
     assert!(host.join("NotificationStore.kt").exists());
     assert!(host.join("DataSyncService.kt").exists());
+    assert!(host.join("MediaPlaybackService.kt").exists());
+    assert!(host.join("MediaNotification.kt").exists());
     assert!(
         fs::read_to_string(output.join("host/src/main/AndroidManifest.xml"))
             .unwrap()
@@ -254,6 +257,8 @@ fn sync_prunes_disabled_modules_and_icons() {
         "NotificationStore.kt",
         "ShareIntent.kt",
         "DataSyncService.kt",
+        "MediaPlaybackService.kt",
+        "MediaNotification.kt",
     ] {
         assert!(!host.join(file).exists());
     }

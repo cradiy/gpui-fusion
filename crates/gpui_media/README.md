@@ -365,7 +365,7 @@ cx.subscribe(&player, |_, _, event, cx| {
 `SystemBackend` reports available audio and embedded-subtitle streams through
 `MediaInfoChanged`. Applications choose streams through the player while the
 backend preserves the shared playback clock.
-See the [audio track guide](docs/media-tracks.md) for enumeration and selection.
+See the [media track guide](docs/media-tracks.md) for enumeration, selection and subtitle events.
 
 Embedded subtitle cues arrive through `VideoPlayerEvent::Subtitle`. External
 SRT, WebVTT and ASS/SSA text can be normalized with `parse_subtitles`; cue

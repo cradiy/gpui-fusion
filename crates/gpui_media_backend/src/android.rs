@@ -60,9 +60,14 @@ pub(super) fn initialize() -> MediaResult<()> {
                             system_command as *mut c_void,
                         ),
                         method(
-                            "nativeAudioTracks",
+                            "nativeSubtitles",
+                            "(JJLjava/lang/String;JLjava/lang/String;)V",
+                            subtitles_changed as *mut c_void,
+                        ),
+                        method(
+                            "nativeTracks",
                             "(JJLjava/lang/String;)V",
-                            audio_tracks as *mut c_void,
+                            tracks_changed as *mut c_void,
                         ),
                     ],
                 )?;
@@ -417,7 +422,7 @@ extern "system" fn state_changed(
 }
 
 #[derive(serde::Deserialize)]
-struct AudioTrack {
+struct Track {
     id: String,
     codec: Option<String>,
     channels: Option<u32>,
@@ -426,29 +431,37 @@ struct AudioTrack {
     language: Option<String>,
     title: Option<String>,
     selected: bool,
+    forced: bool,
 }
 
-extern "system" fn audio_tracks(
+#[derive(serde::Deserialize)]
+struct Tracks {
+    audio: Vec<Track>,
+    subtitles: Vec<Track>,
+}
+
+extern "system" fn tracks_changed(
     mut env: JNIEnv,
     _: JClass,
     id: jlong,
     generation: jlong,
     tracks: JString,
 ) {
-    let tracks = (|| -> anyhow::Result<Vec<AudioTrack>> {
+    let tracks = (|| -> anyhow::Result<Tracks> {
         let json = String::from(env.get_string(&tracks)?);
         Ok(serde_json::from_str(&json)?)
     })();
     let tracks = match tracks {
         Ok(tracks) => tracks,
         Err(error) => {
-            log::warn!("Android audio track metadata: {error}");
+            log::warn!("Android track metadata: {error}");
             return;
         }
     };
     with_state(id, generation, |state| {
         let mut info = state.info.as_deref().cloned().unwrap_or_default();
         info.audio_streams = tracks
+            .audio
             .into_iter()
             .map(|track| AudioStreamInfo {
                 id: track.id.into(),
@@ -461,9 +474,78 @@ extern "system" fn audio_tracks(
                 selected: track.selected,
             })
             .collect();
+        info.subtitle_streams = tracks
+            .subtitles
+            .into_iter()
+            .map(|track| SubtitleStreamInfo {
+                id: track.id.into(),
+                codec: track.codec.map(Into::into),
+                language: track.language.map(Into::into),
+                title: track.title.map(Into::into),
+                forced: track.forced,
+                selected: track.selected,
+            })
+            .collect();
         let info = Arc::new(info);
         state.info = Some(info.clone());
         state.emit(MediaBackendEvent::MediaInfoChanged(info));
+    });
+}
+
+extern "system" fn subtitles_changed(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    generation: jlong,
+    stream: JString,
+    start_us: jlong,
+    texts: JString,
+) {
+    let snapshot = (|| -> anyhow::Result<_> {
+        let stream = if stream.is_null() {
+            None
+        } else {
+            Some(String::from(env.get_string(&stream)?))
+        };
+        let texts: Vec<String> = serde_json::from_str(&String::from(env.get_string(&texts)?))?;
+        Ok((stream, texts))
+    })();
+    let (stream, texts) = match snapshot {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            log::warn!("Android subtitles: {error}");
+            return;
+        }
+    };
+    with_state(id, generation, |state| {
+        if let Some(stream) = &stream
+            && !state.info.as_ref().is_some_and(|info| {
+                info.subtitle_streams
+                    .iter()
+                    .any(|track| track.selected && track.id.as_str() == stream)
+            })
+        {
+            return;
+        }
+        state.emit(MediaBackendEvent::Subtitle(SubtitleEvent::Reset));
+        if let Some(stream) = stream {
+            let stream_id = MediaStreamId::from(stream);
+            for text in texts {
+                let text: Arc<str> = text.into();
+                state.emit(MediaBackendEvent::Subtitle(SubtitleEvent::Cue {
+                    stream_id: stream_id.clone(),
+                    cue: Arc::new(SubtitleCue {
+                        id: None,
+                        start: Duration::from_micros(start_us.max(0) as u64),
+                        end: Duration::MAX,
+                        text: text.clone(),
+                        raw: text,
+                        settings: None,
+                        format: SubtitleFormat::PlainText,
+                    }),
+                }));
+            }
+        }
     });
 }
 
@@ -575,6 +657,51 @@ struct AndroidSession {
 }
 
 impl AndroidSession {
+    fn select_stream(&mut self, id: Option<&MediaStreamId>, text: bool) -> MediaResult<()> {
+        if let Some(id) = id {
+            let state = self.state.lock().map_err(error)?;
+            let available = state.info.as_ref().is_some_and(|info| {
+                if text {
+                    info.subtitle_streams.iter().any(|stream| &stream.id == id)
+                } else {
+                    info.audio_streams.iter().any(|stream| &stream.id == id)
+                }
+            });
+            if !available {
+                return Err(MediaError::invalid_input(
+                    "unknown or unavailable Android stream",
+                ));
+            }
+        }
+        let message = AndroidRuntime::get()
+            .map_err(error)?
+            .with_env(|env| {
+                let id = id.map(|id| env.new_string(id.as_str())).transpose()?;
+                let object = match id {
+                    Some(id) => jni::objects::JObject::from(id),
+                    None => jni::objects::JObject::null(),
+                };
+                let result = env
+                    .call_method(
+                        self.object.as_obj(),
+                        "selectStream",
+                        "(Ljava/lang/String;Z)Ljava/lang/String;",
+                        &[JValue::Object(&object), JValue::Bool(text as jboolean)],
+                    )?
+                    .l()?;
+                if result.is_null() {
+                    Ok(None)
+                } else {
+                    Ok(Some(String::from(env.get_string(&JString::from(result))?)))
+                }
+            })
+            .map_err(error)?;
+        match message {
+            Some(message) => Err(MediaError::invalid_input(message)),
+            None => Ok(()),
+        }
+    }
+
     fn command(&self, operation: i32, value: f64, advance: bool) -> MediaResult<()> {
         let generation = {
             let mut state = self.state.lock().map_err(error)?;
@@ -635,6 +762,7 @@ impl MediaPlaybackSession for AndroidSession {
             accurate_seeking: true,
             frame_extraction: true,
             playback_rate: true,
+            subtitles: true,
             ..Default::default()
         }
     }
@@ -684,41 +812,10 @@ impl MediaPlaybackSession for AndroidSession {
         self.command(7, if enabled { 1. } else { 0. }, false)
     }
     fn select_audio_stream(&mut self, id: &MediaStreamId) -> MediaResult<()> {
-        let available = self
-            .state
-            .lock()
-            .map_err(error)?
-            .info
-            .as_ref()
-            .is_some_and(|info| info.audio_streams.iter().any(|stream| &stream.id == id));
-        if !available {
-            return Err(MediaError::invalid_input(
-                "unknown or unavailable Android audio stream",
-            ));
-        }
-        let message = AndroidRuntime::get()
-            .map_err(error)?
-            .with_env(|env| {
-                let id = env.new_string(id.as_str())?;
-                let result = env
-                    .call_method(
-                        self.object.as_obj(),
-                        "selectAudioStream",
-                        "(Ljava/lang/String;)Ljava/lang/String;",
-                        &[JValue::Object(&id)],
-                    )?
-                    .l()?;
-                if result.is_null() {
-                    Ok(None)
-                } else {
-                    Ok(Some(String::from(env.get_string(&JString::from(result))?)))
-                }
-            })
-            .map_err(error)?;
-        match message {
-            Some(message) => Err(MediaError::invalid_input(message)),
-            None => Ok(()),
-        }
+        self.select_stream(Some(id), false)
+    }
+    fn select_subtitle_stream(&mut self, id: Option<&MediaStreamId>) -> MediaResult<()> {
+        self.select_stream(id, true)
     }
     fn set_wake_mode(&mut self, mode: PlaybackWakeMode) -> MediaResult<()> {
         let mode = match mode {

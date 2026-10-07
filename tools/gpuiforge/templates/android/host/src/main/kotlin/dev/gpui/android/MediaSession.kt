@@ -10,6 +10,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -38,7 +39,10 @@ internal class MediaSession(
     private var player: ExoPlayer? = null
     private var frames: MediaFrames? = null
     private var systemControls: SystemMediaControls? = null
-    private val audioTracks = MediaAudioTracks(id) { revision, tracks -> nativeAudioTracks(id, revision, tracks) }
+    private val tracks = MediaTracks(id) { revision, tracks -> nativeTracks(id, revision, tracks) }
+    private var lastSubtitle = ""
+    private var expectedSubtitle: String? = null
+    private var subtitleSelectionPending = false
     @Volatile private var generation = 0L
     private var failed = false
     private val tick = object : Runnable {
@@ -65,19 +69,31 @@ internal class MediaSession(
         return null
     }
 
-    fun selectAudioStream(key: String): String? {
+    fun selectStream(key: String?, text: Boolean): String? {
         if (closed.get()) return "Media session closed"
-        if (extractionPosition >= 0) return "Frame extraction does not select audio streams"
-        val choice = audioTracks.find(key) ?: return "Unknown or unavailable audio stream"
+        if (extractionPosition >= 0) return "Frame extraction does not select streams"
+        val type = if (text) C.TRACK_TYPE_TEXT else C.TRACK_TYPE_AUDIO
+        val choice = key?.let { tracks.find(it) }
+        if (key != null && (choice == null || choice.type != type)) return "Unknown or unavailable stream"
+        if (!text && choice == null) return "An audio stream is required"
         if (!handler.post {
             guarded {
                 val current = player ?: return@guarded
                 // A reload or track-list change can invalidate a queued request.
-                if (audioTracks.find(key) != choice) return@guarded
-                current.trackSelectionParameters = current.trackSelectionParameters.buildUpon()
-                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
-                    .setOverrideForType(TrackSelectionOverride(choice.group, choice.index))
-                    .build()
+                if (key != null && tracks.find(key) != choice) return@guarded
+                if (text) {
+                    expectedSubtitle = key
+                    subtitleSelectionPending = true
+                    clearSubtitles()
+                }
+                val parameters = current.trackSelectionParameters.buildUpon()
+                    .setTrackTypeDisabled(type, choice == null).clearOverridesOfType(type)
+                if (choice != null) parameters.setOverrideForType(TrackSelectionOverride(choice.group, choice.index))
+                current.trackSelectionParameters = parameters.build()
+                if (text && tracks.selectedSubtitle == key) {
+                    subtitleSelectionPending = false
+                    reportSubtitles(current.currentCues)
+                }
             }
         }) return "Media session closed"
         return null
@@ -127,7 +143,14 @@ internal class MediaSession(
                     override fun onEvents(player: Player, events: Player.Events) {
                         if (closed.get() || failed) return
                         if (!validateExtraction()) return
-                        audioTracks.report(player.currentTracks, generation)
+                        tracks.report(player.currentTracks, generation)
+                        if (subtitleSelectionPending && tracks.selectedSubtitle == expectedSubtitle) {
+                            subtitleSelectionPending = false
+                        }
+                        if (events.contains(Player.EVENT_CUES) || events.contains(Player.EVENT_TRACKS_CHANGED)) {
+                            reportSubtitles(player.currentCues)
+                        }
+                        if (player.playbackState == Player.STATE_ENDED) clearSubtitles()
                         val size = player.videoSize
                         if (size.width > 0 && size.height > 0) {
                             output.width = (size.width * size.pixelWidthHeightRatio).toInt().coerceAtLeast(1)
@@ -176,6 +199,7 @@ internal class MediaSession(
                 if (operation == 2 || operation == 3 || operation == 6) {
                     generation = revision
                     frames?.discardPending()
+                    clearSubtitles()
                 }
                 when (operation) {
                     0 -> {
@@ -191,20 +215,39 @@ internal class MediaSession(
                     5 -> current.setPlaybackSpeed(value.toFloat())
                     6 -> {
                         failed = false
-                        audioTracks.reset(generation)
+                        tracks.reset(generation)
+                        subtitleSelectionPending = false
                         current.trackSelectionParameters = current.trackSelectionParameters.buildUpon()
-                            .clearOverridesOfType(C.TRACK_TYPE_AUDIO).build()
+                            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                            .clearOverridesOfType(C.TRACK_TYPE_TEXT).build()
                         current.setMediaItem(MediaItem.fromUri(uri))
                         current.playWhenReady = value != 0.0
                         current.prepare()
                     }
                     7 -> current.setAudioAttributes(AudioAttributes.DEFAULT, value != 0.0)
                 }
-                audioTracks.report(current.currentTracks, generation)
+                tracks.report(current.currentTracks, generation)
                 handler.removeCallbacks(tick)
                 tick.run()
             }
         }
+    }
+
+    private fun clearSubtitles() {
+        lastSubtitle = ""
+        nativeSubtitles(id, generation, null, 0, "[]")
+    }
+
+    private fun reportSubtitles(group: CueGroup) {
+        if (extractionPosition >= 0 || subtitleSelectionPending) return
+        val stream = tracks.selectedSubtitle
+        val texts = org.json.JSONArray()
+        if (stream != null) group.cues.forEach { cue -> cue.text?.let { texts.put(it.toString()) } }
+        val encoded = texts.toString()
+        val signature = "$generation:$stream:${group.presentationTimeUs}:$encoded"
+        if (signature == lastSubtitle) return
+        lastSubtitle = signature
+        nativeSubtitles(id, generation, stream, group.presentationTimeUs.coerceAtLeast(0), encoded)
     }
 
     private fun reportState() {
@@ -246,6 +289,7 @@ internal class MediaSession(
     private fun fail(code: Int, message: String) {
         if (closed.get() || failed) return
         failed = true
+        clearSubtitles()
         handler.removeCallbacks(tick)
         runCatching { player?.pause() }
         runCatching { systemControls?.setError(message) }
@@ -279,5 +323,6 @@ internal class MediaSession(
     private external fun nativeFrame(id: Long, generation: Long, pixels: ByteBuffer, width: Int, height: Int, timestamp: Long)
     private external fun nativeError(id: Long, generation: Long, code: Int, message: String)
     private external fun nativeSystemCommand(id: Long, operation: Int, position: Long)
-    private external fun nativeAudioTracks(id: Long, generation: Long, tracks: String)
+    private external fun nativeSubtitles(id: Long, generation: Long, stream: String?, startUs: Long, texts: String)
+    private external fun nativeTracks(id: Long, generation: Long, tracks: String)
 }

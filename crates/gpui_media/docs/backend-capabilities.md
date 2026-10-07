@@ -10,13 +10,17 @@ Windows delivers CPU frames through Media Foundation and WIC. Decoder and
 container support depend on the system's installed media components.
 
 Android supports device-decodable progressive local and HTTP(S) media, audio
-track selection, and CPU frame delivery. Subtitles, frame stepping, DRM,
+track selection, embedded text subtitles, and CPU frame delivery. Frame stepping, DRM,
 adaptive-streaming extensions and HDR output are unavailable. Extraction uses
 `VideoDecoderPolicy::Auto` and `SeekMode::Accurate`; explicit decoder policies,
 other seek modes, audio-only sources and positions beyond a known video duration
 return errors. HTTP options support headers, user agent and connect/read timeout;
 other explicit options return unsupported-operation errors. Video readback and
 upload costs should be measured for high-resolution or simultaneous players.
+
+Android exposes embedded SubRip, WebVTT, SSA/ASS, TTML and tx3g text tracks
+supported by Media3. Bitmap subtitles are not exposed. Text is delivered as
+live plain-text cues; formatting and positioning are not retained.
 
 `MediaPlaybackRequest::output_capabilities` describes native layouts accepted
 by the consumer. It does not choose the decoder or its device. GStreamer

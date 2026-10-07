@@ -1,8 +1,8 @@
 use gpui::gpui_notifications::MediaArtwork;
 use gpui::{prelude::*, *};
 use gpui_media::{
-    MediaSource, PlaybackWakeMode, SeekMode, VideoFrameExtractor, VideoPlayer, VideoPlayerEvent,
-    VideoSurface,
+    MediaSource, MediaStreamId, PlaybackWakeMode, SeekMode, SubtitleCue, SubtitleEvent,
+    VideoFrameExtractor, VideoPlayer, VideoPlayerEvent, VideoSurface, video_container,
 };
 use std::{sync::Arc, time::Duration};
 
@@ -25,6 +25,7 @@ fn main() {
                 wake_mode: PlaybackWakeMode::None,
                 artwork: None,
                 artwork_request: 0,
+                subtitles: Vec::new(),
             });
             window.on_system_back(
                 cx,
@@ -57,6 +58,7 @@ struct MediaDemo {
     wake_mode: PlaybackWakeMode,
     artwork: Option<MediaArtwork>,
     artwork_request: u64,
+    subtitles: Vec<(MediaStreamId, Arc<SubtitleCue>)>,
 }
 
 impl MediaDemo {
@@ -93,7 +95,17 @@ impl MediaDemo {
                     this.artwork = None;
                     this.artwork_request += 1;
                     this.background_task = None;
-                    this.subscription = Some(cx.subscribe(&player, |_, _, event, cx| {
+                    this.subtitles.clear();
+                    this.subscription = Some(cx.subscribe(&player, |this, _, event, cx| {
+                        if let VideoPlayerEvent::Subtitle(event) = event {
+                            match event {
+                                SubtitleEvent::Reset => this.subtitles.clear(),
+                                SubtitleEvent::Cue { stream_id, cue } => {
+                                    this.subtitles.push((stream_id.clone(), cue.clone()))
+                                }
+                                _ => {}
+                            }
+                        }
                         if let VideoPlayerEvent::StateChanged(state) = event {
                             log_state(state);
                         }
@@ -203,6 +215,28 @@ impl MediaDemo {
         if let Some(player) = &self.player
             && let Err(error) = player.update(cx, |player, cx| player.select_audio_stream(id, cx))
         {
+            self.status = error.to_string();
+            cx.notify();
+        }
+    }
+
+    fn cycle_subtitle(&mut self, cx: &mut Context<Self>) {
+        let Some(player) = &self.player else {
+            return;
+        };
+        let next = player.read(cx).media_info().and_then(|info| {
+            let next = info
+                .subtitle_streams
+                .iter()
+                .position(|track| track.selected)
+                .map_or(0, |index| index + 1);
+            info.subtitle_streams
+                .get(next)
+                .map(|track| track.id.clone())
+        });
+        if let Err(error) = player.update(cx, |player, cx| {
+            player.select_subtitle_stream(next.as_ref(), cx)
+        }) {
             self.status = error.to_string();
             cx.notify();
         }
@@ -432,6 +466,45 @@ impl Render for MediaDemo {
             .child(div().text_sm().child(self.status.clone()));
         if let Some(player) = &self.player {
             let timeline = player.read(cx).timeline();
+            let selected_subtitle = player
+                .read(cx)
+                .media_info()
+                .and_then(|info| info.selected_subtitle_stream());
+            let subtitle_text = self
+                .subtitles
+                .iter()
+                .filter(|(id, cue)| {
+                    selected_subtitle.is_some_and(|track| &track.id == id)
+                        && cue.start <= timeline.position()
+                        && timeline.position() < cue.end
+                })
+                .map(|(_, cue)| cue.text.as_ref())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if player
+                .read(cx)
+                .media_info()
+                .is_some_and(|info| !info.subtitle_streams.is_empty())
+            {
+                let label = selected_subtitle
+                    .map(|track| {
+                        track
+                            .title
+                            .as_deref()
+                            .or(track.language.as_deref())
+                            .unwrap_or("On")
+                    })
+                    .unwrap_or("Off");
+                column = column.child(
+                    div()
+                        .id("subtitle-track")
+                        .p_3()
+                        .rounded_lg()
+                        .bg(rgb(0x30475c))
+                        .child(format!("Subtitles: {label}"))
+                        .on_click(cx.listener(|this, _, _, cx| this.cycle_subtitle(cx))),
+                );
+            }
             if let Some(info) = player
                 .read(cx)
                 .media_info()
@@ -517,7 +590,24 @@ impl Render for MediaDemo {
                         .w_full()
                         .flex_shrink_0()
                         .bg(rgb(0x000000))
-                        .child(player.clone()),
+                        .child(video_container(player.clone()).when(
+                            !subtitle_text.is_empty(),
+                            |video| {
+                                video.child(
+                                    div()
+                                        .absolute()
+                                        .bottom_4()
+                                        .left_4()
+                                        .right_4()
+                                        .p_2()
+                                        .rounded_md()
+                                        .bg(rgba(0x000000b0))
+                                        .text_color(rgb(0xffffff))
+                                        .text_center()
+                                        .child(subtitle_text),
+                                )
+                            },
+                        )),
                 )
                 .child(format!(
                     "{:.1}s / {:.1}s · {:?}",

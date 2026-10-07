@@ -201,6 +201,8 @@ class GpuiSession : AutoCloseable {
     internal fun pinch(phase: Int, x: Float, y: Float, delta: Float) {
         if (id != 0L) nativePinch(id, phase, x, y, delta)
     }
+    internal fun longPress(x: Float, y: Float): Boolean =
+        !closed && id != 0L && nativeLongPress(id, x, y)
     internal fun mouse(kind: Int, x: Float, y: Float, button: Int, pressed: Int,
                        clicks: Int, modifiers: Int, dx: Float = 0f, dy: Float = 0f) {
         if (id != 0L) nativeMouse(id, kind, x, y, button, pressed, clicks, modifiers, dx, dy)
@@ -434,6 +436,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeBack(id: Long): Boolean
         @JvmStatic private external fun nativeTouch(id: Long, pointer: Int, phase: Int, x: Float, y: Float): Boolean
         @JvmStatic private external fun nativePinch(id: Long, phase: Int, x: Float, y: Float, delta: Float)
+        @JvmStatic private external fun nativeLongPress(id: Long, x: Float, y: Float): Boolean
         @JvmStatic private external fun nativeTap(id: Long, x: Float, y: Float)
         @JvmStatic private external fun nativeOpenUrl(id: Long, url: String)
         @JvmStatic private external fun nativeReceiveShare(id: Long, text: String?, mime: String?, documents: Array<SelectedDocument>, error: String?)

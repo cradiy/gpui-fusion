@@ -313,6 +313,14 @@ impl AndroidWindow {
         }));
     }
 
+    pub fn long_press(&self, x: f32, y: f32) -> bool {
+        let scale = self.display.scale.get();
+        let position = point(px(x / scale), px(y / scale));
+        self.pointer.set(position);
+        self.input(PlatformInput::LongPress(LongPressEvent { position }))
+            .default_prevented
+    }
+
     pub fn focus_text_input(&self, x: f32, y: f32) -> bool {
         let position = point(
             px(x / self.display.scale.get()),

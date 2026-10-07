@@ -15,7 +15,6 @@
 //! and Tailwind-like styling that you can use to build your own custom elements. Div is
 //! constructed by combining these two systems into an all-in-one element.
 
-use crate::PinchEvent;
 use crate::{
     Action, ActiveDrag, AnyDrag, AnyElement, AnyTooltip, AnyView, App, Bounds, ClickEvent,
     DispatchPhase, Display, DragEnd, DragEndListener, DragOrigin, DragPhase, DragSessionId,
@@ -27,6 +26,7 @@ use crate::{
     Render, ScrollWheelEvent, SharedString, Size, Style, StyleRefinement, Styled, Task, TooltipId,
     Visibility, Window, WindowControlArea, point, px, size,
 };
+use crate::{LongPressEvent, PinchEvent};
 use collections::HashMap;
 use gpui_util::ResultExt;
 use refineable::Refineable;
@@ -379,6 +379,33 @@ impl Interactivity {
             .push(Box::new(move |event, phase, hitbox, window, cx| {
                 if phase == DispatchPhase::Bubble && hitbox.is_hovered(window) {
                     (listener)(event, window, cx);
+                }
+            }));
+    }
+
+    /// Listen for a stationary long press. Prevent the default action to override
+    /// native text selection; stop propagation to exclude ancestor listeners.
+    pub fn on_long_press(
+        &mut self,
+        listener: impl Fn(&LongPressEvent, &mut Window, &mut App) + 'static,
+    ) {
+        self.long_press_listeners
+            .push(Box::new(move |event, phase, hitbox, window, cx| {
+                if phase == DispatchPhase::Bubble && hitbox.is_hovered(window) {
+                    listener(event, window, cx);
+                }
+            }));
+    }
+
+    /// Listen for long presses during the capture phase, before descendants.
+    pub fn capture_long_press(
+        &mut self,
+        listener: impl Fn(&LongPressEvent, &mut Window, &mut App) + 'static,
+    ) {
+        self.long_press_listeners
+            .push(Box::new(move |event, phase, _, window, cx| {
+                if phase == DispatchPhase::Capture {
+                    listener(event, window, cx);
                 }
             }));
     }
@@ -1030,6 +1057,25 @@ pub trait InteractiveElement: Sized {
         self
     }
 
+    /// Listen for a stationary long press without synthesizing a click.
+    /// Call `window.prevent_default()` to override native text selection.
+    fn on_long_press(
+        mut self,
+        listener: impl Fn(&LongPressEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.interactivity().on_long_press(listener);
+        self
+    }
+
+    /// Listen for long presses during capture, before descendant listeners.
+    fn capture_long_press(
+        mut self,
+        listener: impl Fn(&LongPressEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.interactivity().capture_long_press(listener);
+        self
+    }
+
     /// Bind the given callback to pinch gesture events during the capture phase.
     /// The fluent API equivalent to [`Interactivity::capture_pinch`].
     ///
@@ -1629,6 +1675,8 @@ pub(crate) type ScrollWheelListener =
 
 pub(crate) type PinchListener =
     Box<dyn Fn(&PinchEvent, DispatchPhase, &Hitbox, &mut Window, &mut App) + 'static>;
+pub(crate) type LongPressListener =
+    Box<dyn Fn(&LongPressEvent, DispatchPhase, &Hitbox, &mut Window, &mut App) + 'static>;
 
 pub(crate) type ClickListener = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -2034,6 +2082,7 @@ pub struct Interactivity {
     pub(crate) mouse_exit_listeners: Vec<MouseExitListener>,
     pub(crate) scroll_wheel_listeners: Vec<ScrollWheelListener>,
     pub(crate) pinch_listeners: Vec<PinchListener>,
+    pub(crate) long_press_listeners: Vec<LongPressListener>,
     pub(crate) key_down_listeners: Vec<KeyDownListener>,
     pub(crate) key_up_listeners: Vec<KeyUpListener>,
     pub(crate) modifiers_changed_listeners: Vec<ModifiersChangedListener>,
@@ -2316,6 +2365,7 @@ impl Interactivity {
                                         ("Mouse pressure", self.mouse_pressure_listeners.len()),
                                         ("Scroll", self.scroll_wheel_listeners.len()),
                                         ("Pinch", self.pinch_listeners.len()),
+                                        ("Long press", self.long_press_listeners.len()),
                                         ("Key down", self.key_down_listeners.len()),
                                         ("Key up", self.key_up_listeners.len()),
                                         ("Modifiers", self.modifiers_changed_listeners.len()),
@@ -2362,6 +2412,7 @@ impl Interactivity {
             || !self.aux_click_listeners.is_empty()
             || !self.scroll_wheel_listeners.is_empty()
             || self.has_pinch_listeners()
+            || !self.long_press_listeners.is_empty()
             || self.drag_listener.is_some()
             || !self.drop_listeners.is_empty()
             || self.tooltip_builder.is_some()
@@ -2767,6 +2818,13 @@ impl Interactivity {
             window.on_mouse_event(move |event: &PinchEvent, phase, window, cx| {
                 listener(event, phase, &hitbox, window, cx);
             })
+        }
+
+        for listener in self.long_press_listeners.drain(..) {
+            let hitbox = hitbox.clone();
+            window.on_mouse_event(move |event: &LongPressEvent, phase, window, cx| {
+                listener(event, phase, &hitbox, window, cx);
+            });
         }
 
         if self.hover_style.is_some()

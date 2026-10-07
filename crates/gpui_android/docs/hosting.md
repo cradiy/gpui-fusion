@@ -188,6 +188,11 @@ with velocity-based inertial scrolling after release. Scroll events remain
 anchored at the gesture's starting position. Positions and deltas are converted
 from physical pixels to GPUI logical pixels.
 
+`Window::on_touch_event`, registered during paint, receives raw contact phases
+with pointer-mapped coordinates. Handlers track ownership by touch ID and
+hit-test when accepting a contact; GPUI does not automatically capture contacts
+to elements.
+
 Preventing the default action in a raw touch handler suppresses synthesized
 clicking and scrolling for the rest of that contact sequence. Multiple fingers
 also suppress both. Multi-contact scaling uses Android's `ScaleGestureDetector`
@@ -203,6 +208,16 @@ Touch cancellation, focus loss, Surface replacement, and
 backgrounding stop the gesture and its inertia. Touching during inertia stops
 it without activating a button. Long holds do not synthesize clicks. There is
 no mouse drag emulation or Android nested-scrolling integration.
+
+`on_long_press` receives one `LongPressEvent` after a stationary single touch
+reaches Android's long-press timeout. Movement past touch slop, additional
+fingers, raw-touch default prevention, cancellation, or loss of the active
+Surface cancels a pending long press. It does not synthesize a click or right
+mouse button. Use `capture_long_press` to observe before descendants and
+`cx.stop_propagation()` to exclude ancestors. Call `window.prevent_default()`
+to claim the interaction and suppress native text selection; otherwise text
+inputs retain their selection menu and handles. A claimed long press suppresses
+scrolling and pinch recognition until every finger is lifted.
 
 External mice provide hover, button presses, dragging, double/triple clicks, and
 horizontal/vertical wheel scrolling. GPUI cursor styles use Android system pointer

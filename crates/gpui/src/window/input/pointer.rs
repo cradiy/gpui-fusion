@@ -21,6 +21,17 @@ impl AnyMouseListener {
 }
 
 impl Window {
+    /// Register a raw touch listener during paint, for the next rendered frame.
+    /// Track contacts by ID and perform hit testing when accepting a touch.
+    /// Preventing the default action suppresses Android's synthesized gestures
+    /// for the remainder of the contact sequence.
+    pub fn on_touch_event(
+        &mut self,
+        listener: impl FnMut(&crate::TouchEvent, DispatchPhase, &mut Window, &mut App) + 'static,
+    ) {
+        self.on_mouse_event(listener);
+    }
+
     /// Register a mouse event listener on the window for the next frame. The type of event
     /// is determined by the first parameter of the given listener. When the next frame is rendered
     /// the listener will be cleared.

@@ -448,6 +448,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         method("nativeBack", "(J)Z", system_back as *mut c_void),
         method("nativeTouch", "(JIIFF)Z", touch as *mut c_void),
         method("nativePinch", "(JIFFF)V", pinch as *mut c_void),
+        method("nativeLongPress", "(JFF)Z", long_press as *mut c_void),
         method("nativeTap", "(JFF)V", tap as *mut c_void),
         method(
             "nativeOpenUrl",
@@ -1023,6 +1024,21 @@ extern "system" fn tap(mut env: JNIEnv, _: JClass, id: jlong, x: jfloat, y: jflo
         session(id)?.platform.window.tap(x, y);
         Ok(())
     });
+}
+extern "system" fn long_press(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    x: jfloat,
+    y: jfloat,
+) -> jboolean {
+    call(&mut env, |_| {
+        anyhow::ensure!(
+            x.is_finite() && y.is_finite(),
+            "invalid long-press position"
+        );
+        Ok(session(id)?.platform.window.long_press(x, y) as u8)
+    })
 }
 extern "system" fn scroll(
     mut env: JNIEnv,

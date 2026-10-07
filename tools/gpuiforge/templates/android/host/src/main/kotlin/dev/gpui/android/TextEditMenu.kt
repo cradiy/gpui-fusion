@@ -5,7 +5,6 @@ import android.content.ClipboardManager
 import android.graphics.Rect
 import android.icu.text.BreakIterator
 import android.view.ActionMode
-import android.view.HapticFeedbackConstants
 import android.view.Menu
 import android.view.MenuItem
 import android.view.MotionEvent
@@ -18,9 +17,7 @@ import kotlin.math.hypot
 internal class TextEditMenu(
     private val view: GpuiView,
     private val current: () -> TextInputState?,
-    private val consumed: () -> Unit,
 ) : ActionMode.Callback2() {
-    private var pending: Runnable? = null
     private var mode: ActionMode? = null
     private var state: TextInputState? = null
     private var downX = 0f
@@ -39,43 +36,31 @@ internal class TextEditMenu(
     fun beforeFrame(time: Long) { handles.beforeFrame(time) }
     fun needsFrame() = handles.needsFrame()
 
-    fun touch(event: MotionEvent, eligible: Boolean) {
+    fun touch(event: MotionEvent) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 close()
-                if (!eligible) return
                 downX = event.x
                 downY = event.y
-                val epoch = current()?.epoch
-                pending = Runnable {
-                    pending = null
-                    if (current()?.epoch != epoch || !view.hasWindowFocus() || !view.isShown) return@Runnable
-                    try {
-                        val next = view.focusTextInput(downX, downY) ?: return@Runnable
-                        selectWord(next)
-                        state = current()
-                        mode = view.startActionMode(this, ActionMode.TYPE_FLOATING)
-                        if (mode != null) {
-                            consumed()
-                            state?.let { handles.update(it) }
-                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                        } else state = null
-                    } catch (error: RuntimeException) {
-                        close()
-                        view.inputFailure(error)
-                    }
-                }.also { view.postDelayed(it, ViewConfiguration.getLongPressTimeout().toLong()) }
             }
             MotionEvent.ACTION_MOVE -> {
                 if (hypot(event.x - downX, event.y - downY) > slop) close()
-                else if (!eligible && mode == null) cancelPending()
             }
             MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_CANCEL -> close()
-            MotionEvent.ACTION_UP -> cancelPending()
         }
     }
 
-    private fun cancelPending() { pending?.let { view.removeCallbacks(it) }; pending = null }
+    fun longPress(x: Float, y: Float): Boolean {
+        downX = x
+        downY = y
+        val next = view.focusTextInput(x, y) ?: return false
+        selectWord(next)
+        state = current()
+        mode = view.startActionMode(this, ActionMode.TYPE_FLOATING)
+        if (mode == null) { state = null; return false }
+        state?.let { handles.update(it) }
+        return true
+    }
 
     private fun selectWord(input: TextInputState) {
         val index = view.inputIndex(input.epoch, downX, downY)
@@ -98,7 +83,6 @@ internal class TextEditMenu(
     }
 
     fun close() {
-        cancelPending()
         handles.close()
         mode?.finish()
         mode = null

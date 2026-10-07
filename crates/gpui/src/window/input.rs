@@ -84,7 +84,9 @@ impl Window {
         self.last_input_modality = match &event {
             PlatformInput::KeyDown(_) => InputModality::Keyboard,
             PlatformInput::MouseMove(_) | PlatformInput::MouseDown(_) => InputModality::Mouse,
-            PlatformInput::Touch(_) | PlatformInput::TextInputFocus(_) => InputModality::Touch,
+            PlatformInput::Touch(_)
+            | PlatformInput::TextInputFocus(_)
+            | PlatformInput::LongPress(_) => InputModality::Touch,
             _ => self.last_input_modality,
         };
         if self.last_input_modality != old_modality {
@@ -350,10 +352,17 @@ impl Window {
                     PlatformInput::InternalDrag(InternalDragEvent::SourceCancelled { session_id })
                 }
             },
-            PlatformInput::Touch(touch) => PlatformInput::Touch(touch),
+            PlatformInput::Touch(touch) => {
+                self.mouse_position = touch.position;
+                PlatformInput::Touch(touch)
+            }
             PlatformInput::TextInputFocus(request) => {
                 self.mouse_position = request.position;
                 PlatformInput::TextInputFocus(request)
+            }
+            PlatformInput::LongPress(event) => {
+                self.mouse_position = event.position;
+                PlatformInput::LongPress(event)
             }
             PlatformInput::KeyDown(_) | PlatformInput::KeyUp(_) => event,
         };

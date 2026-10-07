@@ -81,6 +81,7 @@ fn main() {
                 count: 0,
                 zoom: 1.,
                 pinch_phase: TouchPhase::Ended,
+                long_presses: 0,
                 scroll: ScrollHandle::new(),
                 clipboard_status: "Copy the counter or paste text from another app.".into(),
                 file_status: "Choose a file to read its contents.".into(),
@@ -190,6 +191,7 @@ struct Counter {
     count: usize,
     zoom: f32,
     pinch_phase: TouchPhase,
+    long_presses: usize,
     scroll: ScrollHandle,
     clipboard_status: String,
     file_status: String,
@@ -798,10 +800,20 @@ impl Render for Counter {
                         cx.stop_propagation();
                         cx.notify();
                     }))
+                    .on_long_press(cx.listener(|this, _, window, cx| {
+                        this.long_presses += 1;
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        cx.notify();
+                    }))
                     .child(div().text_sm().child(format!(
                         "Pinch to zoom · {:.0}% · {:?}",
                         self.zoom * 100.,
                         self.pinch_phase
+                    )))
+                    .child(div().text_xs().child(format!(
+                        "Hold to select · {} long presses",
+                        self.long_presses
                     )))
                     .child(
                         div()

@@ -1,14 +1,9 @@
-//! Touch gesture recognition vocabulary.
+//! Touch gesture vocabulary and platform tuning.
 //!
-//! GPUI recognizes gestures from raw [`TouchEvent`](crate::TouchEvent)s in a
-//! single, portable arena in gpui core: recognizers compete for in-flight
-//! touches, winners claim them, and losers are cancelled. Recognized gestures
-//! are surfaced through *existing* semantic events wherever possible, a tap
-//! becomes [`ClickEvent::Touch`](crate::ClickEvent), a pan becomes
-//! [`ScrollWheelEvent`](crate::ScrollWheelEvent)s carrying a
-//! [`TouchPhase`](crate::TouchPhase), and a pinch becomes
-//! [`PinchEvent`](crate::PinchEvent)s — so components written against
-//! `on_click` and scroll containers work untouched on mobile.
+//! Platform backends can translate touch sequences into semantic events:
+//! [`ScrollWheelEvent`](crate::ScrollWheelEvent), [`PinchEvent`](crate::PinchEvent),
+//! and [`LongPressEvent`]. Raw [`TouchEvent`](crate::TouchEvent)s remain available
+//! for application-defined interactions. Recognition support depends on the backend.
 
 use std::time::Duration;
 
@@ -87,13 +82,9 @@ impl GestureKinds {
     };
 }
 
-/// A long-press gesture, mobile's context-menu trigger.
-///
-/// A bare long press is surfaced as a [`ClickEvent`](crate::ClickEvent) with
-/// `long_press: true`, delivered to aux-click listeners alongside right
-/// clicks. This event is the raw hook for elements that need the gesture
-/// itself (e.g. long-press to start a drag); the registration API ships
-/// together with the gesture arena.
+/// A stationary touch held for the platform's long-press timeout.
+/// Delivered once through `on_long_press`, without synthesizing a click.
+/// Prevent its default action to override native text selection on Android.
 #[derive(Clone, Debug, Default)]
 pub struct LongPressEvent {
     /// The position of the touch that was recognized as a long press.

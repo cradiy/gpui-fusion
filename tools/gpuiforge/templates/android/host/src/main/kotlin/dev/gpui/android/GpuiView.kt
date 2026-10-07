@@ -6,6 +6,7 @@ import android.graphics.PointF
 import android.os.Build
 import android.util.SparseArray
 import android.view.Choreographer
+import android.view.HapticFeedbackConstants
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -49,10 +50,21 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     private val inputConnections = Collections.newSetFromMap(WeakHashMap<GpuiInputConnection, Boolean>())
     private enum class KeyboardRequest { TAP, SHOW, HIDE }
     private var keyboardRequest: KeyboardRequest? = null
-    private val textMenu = TextEditMenu(this, { inputState }) {
-        tapCandidate = false
-        scroll.block()
-        pinch.cancel()
+    private val textMenu = TextEditMenu(this, { inputState })
+    private val longPress = TouchLongPress(this) { x, y ->
+        if (surfaceReady && session.active()) {
+            try {
+                if (session.longPress(x, y) || textMenu.longPress(x, y)) {
+                    tapCandidate = false
+                    scroll.block()
+                    pinch.cancel()
+                    performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                }
+            } catch (error: RuntimeException) {
+                textMenu.close()
+                session.fail(error)
+            }
+        }
     }
 
     init {
@@ -281,7 +293,8 @@ class GpuiView(context: Context, private val session: GpuiSession) :
             }
         }
         pinch.event(event)
-        textMenu.touch(event, tapCandidate)
+        textMenu.touch(event)
+        longPress.touch(event, tapCandidate)
         if (scroll.needsFrame()) requestFrame()
         return true
     }
@@ -295,6 +308,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
             tapCandidate = false
             scroll.block()
             pinch.cancel()
+            longPress.cancel()
         }
     }
 
@@ -304,6 +318,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         tapCandidate = false
         scroll.cancel()
         pinch.cancel()
+        longPress.cancel()
         for (i in 0 until contacts.size()) {
             val point = contacts.valueAt(i)
             session.touch(contacts.keyAt(i), 3, point.x, point.y)

@@ -25,6 +25,7 @@ class GpuiSession : AutoCloseable {
     private var id = 0L
     private val frameWakePosted = AtomicBoolean(false)
     private val pendingUrls = ArrayList<String>()
+    private val pendingShares = ArrayList<IncomingShare>()
     private var phase = BACKGROUND
     private var closeRequested: Runnable? = null
     private var errorHandler: Consumer<RuntimeException>? = null
@@ -102,18 +103,37 @@ class GpuiSession : AutoCloseable {
         updateAppearance()
         for (url in pendingUrls) nativeOpenUrl(id, url)
         pendingUrls.clear()
+        deliverShares()
     }
 
-    /** Forwards ACTION_VIEW data to Application.on_open_urls, including before the first Surface. */
+    /** Forwards VIEW URLs and SEND/SEND_MULTIPLE shares, including before the first Surface. */
     fun onOpenIntent(intent: Intent): Boolean {
         checkThread()
-        if (closed || intent.action != Intent.ACTION_VIEW) return false
+        if (closed) return false
+        if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
+            pendingShares.add(IncomingShare.parse(intent))
+            deliverShares()
+            view.get()?.requestFrame()
+            return true
+        }
+        if (intent.action != Intent.ACTION_VIEW) return false
         val uri = intent.data ?: return false
         if (uri.scheme.isNullOrEmpty()) return false
         val url = uri.toString()
         if (id == 0L) pendingUrls.add(url) else nativeOpenUrl(id, url)
         view.get()?.requestFrame()
         return true
+    }
+
+    private fun deliverShares() {
+        if (id == 0L || pendingShares.isEmpty()) return
+        val context = view.get()?.context?.applicationContext ?: return
+        val shares = pendingShares.toList()
+        pendingShares.clear()
+        for (share in shares) {
+            val documents = share.uris.map { SelectedDocument(context.contentResolver, it, false) }.toTypedArray()
+            nativeReceiveShare(id, share.text, share.mime, documents, share.error)
+        }
     }
 
     private fun darkAppearance(): Boolean =
@@ -361,6 +381,7 @@ class GpuiSession : AutoCloseable {
         if (closed) return
         closed = true
         pendingUrls.clear()
+        pendingShares.clear()
         permissions.close()
         files.close()
         try {
@@ -411,6 +432,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeTouch(id: Long, pointer: Int, phase: Int, x: Float, y: Float): Boolean
         @JvmStatic private external fun nativeTap(id: Long, x: Float, y: Float)
         @JvmStatic private external fun nativeOpenUrl(id: Long, url: String)
+        @JvmStatic private external fun nativeReceiveShare(id: Long, text: String?, mime: String?, documents: Array<SelectedDocument>, error: String?)
         @JvmStatic private external fun nativeFocusTextInput(id: Long, x: Float, y: Float): Boolean
         @JvmStatic private external fun nativeScroll(id: Long, phase: Int, x: Float, y: Float, dx: Float, dy: Float)
         @JvmStatic private external fun nativeMouse(id: Long, kind: Int, x: Float, y: Float,

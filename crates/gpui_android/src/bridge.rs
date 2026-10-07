@@ -454,6 +454,11 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
             receive_url as *mut c_void,
         ),
         method(
+            "nativeReceiveShare",
+            "(JLjava/lang/String;Ljava/lang/String;[Ldev/gpui/android/SelectedDocument;Ljava/lang/String;)V",
+            receive_share as *mut c_void,
+        ),
+        method(
             "nativeFocusTextInput",
             "(JFF)Z",
             focus_text_input as *mut c_void,
@@ -642,6 +647,7 @@ extern "system" fn frame(mut env: JNIEnv, _: JClass, id: jlong) -> jboolean {
     call(&mut env, |_| {
         let session = session(id)?;
         session.platform.dispatch_open_urls();
+        session.platform.shares.dispatch();
         session.platform.window.frame()?;
         Ok(session.platform.window.input_dirty.replace(false) as u8)
     })
@@ -651,6 +657,44 @@ extern "system" fn receive_url(mut env: JNIEnv, _: JClass, id: jlong, url: JStri
     call(&mut env, |env| {
         let url: String = env.get_string(&url)?.into();
         session(id)?.platform.receive_url(url);
+        Ok(())
+    });
+}
+
+extern "system" fn receive_share(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    text: JString,
+    mime_type: JString,
+    documents: JObjectArray,
+    error: JString,
+) {
+    call(&mut env, |env| {
+        let result = (|| -> Result<crate::share::IncomingShare> {
+            if !error.is_null() {
+                anyhow::bail!(String::from(env.get_string(&error)?));
+            }
+            let text = (!text.is_null())
+                .then(|| env.get_string(&text).map(String::from))
+                .transpose()?;
+            let mime_type = (!mime_type.is_null())
+                .then(|| env.get_string(&mime_type).map(String::from))
+                .transpose()?;
+            let mut files = Vec::new();
+            for index in 0..env.get_array_length(&documents)? {
+                let object = env.get_object_array_element(&documents, index)?;
+                files.push(env.new_global_ref(&object)?);
+                env.delete_local_ref(object)?;
+            }
+            Ok(crate::share::IncomingShare {
+                text,
+                mime_type,
+                documents: files,
+                vm: VM.get().context("Android VM unavailable")?.clone(),
+            })
+        })();
+        session(id)?.platform.shares.receive(result);
         Ok(())
     });
 }

@@ -14,6 +14,7 @@ application-id = "dev.gpui.example"
 abis = ["arm64-v8a", "x86_64"]
 permissions = ["android.permission.RECORD_AUDIO"]
 url-schemes = ["gpui-example"]
+share-mime-types = ["text/plain", "image/*", "application/pdf"]
 
 [[platforms.android.build]]
 program = "bash"

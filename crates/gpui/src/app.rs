@@ -278,6 +278,26 @@ impl Application {
         self
     }
 
+    /// Receives text and files shared by other applications, or an error if a
+    /// request cannot be prepared. Register before running the application.
+    /// Android requires matching share intent filters in the host manifest.
+    /// Platforms without incoming share support do not invoke this callback.
+    pub fn on_receive_share<F>(&self, mut callback: F) -> &Self
+    where
+        F: 'static + FnMut(Result<crate::ReceivedShare>, &mut App),
+    {
+        let app = Rc::downgrade(&self.0);
+        self.0
+            .borrow()
+            .platform
+            .on_receive_share(Box::new(move |share| {
+                if let Some(app) = app.upgrade() {
+                    callback(share, &mut app.borrow_mut());
+                }
+            }));
+        self
+    }
+
     /// Invokes a handler when an already-running application is launched.
     /// On macOS, this can occur when the application icon is double-clicked or the app is launched via the dock.
     pub fn on_reopen<F>(&self, mut callback: F) -> &Self

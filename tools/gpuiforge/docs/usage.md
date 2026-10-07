@@ -239,6 +239,23 @@ maintain the filters and Activity launch mode in your manifest. HTTP(S) App Link
 need host-specific filters and website verification, so they are configured in
 a custom manifest instead of `url-schemes`.
 
+## Receiving Android shares
+
+```toml
+[platforms.android]
+application-id = "dev.example.app"
+share-mime-types = ["text/plain", "image/*", "application/pdf"]
+```
+
+The bundled template generates `SEND` and `SEND_MULTIPLE` filters with the
+`DEFAULT` category. Types use lowercase `type/subtype` syntax; `image/*` and
+`*/*` wildcards are supported. Declare only content your application can handle.
+An empty or omitted list does not register a share target.
+
+GPUI delivers incoming content through `Application::on_receive_share`.
+Custom templates can use `{{android_share_filters}}`; manually managed hosts
+maintain their own manifest filters and forward incoming intents.
+
 ## Android release signing
 
 ```toml

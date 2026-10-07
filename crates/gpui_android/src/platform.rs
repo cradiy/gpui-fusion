@@ -27,6 +27,7 @@ pub struct AndroidPlatform {
     pub(crate) window: Rc<AndroidWindow>,
     pub(crate) permissions: Rc<crate::permissions::PermissionState>,
     pub(crate) files: Rc<crate::file_dialog::FileDialog>,
+    pub(crate) shares: Rc<crate::share::ShareReceiver>,
     handle: Cell<Option<AnyWindowHandle>>,
     lifecycle: RefCell<Option<Box<dyn FnMut(AppLifecyclePhase)>>>,
     quit: RefCell<Option<Box<dyn FnMut()>>>,
@@ -87,6 +88,7 @@ impl AndroidPlatform {
                 BackgroundExecutor::new(dispatcher.clone()),
                 foreground.clone(),
             ),
+            shares: crate::share::ShareReceiver::new(host.clone(), &foreground),
             foreground,
             dispatcher,
             permissions: crate::permissions::PermissionState::new(host.clone()),
@@ -115,6 +117,7 @@ impl AndroidPlatform {
         self.pending_urls.borrow_mut().clear();
         self.permissions.close();
         self.files.close();
+        self.shares.close();
         self.window.detach();
         let callback = self.quit.borrow_mut().take();
         if let Some(mut callback) = callback {
@@ -230,6 +233,9 @@ impl Platform for AndroidPlatform {
     }
     fn on_open_urls(&self, callback: Box<dyn FnMut(Vec<String>)>) {
         *self.open_urls.borrow_mut() = Some(callback);
+    }
+    fn on_receive_share(&self, callback: Box<dyn FnMut(Result<ReceivedShare>)>) {
+        self.shares.set_callback(callback);
     }
     fn register_url_scheme(&self, _: &str) -> Task<Result<()>> {
         Task::ready(Err(anyhow::anyhow!(

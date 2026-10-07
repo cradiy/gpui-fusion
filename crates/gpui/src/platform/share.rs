@@ -10,3 +10,15 @@ pub struct ShareOptions {
     /// Optional system chooser title. Platforms may ignore it.
     pub title: Option<String>,
 }
+
+/// Text and read-only files received from another application.
+#[derive(Clone, Debug)]
+pub struct ReceivedShare {
+    /// Plain text accompanying the share, if supplied.
+    pub text: Option<String>,
+    /// Sender-declared MIME type; applications must validate content themselves.
+    pub mime_type: Option<String>,
+    /// Files available under the sender's temporary access grant.
+    /// Retaining a handle does not extend that grant or copy the file.
+    pub files: Vec<SelectedFile>,
+}

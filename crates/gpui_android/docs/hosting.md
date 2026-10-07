@@ -457,6 +457,44 @@ preparation failure prevents the entire share request. Success only reports that
 the Sharesheet was requested; choosing a target, cancelling the sheet, and
 delivery completion are not reported. The optional title is a system UI hint.
 
+### Receiving shares
+
+```rust,ignore
+let app = gpui_platform::application();
+app.on_receive_share(|result, cx| {
+    match result {
+        Ok(share) => { /* Present share.text and share.files for user review. */ }
+        Err(error) => { /* Show the receive error. */ }
+    }
+});
+app.run(|cx| { /* Open the application window. */ });
+```
+
+Enable the share target with GPUiForge's `platforms.android.share-mime-types`,
+for example `["text/plain", "image/*"]`. The host accepts `ACTION_SEND` and
+`ACTION_SEND_MULTIPLE`. `ReceivedShare` contains optional plain text, the
+sender-declared MIME type, and read-only `SelectedFile` handles. URI entries
+mirrored between `EXTRA_STREAM` and `ClipData` are delivered once in their
+original order. Only `content://` file URIs are accepted.
+
+Register the callback before `Application::run`. Cold-start requests and new
+intents are queued in arrival order and delivered on the main thread. Provider
+metadata is read on I/O workers. A malformed request or metadata failure returns
+an error for that request; subsequent requests continue. File contents are not
+read or copied automatically. MIME types, names, text, and contents are untrusted
+input and must be validated by the application.
+
+File access uses temporary grants from the sender. Holding a handle does not
+extend permission beyond the receiving Activity task's lifetime. These handles
+do not acquire persistent grants; applications needing durable content can copy
+it explicitly while access remains available. Configuration changes retaining
+the session do not replay a share. Process recreation creates a new session and
+can redeliver its launch intent. Closing a session discards its pending requests.
+
+Custom hosts forward each intent once through `GpuiSession.onOpenIntent` and
+declare matching manifest filters. Other GPUI backends do not currently deliver
+incoming shares.
+
 ### Persistent file access
 
 Call `file.persist().await?` while a picked document's access is valid, then save
@@ -547,9 +585,9 @@ in order on the main thread before a frame. Repeated intents with the same URL
 remain separate requests. Closing the session discards pending requests.
 
 Custom hosts call `GpuiSession.onOpenIntent(intent)` once for each incoming intent.
-It accepts `ACTION_VIEW` with a URI scheme and returns false for other intents;
-it does not import shared files or process `ACTION_SEND`. Applications validate
-the URL and decide which page or document to open.
+It accepts `ACTION_VIEW` with a URI scheme and `ACTION_SEND`/`ACTION_SEND_MULTIPLE`
+shares, returning false for other intents. Applications validate the content and
+decide which page or document to open.
 
 Declare custom schemes through GPUiForge's `platforms.android.url-schemes`.
 Custom manifests can provide narrower filters or verified HTTPS App Links.

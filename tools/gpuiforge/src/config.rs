@@ -59,6 +59,8 @@ pub struct Platform {
     pub permissions: Vec<String>,
     #[serde(default)]
     pub url_schemes: Vec<String>,
+    #[serde(default)]
+    pub share_mime_types: Vec<String>,
     pub signing: Option<Signing>,
 }
 
@@ -251,6 +253,25 @@ impl Project {
                 }
                 platform.url_schemes.sort();
                 platform.url_schemes.dedup();
+                for mime in &platform.share_mime_types {
+                    let valid_part = |part: &str| {
+                        !part.is_empty()
+                            && part.bytes().all(|c| {
+                                c.is_ascii_lowercase()
+                                    || c.is_ascii_digit()
+                                    || b"!#$%&'+-.^_`|~".contains(&c)
+                            })
+                    };
+                    ensure!(
+                        mime.split_once('/').is_some_and(|(major, minor)| {
+                            (valid_part(major) && (valid_part(minor) || minor == "*"))
+                                || (major == "*" && minor == "*")
+                        }),
+                        "invalid share MIME type (use lowercase type/subtype): {mime}"
+                    );
+                }
+                platform.share_mime_types.sort();
+                platform.share_mime_types.dedup();
                 if let Some(signing) = &platform.signing {
                     ensure!(
                         !signing.key_alias.trim().is_empty(),
@@ -292,8 +313,9 @@ impl Project {
                 ensure!(
                     platform.permissions.is_empty()
                         && platform.signing.is_none()
-                        && platform.url_schemes.is_empty(),
-                    "permissions, signing and url-schemes are Android-only settings"
+                        && platform.url_schemes.is_empty()
+                        && platform.share_mime_types.is_empty(),
+                    "permissions, signing, url-schemes and share-mime-types are Android-only settings"
                 );
             }
             platforms.insert(name, platform);
@@ -375,6 +397,16 @@ impl Project {
         vars.insert("android_url_filters".into(), p.url_schemes.iter().map(|scheme| format!(
             "            <intent-filter>\n                <action android:name=\"android.intent.action.VIEW\" />\n                <category android:name=\"android.intent.category.DEFAULT\" />\n                <category android:name=\"android.intent.category.BROWSABLE\" />\n                <data android:scheme=\"{scheme}\" />\n            </intent-filter>\n"
         )).collect());
+        vars.insert("android_share_filters".into(), if p.share_mime_types.is_empty() {
+            String::new()
+        } else {
+            let types: String = p.share_mime_types.iter().map(|mime| format!(
+                "                <data android:mimeType=\"{}\" />\n", mime.replace('&', "&amp;").replace('\'', "&apos;")
+            )).collect();
+            ["SEND", "SEND_MULTIPLE"].iter().map(|action| format!(
+                "            <intent-filter>\n                <action android:name=\"android.intent.action.{action}\" />\n                <category android:name=\"android.intent.category.DEFAULT\" />\n{types}            </intent-filter>\n"
+            )).collect()
+        });
         if let Some(activity) = &p.activity {
             vars.insert("activity".into(), activity.clone());
         }

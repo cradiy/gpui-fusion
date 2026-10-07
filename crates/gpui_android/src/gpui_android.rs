@@ -11,6 +11,7 @@ mod input;
 mod logging;
 mod permissions;
 mod platform;
+mod share;
 mod surface;
 mod window;
 

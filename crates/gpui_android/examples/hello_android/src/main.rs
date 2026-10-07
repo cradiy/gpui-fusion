@@ -35,6 +35,27 @@ const KEYBOARDS: [(&str, TextInputPurpose); 6] = [
 #[gpui_platform::main]
 fn main() {
     let application = gpui_platform::application();
+    application.on_receive_share(|result, cx| {
+        let state = cx.global_mut::<SharedContent>();
+        state.count += 1;
+        state.preview.clear();
+        match result {
+            Ok(share) => {
+                state.status = format!(
+                    "Share {}: {} · {} file(s)",
+                    state.count,
+                    share.mime_type.as_deref().unwrap_or("unspecified type"),
+                    share.files.len()
+                );
+                state.content = Some(share);
+            }
+            Err(error) => {
+                state.status = format!("Share {}: {error}", state.count);
+                state.content = None;
+            }
+        }
+        cx.refresh_windows();
+    });
     let link_context = Rc::new(RefCell::new(None::<AsyncApp>));
     let receiver = link_context.clone();
     application.on_open_urls(move |urls| {
@@ -50,6 +71,7 @@ fn main() {
         }
     });
     application.run(move |cx| {
+        cx.set_global(SharedContent::default());
         cx.set_global(OpenedLinks::default());
         *link_context.borrow_mut() = Some(cx.to_async());
         uic::init(cx);
@@ -151,6 +173,15 @@ struct OpenedLinks {
     last: String,
 }
 impl Global for OpenedLinks {}
+
+#[derive(Default)]
+struct SharedContent {
+    count: usize,
+    status: String,
+    content: Option<ReceivedShare>,
+    preview: String,
+}
+impl Global for SharedContent {}
 
 struct Counter {
     details: bool,
@@ -735,6 +766,85 @@ impl Render for Counter {
             .flex_col()
             .gap_5()
             .child(div().text_3xl().child("GPUI on Android"))
+            .when(cx.global::<SharedContent>().count > 0, |page| {
+                let shared = cx.global::<SharedContent>();
+                let content = shared.content.clone();
+                page.child(
+                    div()
+                        .p_5()
+                        .rounded_xl()
+                        .bg(rgb(surface))
+                        .flex()
+                        .flex_col()
+                        .gap_3()
+                        .child("Received share")
+                        .child(
+                            div()
+                                .text_sm()
+                                .whitespace_normal()
+                                .child(shared.status.clone()),
+                        )
+                        .child(
+                            div().whitespace_normal().child(
+                                content
+                                    .as_ref()
+                                    .and_then(|share| share.text.clone())
+                                    .unwrap_or_default(),
+                            ),
+                        )
+                        .children(content.iter().flat_map(|share| &share.files).map(|file| {
+                            div()
+                                .text_sm()
+                                .whitespace_normal()
+                                .child(file.name().to_owned())
+                        }))
+                        .when(
+                            content
+                                .as_ref()
+                                .is_some_and(|share| !share.files.is_empty()),
+                            |card| {
+                                card.child(
+                                    button("read-shared-file", "Read first file (up to 4 KiB)")
+                                        .on_click(|_, _, cx| {
+                                            let shared = cx.global::<SharedContent>();
+                                            let count = shared.count;
+                                            let Some(file) = shared
+                                                .content
+                                                .as_ref()
+                                                .and_then(|share| share.files.first())
+                                                .cloned()
+                                            else {
+                                                return;
+                                            };
+                                            cx.spawn(async move |cx| {
+                                                let result = file.read_limited(4096).await;
+                                                cx.update(|cx| {
+                                                    let shared = cx.global_mut::<SharedContent>();
+                                                    if shared.count == count {
+                                                        shared.preview = match result {
+                                                            Ok(bytes) => {
+                                                                String::from_utf8_lossy(&bytes)
+                                                                    .into_owned()
+                                                            }
+                                                            Err(error) => format!("Read: {error}"),
+                                                        };
+                                                        cx.refresh_windows();
+                                                    }
+                                                });
+                                            })
+                                            .detach();
+                                        }),
+                                )
+                            },
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .whitespace_normal()
+                                .child(shared.preview.clone()),
+                        ),
+                )
+            })
             .child(
                 button("microphone", "Request microphone permission")
                     .on_click(cx.listener(Self::request_microphone)),

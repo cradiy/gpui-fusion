@@ -26,6 +26,7 @@ pub struct AndroidPlatform {
     pub(crate) context: GpuContext,
     pub(crate) window: Rc<AndroidWindow>,
     pub(crate) permissions: Rc<crate::permissions::PermissionState>,
+    pub(crate) background: Rc<crate::background::BackgroundState>,
     pub(crate) files: Rc<crate::file_dialog::FileDialog>,
     pub(crate) shares: Rc<crate::share::ShareReceiver>,
     handle: Cell<Option<AnyWindowHandle>>,
@@ -36,6 +37,10 @@ pub struct AndroidPlatform {
 }
 
 impl AndroidPlatform {
+    /// Android foreground execution for application-owned data transfers.
+    pub fn background_execution(&self) -> crate::AndroidBackgroundExecution {
+        crate::AndroidBackgroundExecution(self.background.clone())
+    }
     /// App-private files excluded from Android system backup.
     pub fn no_backup_directory(
         &self,
@@ -92,6 +97,7 @@ impl AndroidPlatform {
             foreground,
             dispatcher,
             permissions: crate::permissions::PermissionState::new(host.clone()),
+            background: crate::background::BackgroundState::new(host.clone()),
             host,
             text,
             context,

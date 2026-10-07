@@ -11,9 +11,10 @@ text clipboard access, external links,
 lifecycle notifications, and Surface replacement while
 retaining the Rust application and GPU atlas. Each session hosts one GPUI window.
 
-Native text selection handles, image/file clipboard data, file pickers,
-TalkBack semantics, and GPU device-loss recovery are not implemented. System
-font discovery is not configured; applications can register their own fonts.
+Native text selection handles, document pickers and system font discovery are
+available. Image/file clipboard data, TalkBack semantics and GPU device-loss
+recovery are not implemented.
 
 See [Android hosting](docs/hosting.md) for application setup, embedding,
 lifecycle ownership, and device verification.
+See [background execution](docs/background.md) for session-bound data transfers.

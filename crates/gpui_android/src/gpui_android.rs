@@ -1,6 +1,7 @@
 //! Android View hosting for GPUI applications.
 #![cfg(target_os = "android")]
 
+mod background;
 mod bridge;
 mod credentials;
 mod dispatcher;
@@ -16,6 +17,9 @@ mod share;
 mod surface;
 mod window;
 
+pub use background::{
+    AndroidBackgroundExecution, BackgroundExecution, BackgroundStopReason, DataSyncNotification,
+};
 pub use bridge::{current_platform, initialize};
 pub use jni;
 pub use permissions::{AndroidPermissions, PermissionStatus};

@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
+futures.workspace = true
 serde_json.workspace = true
 gpui.workspace = true
 gpui_platform = { workspace = true, features = ["wayland", "x11"] }

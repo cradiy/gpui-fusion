@@ -1,5 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
+<!-- gpuiforge:if data-sync -->
+        <service android:name="dev.gpui.android.DataSyncService" android:exported="false" android:foregroundServiceType="dataSync" />
+<!-- gpuiforge:endif -->
 <!-- gpuiforge:if notifications -->
         <receiver android:name="dev.gpui.android.NotificationReceiver" android:exported="false" />
 <!-- gpuiforge:endif -->

@@ -20,6 +20,7 @@ pub fn included(path: &str, platform: &Platform) -> bool {
         "MediaSession.kt" | "MediaFrames.kt" | "SystemMediaControls.kt" => Media,
         "NotificationStore.kt" => Notifications,
         "MediaNotification.kt" => MediaNotifications,
+        "DataSyncService.kt" => DataSync,
         _ => return true,
     };
     platform.feature(feature)

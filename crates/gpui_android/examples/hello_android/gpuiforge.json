@@ -14,8 +14,8 @@
           "program": "bash"
         }
       ],
-      "features": ["files", "sharing", "credentials"],
-      "permissions": ["android.permission.RECORD_AUDIO"],
+      "features": ["files", "sharing", "credentials", "data-sync"],
+      "permissions": ["android.permission.RECORD_AUDIO", "android.permission.POST_NOTIFICATIONS", "android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_DATA_SYNC"],
       "run": [
         {
           "args": ["-s", "{{device}}", "install", "-r", "{{artifact}}"],

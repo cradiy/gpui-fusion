@@ -37,12 +37,12 @@ pub struct Platform {
     /// Optional editor schema reference for a platform recipe. Relative references resolve from the JSON file. GPUiForge does not fetch schema URLs.
     #[serde(default, rename = "$schema")]
     pub _schema: Option<String>,
-    /// Optional modules for the bundled Android host. Defaults to an empty list: window rendering, input, IME, accessibility and lifecycle remain available. Disabled modules omit their Kotlin files, Manifest components and dedicated dependencies. Cargo features and Android permissions are configured separately.
+    /// Optional modules for the bundled Android host. Defaults to an empty list: window rendering, input, IME and lifecycle remain available. Disabled modules omit their Kotlin files, Manifest components and dedicated dependencies. Cargo features and Android permissions are configured separately. Android TalkBack semantics are not implemented.
     #[serde(default)]
     pub features: BTreeSet<AndroidFeature>,
     /// Application and launcher icon for the bundled Android host. Accepts PNG, WebP or Android drawable XML. Resolve relative paths from gpuiforge.json. Omit to leave the application icon unspecified; no copy entry is required.
     pub icon: Option<PathBuf>,
-    /// Default small icon for general and media notifications. Requires notifications or media-notifications. Accepts PNG, WebP or Android drawable XML relative to gpuiforge.json; use a monochrome image with transparency. A per-send resource icon takes priority, followed by this icon, the application icon and Android's generic icon.
+    /// Default small icon for general, media and data-sync notifications. Requires notifications, media-notifications or data-sync. Accepts PNG, WebP or Android drawable XML relative to gpuiforge.json; use a monochrome image with transparency. A per-send resource icon takes priority, followed by this icon, the application icon and Android's generic icon.
     pub notification_icon: Option<PathBuf>,
     /// Optional JSON platform recipe, relative to gpuiforge.json. Application fields override recipe fields: objects merge recursively and arrays replace the whole recipe array. Custom recipes replace bundled Android defaults and cannot include another recipe.
     #[serde(rename = "recipe")]
@@ -110,6 +110,8 @@ pub enum AndroidFeature {
     Notifications,
     /// Android system media session and playback notification controls. Independent of media and notifications, so an application may connect its own player. Does not create a foreground service or keep background work alive.
     MediaNotifications,
+    /// Session-bound foreground execution for application-owned data transfers. Declare FOREGROUND_SERVICE and FOREGROUND_SERVICE_DATA_SYNC. Does not schedule work, survive session closure or restore tasks after process death.
+    DataSync,
 }
 impl Platform {
     pub fn feature(&self, feature: AndroidFeature) -> bool {
@@ -318,8 +320,9 @@ impl Project {
                 ensure!(
                     platform.notification_icon.is_none()
                         || platform.feature(AndroidFeature::Notifications)
-                        || platform.feature(AndroidFeature::MediaNotifications),
-                    "notification-icon requires notifications or media-notifications"
+                        || platform.feature(AndroidFeature::MediaNotifications)
+                        || platform.feature(AndroidFeature::DataSync),
+                    "notification-icon requires notifications, media-notifications or data-sync"
                 );
                 for permission in &platform.permissions {
                     ensure!(
@@ -333,6 +336,17 @@ impl Project {
                             }),
                         "invalid Android permission name: {permission}"
                     );
+                }
+                if platform.feature(AndroidFeature::DataSync) {
+                    for required in [
+                        "android.permission.FOREGROUND_SERVICE",
+                        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+                    ] {
+                        ensure!(
+                            platform.permissions.iter().any(|value| value == required),
+                            "data-sync requires {required} in permissions"
+                        );
+                    }
                 }
                 platform.permissions.sort();
                 platform.permissions.dedup();

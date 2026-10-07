@@ -178,8 +178,10 @@ fn sync_prunes_disabled_modules_and_icons() {
       "application-id": "dev.example.app",
       "features": [
         "sharing",
-        "notifications"
+        "notifications",
+        "data-sync"
       ],
+      "permissions": ["android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_DATA_SYNC"],
       "icon": "icon.xml",
       "notification-icon": "icon.xml"
     }
@@ -200,6 +202,12 @@ fn sync_prunes_disabled_modules_and_icons() {
     let host = output.join("host/src/main/kotlin/dev/gpui/android");
     assert!(host.join("FileStore.kt").exists());
     assert!(host.join("NotificationStore.kt").exists());
+    assert!(host.join("DataSyncService.kt").exists());
+    assert!(
+        fs::read_to_string(output.join("host/src/main/AndroidManifest.xml"))
+            .unwrap()
+            .contains("android:foregroundServiceType=\"dataSync\"")
+    );
     assert!(!host.join("MediaSession.kt").exists());
     assert!(
         !fs::read_to_string(output.join("host/build.gradle.kts"))
@@ -241,12 +249,18 @@ fn sync_prunes_disabled_modules_and_icons() {
     assert_eq!(fs::metadata(&state).unwrap().modified().unwrap(), modified);
     app.ok(&["sync", "android"]);
     app.ok(&["sync", "--check"]);
-    for file in ["FileStore.kt", "NotificationStore.kt", "ShareIntent.kt"] {
+    for file in [
+        "FileStore.kt",
+        "NotificationStore.kt",
+        "ShareIntent.kt",
+        "DataSyncService.kt",
+    ] {
         assert!(!host.join(file).exists());
     }
     let manifest = fs::read_to_string(output.join("host/src/main/AndroidManifest.xml")).unwrap();
     assert!(!manifest.contains("<receiver"));
     assert!(!manifest.contains("<provider"));
+    assert!(!manifest.contains("<service"));
     assert!(
         !output
             .join("app/src/main/res/drawable-nodpi/gpui_notification_icon.xml")

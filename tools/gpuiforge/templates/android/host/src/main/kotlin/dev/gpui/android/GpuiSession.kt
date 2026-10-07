@@ -89,6 +89,22 @@ class GpuiSession : AutoCloseable {
     private fun credentialStore(): Any = unsupported("credentials")
 // gpuiforge:endif
     private fun unsupported(feature: String): Nothing = error("Enable '$feature' in platforms.android.features and run gpuiforge sync")
+// gpuiforge:if data-sync
+    private var dataSync: DataSyncHost? = null
+// gpuiforge:endif
+    private fun backgroundOperation(operation: String, payload: String): String? = try {
+        checkThread()
+        check(!closed) { "GPUI session is closed" }
+// gpuiforge:if data-sync
+        val host = dataSync ?: DataSyncHost(requireContext().applicationContext) { token, event, error ->
+            handler.post { if (!closed && id != 0L) nativeBackgroundEvent(id, token, event, error) }
+        }.also { dataSync = it }
+        host.operation(operation, payload, active())
+        null
+// gpuiforge:else
+        unsupported("data-sync")
+// gpuiforge:endif
+    } catch (error: RuntimeException) { error.message ?: error.javaClass.simpleName }
 // gpuiforge:if notifications
     private var notificationStore: NotificationStore? = null
 // gpuiforge:endif
@@ -534,6 +550,10 @@ class GpuiSession : AutoCloseable {
 
     /** Releases the Rust application. Do not close during a retained Activity recreation. */
     override fun close() {
+// gpuiforge:if data-sync
+        dataSync?.close()
+        dataSync = null
+// gpuiforge:endif
 // gpuiforge:if media-notifications
         mediaNotifications.values.forEach { it.close() }
         mediaNotifications.clear()
@@ -616,6 +636,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeRunTask(id: Long, token: Long)
         @JvmStatic private external fun nativeClose(id: Long)
         @JvmStatic private external fun nativePermissionResult(id: Long, token: Long, status: Int)
+        @JvmStatic private external fun nativeBackgroundEvent(id: Long, token: String, event: String, error: String)
         @JvmStatic private external fun nativeNotificationEvent(id: Long, event: String): Boolean
         @JvmStatic private external fun nativeMediaCommand(id: Long, event: String)
         @JvmStatic private external fun nativeFileResult(id: Long, token: Long, documents: Array<out Any>?, error: String?)

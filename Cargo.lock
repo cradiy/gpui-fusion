@@ -3393,6 +3393,7 @@ name = "hello_android"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "futures",
  "gpui",
  "gpui_android",
  "gpui_platform",

@@ -162,7 +162,8 @@ Select optional host modules in the Android platform configuration:
 ```
 
 With `"features": []` (the default), the host provides window rendering, input,
-IME, accessibility, lifecycle, permissions and other core system integration.
+IME, lifecycle, permissions and other core system integration. Android TalkBack
+semantics are not implemented.
 Optional modules are:
 
 | Feature | Capability |
@@ -173,6 +174,7 @@ Optional modules are:
 | `media` | Media playback and decoding, including the Media3 dependency |
 | `notifications` | General notifications, actions and inline replies |
 | `media-notifications` | System media session and playback notification; independent of `media` |
+| `data-sync` | Session-bound foreground execution for application-owned transfers; requires `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_DATA_SYNC` in `permissions` |
 
 Disabled modules omit their Kotlin sources, Manifest components and module-specific
 dependencies. Applications must enable the modules used by their Rust APIs;
@@ -180,8 +182,8 @@ calling an unavailable host capability returns an error. Rust Cargo dependencies
 are configured separately. Permissions remain explicit in `permissions`.
 
 `icon` sets the application and launcher icon. `notification-icon` sets the default
-small icon for general and media notifications; it requires either notification
-feature. Both paths resolve relative to `gpuiforge.json` and accept PNG, WebP or
+small icon for general, media and data-sync notifications; it requires one of those
+features. Both paths resolve relative to `gpuiforge.json` and accept PNG, WebP or
 Android drawable XML. Small notification icons should be monochrome with a
 transparent background. A per-notification resource icon overrides this default;
 missing resources fall back to the configured notification icon, then the app icon

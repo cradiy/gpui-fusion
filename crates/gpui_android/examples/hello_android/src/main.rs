@@ -97,8 +97,12 @@ fn main() {
                         .initial_value("Hello from GPUI — 你好！\n")
                 }),
                 permission_status: "Microphone permission has not been requested.".into(),
+                background_status: "Start a 60-second execution demo, then press Home.".into(),
+                background_task: None,
                 #[cfg(target_os = "android")]
                 permissions: gpui_android::current_platform().permissions(),
+                #[cfg(target_os = "android")]
+                background_execution: gpui_android::current_platform().background_execution(),
                 title: cx.new(|cx| TextInput::new(cx).placeholder("Name")),
                 text: cx.new(|cx| TextInput::new(cx).multiline().placeholder("Message")),
                 password: cx.new(|cx| TextInput::new(cx).password().placeholder("Password")),
@@ -215,8 +219,12 @@ struct Counter {
     document: Option<SelectedFile>,
     file_text: Entity<TextInput>,
     permission_status: String,
+    background_status: String,
+    background_task: Option<Task<()>>,
     #[cfg(target_os = "android")]
     permissions: gpui_android::AndroidPermissions,
+    #[cfg(target_os = "android")]
+    background_execution: gpui_android::AndroidBackgroundExecution,
     text: Entity<TextInput>,
     title: Entity<TextInput>,
     password: Entity<TextInput>,
@@ -253,6 +261,59 @@ fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
 }
 
 impl Counter {
+    fn toggle_background(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.background_task.take().is_some() {
+            self.background_status = "Foreground execution stopped.".into();
+            cx.notify();
+            return;
+        }
+        #[cfg(target_os = "android")]
+        {
+            let execution = self.background_execution.clone();
+            let permissions = self.permissions.clone();
+            self.background_status = "Starting foreground execution...".into();
+            self.background_task = Some(cx.spawn(async move |this, cx| {
+                use futures::FutureExt;
+                let result = async {
+                    // Notification permission is optional for foreground execution.
+                    let _ = permissions.request("android.permission.POST_NOTIFICATIONS").await;
+                    let notification = |seconds| gpui_android::DataSyncNotification {
+                        channel: "execution-demo".into(),
+                        channel_name: "Background execution demo".into(),
+                        title: "GPUI background execution".into(),
+                        body: format!("{seconds} / 60 seconds · no files are transferred"),
+                        icon: None,
+                    };
+                    let mut lease = execution.start_data_sync(notification(0)).await?;
+                    for seconds in 1..=60 {
+                        futures::select_biased! {
+                            reason = lease.stopped().fuse() => anyhow::bail!("Foreground execution stopped: {reason:?}"),
+                            _ = cx.background_executor().timer(std::time::Duration::from_secs(1)).fuse() => {}
+                        }
+                        lease.update(notification(seconds))?;
+                        this.update(cx, |this, cx| {
+                            this.background_status = format!("Foreground execution: {seconds} / 60 seconds");
+                            cx.notify();
+                        })?;
+                    }
+                    anyhow::Ok(())
+                }.await;
+                let _ = this.update(cx, |this, cx| {
+                    this.background_status = match result {
+                        Ok(()) => "Foreground execution finished.".into(),
+                        Err(error) => format!("{error:#}"),
+                    };
+                    this.background_task = None;
+                    cx.notify();
+                });
+            }));
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            self.background_status = "Foreground services are available on Android.".into();
+        }
+        cx.notify();
+    }
     fn share_content(&mut self, action: ShareAction, cx: &mut Context<Self>) {
         if self.file_pending {
             return;
@@ -978,6 +1039,11 @@ impl Render for Counter {
                     .on_click(cx.listener(Self::request_microphone)),
             )
             .child(div().text_sm().child(self.permission_status.clone()))
+            .child(
+                button("background-execution", "Start / stop background execution")
+                    .on_click(cx.listener(Self::toggle_background)),
+            )
+            .child(div().text_sm().child(self.background_status.clone()))
             .child(
                 button("details", "Open details").on_click(cx.listener(|this, _, _, cx| {
                     this.details = true;

@@ -85,6 +85,27 @@ pub(crate) struct Host {
     object: GlobalRef,
 }
 impl Host {
+    pub fn background_operation(&self, operation: &str, payload: &str) -> Result<()> {
+        self.with_env(|env| {
+            let operation = env.new_string(operation)?;
+            let payload = env.new_string(payload)?;
+            let error = env
+                .call_method(
+                    self.object.as_obj(),
+                    "backgroundOperation",
+                    "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                    &[
+                        JValue::Object(operation.as_ref()),
+                        JValue::Object(payload.as_ref()),
+                    ],
+                )?
+                .l()?;
+            if !error.is_null() {
+                anyhow::bail!(String::from(env.get_string(&JString::from(error))?));
+            }
+            Ok(())
+        })
+    }
     pub fn notification_operation(&self, operation: &str, payload: &str) -> Result<String> {
         self.with_env(|env| {
             let operation = env.new_string(operation)?;
@@ -466,6 +487,11 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
     let vm = Arc::new(vm);
     let mut env = vm.get_env()?;
     let methods = [
+        method(
+            "nativeBackgroundEvent",
+            "(JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+            background_event as *mut c_void,
+        ),
         method(
             "nativeNotificationEvent",
             "(JLjava/lang/String;)Z",
@@ -1261,7 +1287,27 @@ extern "system" fn close(mut env: JNIEnv, _: JClass, id: jlong) {
     call(&mut env, |_| {
         let session = SESSIONS.with(|sessions| sessions.borrow_mut().remove(&id));
         if let Some(session) = session {
+            session.platform.background.close();
             session.platform.close();
+        }
+        Ok(())
+    });
+}
+
+extern "system" fn background_event(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    token: JString,
+    event: JString,
+    error: JString,
+) {
+    call(&mut env, |env| {
+        if let Ok(session) = session(id) {
+            let token: String = env.get_string(&token)?.into();
+            let event: String = env.get_string(&event)?.into();
+            let error: String = env.get_string(&error)?.into();
+            session.platform.background.event(&token, &event, &error);
         }
         Ok(())
     });

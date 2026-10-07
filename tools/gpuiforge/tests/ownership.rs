@@ -23,28 +23,39 @@ impl Fixture {
         )
         .unwrap();
         fs::write(
-            root.join("recipe.toml"),
-            r#"
-template = "template"
-abis = ["x86_64"]
-application-id = "dev.example.app"
-[[build]]
-program = "rustc"
-args = ["--version"]
-"#,
+            root.join("recipe.json"),
+            r#"{
+  "abis": [
+    "x86_64"
+  ],
+  "application-id": "dev.example.app",
+  "build": [
+    {
+      "args": [
+        "--version"
+      ],
+      "program": "rustc"
+    }
+  ],
+  "template": "template"
+}"#,
         )
         .unwrap();
         fs::write(
-            root.join("gpuiforge.toml"),
-            r#"
-# Keep this comment when switching ownership.
-[app]
-name = 'A & B'
-[platforms.android]
-recipe = "recipe.toml"
-[platforms.android.variables]
-message = '$value'
-"#,
+            root.join("gpuiforge.json"),
+            r#"{
+  "app": {
+    "name": "A & B"
+  },
+  "platforms": {
+    "android": {
+      "recipe": "recipe.json",
+      "variables": {
+        "message": "$value"
+      }
+    }
+  }
+}"#,
         )
         .unwrap();
         Self(root)
@@ -74,8 +85,8 @@ impl Drop for Fixture {
 #[test]
 fn bundled_android_generates_without_recipe_or_checkout() {
     let app = Fixture::new();
-    fs::remove_file(app.0.join("gpuiforge.toml")).unwrap();
-    fs::remove_file(app.0.join("recipe.toml")).unwrap();
+    fs::remove_file(app.0.join("gpuiforge.json")).unwrap();
+    fs::remove_file(app.0.join("recipe.json")).unwrap();
     fs::remove_dir_all(app.0.join("template")).unwrap();
     fs::write(
         app.0.join("Cargo.toml"),
@@ -104,8 +115,10 @@ fn bundled_android_generates_without_recipe_or_checkout() {
         );
     }
     let generated = app.0.join("target/gpuiforge/android");
-    let config: toml::Value =
-        toml::from_str(&fs::read_to_string(app.0.join("gpuiforge.toml")).unwrap()).unwrap();
+    let config: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(app.0.join("gpuiforge.json")).unwrap()).unwrap();
+    assert_eq!(config["$schema"], "./gpuiforge.schema.json");
+    assert!(app.0.join("gpuiforge.schema.json").is_file());
     assert!(
         config["platforms"]["android"]["build"]
             .as_array()
@@ -153,18 +166,25 @@ fn sync_prunes_disabled_modules_and_icons() {
     )
     .unwrap();
     fs::write(app.0.join("icon.xml"), "<vector />").unwrap();
-    let config = app.0.join("gpuiforge.toml");
+    let config = app.0.join("gpuiforge.json");
     fs::write(
         &config,
-        r#"
-[app]
-name = "Example"
-[platforms.android]
-application-id = "dev.example.app"
-features = ["sharing", "notifications"]
-icon = "icon.xml"
-notification-icon = "icon.xml"
-"#,
+        r#"{
+  "app": {
+    "name": "Example"
+  },
+  "platforms": {
+    "android": {
+      "application-id": "dev.example.app",
+      "features": [
+        "sharing",
+        "notifications"
+      ],
+      "icon": "icon.xml",
+      "notification-icon": "icon.xml"
+    }
+  }
+}"#,
     )
     .unwrap();
     let output = app.0.join("target/gpuiforge/android");
@@ -198,13 +218,17 @@ notification-icon = "icon.xml"
     );
     fs::write(
         &config,
-        r#"
-[app]
-name = "Example"
-[platforms.android]
-application-id = "dev.example.app"
-features = []
-"#,
+        r#"{
+  "app": {
+    "name": "Example"
+  },
+  "platforms": {
+    "android": {
+      "application-id": "dev.example.app",
+      "features": []
+    }
+  }
+}"#,
     )
     .unwrap();
     let check = app.run(&["sync", "android", "--check"]);
@@ -252,21 +276,42 @@ fn invalid_icon_does_not_modify_generated_project() {
         "[package]\nname = 'fixture-app'\nversion = '0.1.0'\n",
     )
     .unwrap();
-    let config = app.0.join("gpuiforge.toml");
-    let base = "[app]\nname = 'Example'\n[platforms.android]\napplication-id = 'dev.example.app'\n";
-    fs::write(&config, base).unwrap();
+    let config = app.0.join("gpuiforge.json");
+    let mut base = serde_json::json!({"app":{"name":"Example"},"platforms":{"android":{"application-id":"dev.example.app"}}});
+    fs::write(&config, base.to_string()).unwrap();
     app.ok(&["sync"]);
     let state = app
         .0
         .join("target/gpuiforge/android/.gpuiforge-generated.json");
     let modified = fs::metadata(&state).unwrap().modified().unwrap();
-    fs::write(&config, format!("{base}icon = 'missing.png'\n")).unwrap();
+    base["platforms"]["android"]["icon"] = "missing.png".into();
+    fs::write(&config, base.to_string()).unwrap();
     for args in [&["sync", "--check"][..], &["sync"][..]] {
         let result = app.run(args);
         assert!(!result.status.success());
         let message = String::from_utf8_lossy(&result.stderr);
         assert!(message.contains("platforms.android.icon") && message.contains("missing.png"));
         assert_eq!(fs::metadata(&state).unwrap().modified().unwrap(), modified);
+    }
+}
+
+#[test]
+fn published_schemas_match_configuration_types() {
+    let app = Fixture::new();
+    for (args, expected) in [
+        (vec!["schema"], include_str!("../gpuiforge.schema.json")),
+        (
+            vec!["schema", "--recipe"],
+            include_str!("../recipe.schema.json"),
+        ),
+    ] {
+        let result = app.run(&args);
+        assert!(result.status.success());
+        let actual: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(
+            actual,
+            serde_json::from_str::<serde_json::Value>(expected).unwrap()
+        );
     }
 }
 
@@ -278,7 +323,7 @@ fn missing_android_tools_stop_before_generating_or_starting_gradle() {
         "[package]\nname = 'fixture-app'\nversion = '0.1.0'\n",
     )
     .unwrap();
-    fs::remove_file(app.0.join("gpuiforge.toml")).unwrap();
+    fs::remove_file(app.0.join("gpuiforge.json")).unwrap();
     app.ok(&["init", "--android", "--application-id", "dev.example.app"]);
     let result = Command::new(env!("CARGO_BIN_EXE_gpuiforge"))
         .args(["build", "android"])
@@ -322,8 +367,14 @@ fn edited_generated_sources_survive_eject_and_manual_build() {
     )
     .unwrap();
     app.ok(&["platform", "eject", "android"]);
-    let config = fs::read_to_string(app.0.join("gpuiforge.toml")).unwrap();
-    assert!(config.contains("management = \"manual\"") && config.contains("# Keep this comment"));
+    let config = fs::read_to_string(app.0.join("gpuiforge.json")).unwrap();
+    let config: serde_json::Value = serde_json::from_str(&config).unwrap();
+    assert_eq!(config["platforms"]["android"]["management"], "manual");
+    assert_eq!(config["app"]["name"], "A & B");
+    assert_eq!(
+        config["platforms"]["android"]["variables"]["message"],
+        "$value"
+    );
     let exported = app.0.join("platforms/android/settings.txt");
     assert_eq!(
         fs::read_to_string(&exported).unwrap(),
@@ -351,27 +402,18 @@ fn invalid_configuration_cannot_overwrite_existing_project() {
         fs::read_to_string(generated.join("settings.txt")).unwrap(),
         "existing project"
     );
-    let config = app.0.join("gpuiforge.toml");
-    let original = fs::read_to_string(&config).unwrap();
-    fs::write(
-        &config,
-        original.replace(
-            "[platforms.android]\n",
-            "[platforms.android]\nproject-dir = '../outside'\n",
-        ),
-    )
-    .unwrap();
+    let config = app.0.join("gpuiforge.json");
+    let original: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+    let mut changed = original.clone();
+    changed["platforms"]["android"]["project-dir"] = "../outside".into();
+    fs::write(&config, changed.to_string()).unwrap();
     assert!(!app.run(&["generate", "android"]).status.success());
-    fs::write(
-        &config,
-        original.replace(
-            "[platforms.android]\n",
-            "[platforms.android]\nmanagment = 'manual'\n",
-        ),
-    )
-    .unwrap();
+    let mut changed = original.clone();
+    changed["platforms"]["android"]["managment"] = "manual".into();
+    fs::write(&config, changed.to_string()).unwrap();
     assert!(!app.run(&["generate", "android"]).status.success());
-    fs::write(&config, original).unwrap();
+    fs::write(&config, original.to_string()).unwrap();
     assert!(!app.run(&["run"]).status.success());
 }
 
@@ -400,39 +442,28 @@ esac
     )
     .unwrap();
     fs::set_permissions(&adb, fs::Permissions::from_mode(0o755)).unwrap();
-    let recipe = fs::read_to_string(app.0.join("recipe.toml")).unwrap();
-    fs::write(
-        app.0.join("recipe.toml"),
-        recipe
-            .replace("[[build]]", "artifact = 'fixture.apk'\n[[build]]")
-            .replace(
-                "program = \"rustc\"\nargs = [\"--version\"]",
-                r#"program = "sh"
-args = ["-c", "printf apk > \"$1\"", "sh", "{{project_dir}}/fixture.apk"]"#,
-            ),
-    )
-    .unwrap();
-    let mut config = fs::read_to_string(app.0.join("gpuiforge.toml"))
-        .unwrap()
-        .parse::<toml_edit::DocumentMut>()
-        .unwrap();
-    let defaults = include_str!("../android.toml")
-        .parse::<toml_edit::DocumentMut>()
-        .unwrap();
-    config["platforms"]["android"]["activity"] = toml_edit::value("dev.example.MainActivity");
+    let mut recipe: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(app.0.join("recipe.json")).unwrap()).unwrap();
+    recipe["artifact"] = "fixture.apk".into();
+    recipe["build"] = serde_json::json!([{
+        "program": "sh",
+        "args": ["-c", "printf apk > \"$1\"", "sh", "{{project_dir}}/fixture.apk"]
+    }]);
+    fs::write(app.0.join("recipe.json"), recipe.to_string()).unwrap();
+    let mut config: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(app.0.join("gpuiforge.json")).unwrap()).unwrap();
+    let defaults: serde_json::Value =
+        serde_json::from_str(include_str!("../android.json")).unwrap();
+    config["platforms"]["android"]["activity"] = "dev.example.MainActivity".into();
     config["platforms"]["android"]["run"] = defaults["run"].clone();
-    config["platforms"]["android"]["run"]
-        .as_array_of_tables_mut()
-        .unwrap()
-        .get_mut(1)
-        .unwrap()["args"]
+    config["platforms"]["android"]["run"][1]["args"]
         .as_array_mut()
         .unwrap()
-        .push("-S");
-    fs::write(app.0.join("gpuiforge.toml"), config.to_string()).unwrap();
+        .push("-S".into());
+    fs::write(app.0.join("gpuiforge.json"), config.to_string()).unwrap();
     let log = app.0.join("adb.log");
     let listed = Command::new(env!("CARGO_BIN_EXE_gpuiforge"))
-        .args(["--config", "missing.toml", "devices"])
+        .args(["--config", "missing.json", "devices"])
         .env("ANDROID_HOME", app.0.join("sdk"))
         .env("FORGE_LOG", &log)
         .current_dir(&app.0)

@@ -121,18 +121,23 @@ it does not send messages or execute business actions.
 ### Android
 
 The `app_id` must match `platforms.android.application-id`. Declare
-`android.permission.POST_NOTIFICATIONS` in `gpuiforge.toml`. Set
+`android.permission.POST_NOTIFICATIONS` in `gpuiforge.json`. Set
 `options.channel.id` and `options.channel.name` before creating the center.
 Channel importance and user overrides remain under Android's control.
 
 Enable the host module and optionally configure a default small icon:
 
-```toml
-[platforms.android]
-application-id = "com.example.app"
-features = ["notifications"]
-permissions = ["android.permission.POST_NOTIFICATIONS"]
-notification-icon = "assets/notification.xml"
+```json
+{
+  "platforms": {
+    "android": {
+      "application-id": "com.example.app",
+      "features": ["notifications"],
+      "notification-icon": "assets/notification.xml",
+      "permissions": ["android.permission.POST_NOTIFICATIONS"]
+    }
+  }
+}
 ```
 
 Run `gpuiforge sync` to regenerate the managed project. The default icon needs

@@ -7,7 +7,7 @@ These surfaces follow the operating system's presentation policy.
 
 Android applications enable `"media-notifications"` in
 `platforms.android.features`. Add `"media"` when using GPUI's Android media
-backend. Configure `notification-icon = "assets/notification.xml"` for a default
+backend. Configure `"notification-icon": "assets/notification.xml"` for a default
 small icon, or pass a packaged resource name per session update. Run
 `gpuiforge sync` after changing the host configuration.
 

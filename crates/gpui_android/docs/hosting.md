@@ -20,20 +20,25 @@ rustup target add aarch64-linux-android x86_64-linux-android
 gpuiforge run
 ```
 
-External applications enable the bundled Android support in `gpuiforge.toml`:
+External applications enable the bundled Android support in `gpuiforge.json`:
 
-```toml
-[platforms.android]
-application-id = "dev.example.app"
+```json
+{
+  "platforms": {
+    "android": {
+      "application-id": "dev.example.app"
+    }
+  }
+}
 ```
 
 GPUiForge derives the native library name from the application's Cargo package.
 No recipe or local GPUI checkout path is required.
 
 Enable optional host capabilities with `features`, for example
-`features = ["files", "sharing", "credentials"]`. Media playback uses `"media"`;
+`"features": ["files", "sharing", "credentials"]`. Media playback uses `"media"`;
 general and media notifications use `"notifications"` and `"media-notifications"`.
-Omitted modules are not generated. Use `icon = "assets/app.png"` for the application
+Omitted modules are not generated. Use `"icon": "assets/app.png"` for the application
 icon and `gpuiforge sync` to regenerate the managed project without building.
 See [host features and icons](../../../tools/gpuiforge/docs/usage.md#android-host-features-and-icons)
 for available modules and resource configuration.
@@ -42,13 +47,13 @@ The platform menu offers desktop and Android. Android run prompts for a device
 and builds its ABI. `gpuiforge build android` packages both configured ABIs;
 `gpuiforge run android --device emulator-5554` selects a device explicitly.
 
-`gpuiforge.toml` belongs to the Rust application. GPUiForge generates the
+`gpuiforge.json` belongs to the Rust application. GPUiForge generates the
 Kotlin host and Gradle application under
 `target/gpuiforge/android`. The debug APK is written to
 `target/gpuiforge/android/app/build/outputs/apk/debug/app-debug.apk`.
 
 Use `gpuiforge platform eject android` to export the generated application to
-`platforms/android` and switch the TOML configuration to manual management.
+`platforms/android` and switch the JSON configuration to manual management.
 Subsequent builds preserve user-owned Kotlin, Manifest, and Gradle files.
 See [GPUiForge configuration](../../../tools/gpuiforge/docs/usage.md) for recipes,
 template variables, and ownership rules.
@@ -381,12 +386,17 @@ not implemented.
 
 ## Permissions
 
-Declare Android permissions in the application's `gpuiforge.toml`:
+Declare Android permissions in the application's `gpuiforge.json`:
 
-```toml
-[platforms.android]
-application-id = "dev.example.app"
-permissions = ["android.permission.RECORD_AUDIO"]
+```json
+{
+  "platforms": {
+    "android": {
+      "application-id": "dev.example.app",
+      "permissions": ["android.permission.RECORD_AUDIO"]
+    }
+  }
+}
 ```
 
 Capture `gpui_android::current_platform().permissions()` during application

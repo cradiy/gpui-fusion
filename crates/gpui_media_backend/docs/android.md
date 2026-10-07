@@ -14,13 +14,18 @@ gpui_media = { path = "path/to/gpui/crates/gpui_media", default-features = false
 gpui_media_backend = { path = "path/to/gpui/crates/gpui_media_backend" }
 ```
 
-For network media, include the Internet permission in `gpuiforge.toml`:
+For network media, include the Internet permission in `gpuiforge.json`:
 
-```toml
-[platforms.android]
-application-id = "com.example.player"
-features = ["media", "files"]
-permissions = ["android.permission.INTERNET"]
+```json
+{
+  "platforms": {
+    "android": {
+      "application-id": "com.example.player",
+      "features": ["media", "files"],
+      "permissions": ["android.permission.INTERNET"]
+    }
+  }
+}
 ```
 
 Run `gpuiforge run android` from the application directory. GPUiForge supplies

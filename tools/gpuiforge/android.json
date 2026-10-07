@@ -1,0 +1,55 @@
+{
+  "abis": [
+    "arm64-v8a",
+    "x86_64"
+  ],
+  "activity": "dev.gpuiforge.app.MainActivity",
+  "artifact": "app/build/outputs/apk/{{profile}}/app-{{profile}}{{apk_suffix}}.apk",
+  "build": [
+    {
+      "args": [
+        "gradlew",
+        "--no-daemon",
+        "-PgpuiAbis={{abis}}",
+        "-PgpuiForgeExecutable={{tool_path}}",
+        ":app:assemble{{variant}}"
+      ],
+      "cwd": "{{project_dir}}",
+      "program": "bash"
+    }
+  ],
+  "features": [],
+  "permissions": [],
+  "run": [
+    {
+      "args": [
+        "-s",
+        "{{device}}",
+        "install",
+        "-r",
+        "{{artifact}}"
+      ],
+      "program": "{{adb}}"
+    },
+    {
+      "args": [
+        "-s",
+        "{{device}}",
+        "shell",
+        "am",
+        "start",
+        "-W",
+        "-n",
+        "{{application_id}}/{{activity}}"
+      ],
+      "error-pattern": "Error:",
+      "program": "{{adb}}"
+    }
+  ],
+  "variables": {
+    "min_sdk": "26",
+    "target_sdk": "36",
+    "version_code": "1",
+    "version_name": "0.1.0"
+  }
+}

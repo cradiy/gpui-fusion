@@ -1,0 +1,47 @@
+{
+  "$schema": "../../../../tools/gpuiforge/gpuiforge.schema.json",
+  "app": {
+    "name": "GPUI Media"
+  },
+  "platforms": {
+    "android": {
+      "abis": ["arm64-v8a", "x86_64"],
+      "application-id": "dev.gpui.media",
+      "build": [
+        {
+          "args": ["gradlew", "--no-daemon", "-PgpuiAbis={{abis}}", "-PgpuiForgeExecutable={{tool_path}}", ":app:assemble{{variant}}"],
+          "cwd": "{{project_dir}}",
+          "program": "bash"
+        }
+      ],
+      "features": ["files", "media", "media-notifications"],
+      "notification-icon": "assets/ic_media_notification.xml",
+      "permissions": ["android.permission.INTERNET"],
+      "run": [
+        {
+          "args": ["-s", "{{device}}", "install", "-r", "{{artifact}}"],
+          "program": "{{adb}}"
+        },
+        {
+          "args": ["-s", "{{device}}", "shell", "am", "start", "-W", "-n", "{{application_id}}/{{activity}}"],
+          "error-pattern": "Error:",
+          "program": "{{adb}}"
+        }
+      ]
+    },
+    "desktop": {
+      "build": [
+        {
+          "args": ["build", "-p", "media_android", "--profile", "{{cargo_profile}}"],
+          "program": "cargo"
+        }
+      ],
+      "run": [
+        {
+          "args": ["run", "-p", "media_android", "--profile", "{{cargo_profile}}"],
+          "program": "cargo"
+        }
+      ]
+    }
+  }
+}

@@ -9,8 +9,10 @@ use std::{
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
+    #[serde(default, rename = "$schema")]
+    _schema: Option<String>,
     app: App,
-    platforms: BTreeMap<String, toml::Value>,
+    platforms: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -19,63 +21,94 @@ struct App {
     name: String,
 }
 
-#[derive(Clone, Copy, Default, Deserialize, PartialEq)]
+#[derive(schemars::JsonSchema, Clone, Copy, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Management {
+    /// GPUiForge generates native files during sync and before builds. Edited generated files are protected from overwriting.
     #[default]
     Managed,
+    /// The application maintains native files. Build/run execute configured steps without regeneration; sync and generate are disabled. Use platform eject to export a managed project.
     Manual,
 }
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(schemars::JsonSchema, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Platform {
+    /// Optional editor schema reference for a platform recipe. Relative references resolve from the JSON file. GPUiForge does not fetch schema URLs.
+    #[serde(default, rename = "$schema")]
+    pub _schema: Option<String>,
+    /// Optional modules for the bundled Android host. Defaults to an empty list: window rendering, input, IME, accessibility and lifecycle remain available. Disabled modules omit their Kotlin files, Manifest components and dedicated dependencies. Cargo features and Android permissions are configured separately.
     #[serde(default)]
     pub features: BTreeSet<AndroidFeature>,
+    /// Application and launcher icon for the bundled Android host. Accepts PNG, WebP or Android drawable XML. Resolve relative paths from gpuiforge.json. Omit to leave the application icon unspecified; no copy entry is required.
     pub icon: Option<PathBuf>,
+    /// Default small icon for general and media notifications. Requires notifications or media-notifications. Accepts PNG, WebP or Android drawable XML relative to gpuiforge.json; use a monochrome image with transparency. A per-send resource icon takes priority, followed by this icon, the application icon and Android's generic icon.
     pub notification_icon: Option<PathBuf>,
+    /// Optional JSON platform recipe, relative to gpuiforge.json. Application fields override recipe fields: objects merge recursively and arrays replace the whole recipe array. Custom recipes replace bundled Android defaults and cannot include another recipe.
     #[serde(rename = "recipe")]
     pub _recipe: Option<PathBuf>,
     #[serde(skip)]
     pub bundled: bool,
     #[serde(skip)]
     pub default_android_build: bool,
+    /// Native project ownership. Defaults to managed. Use gpuiforge platform eject android to export generated sources before taking manual ownership.
     #[serde(default)]
     pub management: Management,
+    /// Custom native project template directory. Relative paths resolve from the JSON file declaring this field. Files ending in .tmpl expand {{variables}} and lose that suffix; other files are copied verbatim. Symlinks are rejected. Omit together with recipe to use bundled Android templates.
     pub template: Option<PathBuf>,
+    /// Native project directory, always relative to the application's configuration directory, even when declared in a recipe. Defaults to target/gpuiforge/<platform>. Must be nonempty and contain no . or .. components. Managed generation never adopts a nonempty directory without matching ownership metadata.
     pub project_dir: Option<PathBuf>,
+    /// Custom string values exposed as {{var.<name>}} in templates and process steps. Values are strings, including SDK levels and version codes. Application values override individual recipe keys. Bundled Android templates recognize the documented SDK, version and native_library keys; arbitrary additional keys are allowed.
     #[serde(default)]
     pub variables: BTreeMap<String, String>,
+    /// Named filesystem paths exposed as {{path.<name>}}. Relative values resolve from the JSON file declaring them and must exist when variables are expanded. Template expansion receives absolute, canonical paths. Use this for shared assets or external template inputs.
     #[serde(default)]
     pub paths: BTreeMap<String, PathBuf>,
+    /// Extra file or directory copies into the generated native project. Contents are copied verbatim, including binary assets, without template expansion. Duplicate destinations and symlinks are rejected. Application arrays replace recipe copies; use icon and notification-icon for ordinary Android icons.
     #[serde(default)]
     pub copies: Vec<CopySpec>,
+    /// Ordered process steps for gpuiforge build. Android run executes these before its run steps. Each step must succeed before the next starts. Bundled Android defaults assemble the selected debug/release APK; a configured array replaces all default build steps.
     #[serde(default)]
     pub build: Vec<Step>,
+    /// Ordered launch steps for gpuiforge run. Android builds first, then runs its configured install and launch steps. Desktop and Web execute only these steps, so they must build or serve the application as needed. Bundled Android defaults use ADB; a configured array replaces all defaults.
     #[serde(default)]
     pub run: Vec<Step>,
+    /// Expected build output path relative to project-dir, with {{variables}} supported. When present, build fails if the file does not exist afterward. Android run exposes its absolute path as {{artifact}}. Bundled default: app/build/outputs/apk/{{profile}}/app-{{profile}}{{apk_suffix}}.apk.
     pub artifact: Option<String>,
+    /// Android package identity, such as com.example.app. Required directly or through a recipe. Use at least two dot-separated segments starting with ASCII letters; remaining characters may be letters, digits or underscores. This is independent of the Kotlin host namespace and Rust package name.
     pub application_id: Option<String>,
+    /// Android Activity class used by launch steps through {{activity}}. Bundled default: dev.gpuiforge.app.MainActivity. Changing this value does not rename generated Kotlin classes or Manifest entries; keep it aligned with a custom or manually maintained host.
     pub activity: Option<String>,
+    /// Android architectures enabled for packaging. Bundled defaults: arm64-v8a and x86_64. Builds package all enabled ABIs unless --abi selects one; device runs choose a compatible enabled ABI. At least one is required, and 32-bit Android targets are not supported.
     #[serde(default)]
     pub abis: Vec<String>,
+    /// Fully qualified Android permission names written as uses-permission entries in the bundled Manifest, for example android.permission.INTERNET. Defaults to empty; duplicates are removed. Modules do not grant or request runtime permissions automatically. Runtime authorization remains the application's responsibility.
     #[serde(default)]
     pub permissions: Vec<String>,
+    /// Lowercase custom URI schemes delivered through Application::on_open_urls, for example myapp. Defaults to empty; duplicates are removed. Bundled templates generate VIEW/DEFAULT/BROWSABLE intent filters. HTTP(S) App Links and file/content URI handlers require a custom Manifest.
     #[serde(default)]
     pub url_schemes: Vec<String>,
+    /// MIME types accepted from Android SEND and SEND_MULTIPLE intents, for example text/plain, image/* or */*. Defaults to empty, which does not register a share target. Use lowercase type/subtype syntax. The bundled host requires the sharing feature; the application handles received content itself.
     #[serde(default)]
     pub share_mime_types: Vec<String>,
+    /// Optional Android release signing configuration. All four fields are required when present. Passwords come from environment variables during --release builds; debug builds use the development key. Without this object, the bundled release build produces an unsigned APK. Store the keystore outside the generated project.
     pub signing: Option<Signing>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(schemars::JsonSchema, Clone, Copy, Debug, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(rename_all = "kebab-case")]
 pub enum AndroidFeature {
+    /// Document open/save pickers, persistent document grants, private/public storage and the file provider. Does not require broad storage access permissions for document picker use.
     Files,
+    /// Sending and receiving Android shares. Automatically includes files. Set share-mime-types separately to register the application as a share target.
     Sharing,
+    /// Android-backed credential storage used by GPUI's credential API. Enable when storing or retrieving application credentials.
     Credentials,
+    /// Media playback and frame decoding, including the Media3 dependency. System playback notifications are selected separately with media-notifications.
     Media,
+    /// General system notifications, action buttons and inline replies. Declare POST_NOTIFICATIONS and request runtime authorization when required by Android.
     Notifications,
+    /// Android system media session and playback notification controls. Independent of media and notifications, so an application may connect its own player. Does not create a foreground service or keep background work alive.
     MediaNotifications,
 }
 impl Platform {
@@ -86,31 +119,42 @@ impl Platform {
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(schemars::JsonSchema, Clone, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Signing {
+    /// Existing keystore file, relative to the JSON file declaring this field or an absolute path. Must remain outside project-dir so generated files cannot replace it. GPUiForge does not generate keys or package the keystore in the APK.
     pub keystore: PathBuf,
+    /// Alias of the signing key inside the keystore, not the keystore filename. Must be nonempty and match the alias used when the key was created.
     pub key_alias: String,
+    /// Name of the environment variable containing the keystore password, not the password itself. It must be set to a nonempty value for release builds. Example: ANDROID_STORE_PASSWORD.
     pub store_password_env: String,
+    /// Name of the environment variable containing the private signing key's password. It may name the same variable as store-password-env when both passwords are identical. Example: ANDROID_KEY_PASSWORD.
     pub key_password_env: String,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(schemars::JsonSchema, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CopySpec {
+    /// Existing source file or directory. Relative paths resolve from the JSON file declaring this copy. Directory contents are copied recursively; symlinks are rejected and content is not template-expanded.
     pub from: PathBuf,
+    /// Destination relative to the generated project directory. A file source requires its destination filename; a directory source supplies contents under this directory. Must be nonempty, contain no . or .. components, and not overlap another generated file.
     pub to: PathBuf,
 }
 
-#[derive(Clone, Deserialize, PartialEq)]
+#[derive(schemars::JsonSchema, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Step {
+    /// Executable name resolved through PATH, or an explicit executable path. Supports {{variables}}. GPUiForge starts it directly without a shell; use an explicit shell program when shell syntax is required.
     pub program: String,
+    /// Arguments passed individually to the executable, in order. Defaults to empty. Spaces do not split an argument; shell quoting, pipes, globbing and $VAR expansion are not performed by GPUiForge. Common placeholders: {{cargo_profile}} (dev/release), {{profile}} (debug/release), {{variant}} (Debug/Release), {{project_dir}} and {{abis}}. Android run steps also receive {{adb}}, {{device}} and {{artifact}}. Custom values use {{var.<name>}} or {{path.<name>}}.
     #[serde(default)]
     pub args: Vec<String>,
+    /// Working directory for this step. Defaults to the application configuration directory. Relative paths also resolve from that directory, including steps inherited from a recipe. Supports {{variables}}; use {{project_dir}} for Gradle commands in the native project.
     pub cwd: Option<String>,
+    /// Additional environment variables for this process. Values are strings supporting {{variables}}; unlisted variables are inherited from GPUiForge's environment. Generated release-signing variables take precedence. Reference password variable names in signing instead of storing passwords here.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// Optional case-sensitive literal substring checked in stdout and stderr. A match fails the step even if its exit code is zero. When set, output is captured and printed after the process finishes; otherwise streams are inherited. Use Error: to detect ADB launch errors. This is not a regular expression.
     pub error_pattern: Option<String>,
 }
 
@@ -123,17 +167,17 @@ pub struct Project {
 
 pub type Variables = BTreeMap<String, String>;
 
-fn read(path: &Path) -> Result<toml::Value> {
-    toml::from_str(
+fn read(path: &Path) -> Result<serde_json::Value> {
+    serde_json::from_str(
         &fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?,
     )
     .with_context(|| format!("parsing {}", path.display()))
 }
 
-fn paths(value: &mut toml::Value, base: &Path) -> Result<()> {
-    fn resolve(value: &mut toml::Value, base: &Path) -> Result<()> {
+fn paths(value: &mut serde_json::Value, base: &Path) -> Result<()> {
+    fn resolve(value: &mut serde_json::Value, base: &Path) -> Result<()> {
         let path = value.as_str().context("expected a path string")?;
-        *value = toml::Value::String(base.join(path).to_string_lossy().into_owned());
+        *value = serde_json::Value::String(base.join(path).to_string_lossy().into_owned());
         Ok(())
     }
     for field in ["icon", "notification-icon"] {
@@ -152,12 +196,18 @@ fn paths(value: &mut toml::Value, base: &Path) -> Result<()> {
             base,
         )?;
     }
-    if let Some(table) = value.get_mut("paths").and_then(toml::Value::as_table_mut) {
+    if let Some(table) = value
+        .get_mut("paths")
+        .and_then(serde_json::Value::as_object_mut)
+    {
         for (_, path) in table.iter_mut() {
             resolve(path, base)?;
         }
     }
-    if let Some(copies) = value.get_mut("copies").and_then(toml::Value::as_array_mut) {
+    if let Some(copies) = value
+        .get_mut("copies")
+        .and_then(serde_json::Value::as_array_mut)
+    {
         for copy in copies {
             resolve(copy.get_mut("from").context("copy is missing from")?, base)?;
         }
@@ -165,8 +215,8 @@ fn paths(value: &mut toml::Value, base: &Path) -> Result<()> {
     Ok(())
 }
 
-fn merge(base: &mut toml::Value, overlay: toml::Value) {
-    if let (Some(base), Some(overlay)) = (base.as_table_mut(), overlay.as_table()) {
+fn merge(base: &mut serde_json::Value, overlay: serde_json::Value) {
+    if let (Some(base), Some(overlay)) = (base.as_object_mut(), overlay.as_object()) {
         for (key, value) in overlay {
             if let Some(existing) = base.get_mut(key) {
                 merge(existing, value.clone());
@@ -195,7 +245,7 @@ impl Project {
             .canonicalize()
             .with_context(|| format!("configuration not found: {}", path.display()))?;
         let root = config_path.parent().unwrap().to_owned();
-        let config: Config = read(&config_path)?.try_into()?;
+        let config: Config = serde_json::from_value(read(&config_path)?)?;
         ensure!(
             !config.app.name.trim().is_empty(),
             "app.name must not be empty"
@@ -221,21 +271,21 @@ impl Project {
                 paths(&mut base, recipe.parent().unwrap())?;
                 base
             } else if bundled {
-                toml::from_str(include_str!("../android.toml"))?
+                serde_json::from_str(include_str!("../android.json"))?
             } else {
-                toml::Value::Table(toml::Table::new())
+                serde_json::json!({})
             };
             paths(&mut value, &root)?;
             merge(&mut base, value);
-            let mut platform: Platform = base
-                .try_into()
-                .with_context(|| format!("invalid platform {name}"))?;
+            let mut platform: Platform =
+                serde_json::from_value(base).with_context(|| format!("invalid platform {name}"))?;
             platform.bundled = bundled;
             platform.default_android_build = bundled
                 && platform.build
-                    == toml::from_str::<Platform>(include_str!("../android.toml"))?.build;
+                    == serde_json::from_str::<Platform>(include_str!("../android.json"))?.build;
             if bundled && !platform.variables.contains_key("native_library") {
-                let manifest = read(&root.join("Cargo.toml"))?;
+                let manifest: toml::Value =
+                    toml::from_str(&fs::read_to_string(root.join("Cargo.toml"))?)?;
                 let package = manifest
                     .get("package")
                     .and_then(|p| p.get("name"))

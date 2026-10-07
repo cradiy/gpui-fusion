@@ -346,10 +346,10 @@ pub fn eject(project: &Project, name: &str, destination: &Path) -> Result<PathBu
     // Export source files, including user edits and additions, but no build caches.
     let mut files = BTreeMap::new();
     collect_export(&source, Path::new(""), &mut files)?;
-    let mut document: toml_edit::DocumentMut = fs::read_to_string(&project.config_path)?.parse()?;
-    document["platforms"][name]["management"] = toml_edit::value("manual");
+    let mut document: serde_json::Value = fs::read_to_string(&project.config_path)?.parse()?;
+    document["platforms"][name]["management"] = serde_json::json!("manual");
     document["platforms"][name]["project-dir"] =
-        toml_edit::value(destination.to_str().context("project-dir must be UTF-8")?);
+        serde_json::json!(destination.to_str().context("project-dir must be UTF-8")?);
     fs::create_dir_all(&output)?;
     for (path, file) in files {
         let target = output.join(path);
@@ -359,7 +359,10 @@ pub fn eject(project: &Project, name: &str, destination: &Path) -> Result<PathBu
             fs::set_permissions(target, permissions)?;
         }
     }
-    fs::write(&project.config_path, document.to_string())?;
+    fs::write(
+        &project.config_path,
+        serde_json::to_string_pretty(&document)? + "\n",
+    )?;
     Ok(output)
 }
 

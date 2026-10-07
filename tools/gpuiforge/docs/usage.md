@@ -1,7 +1,7 @@
 # Configuration and workflows
 
-Run GPUiForge in a directory containing `gpuiforge.toml`, or pass
-`--config path/to/gpuiforge.toml`. Diagnostics and commands go to stderr;
+Run GPUiForge in a directory containing `gpuiforge.json`, or pass
+`--config path/to/gpuiforge.json`. Diagnostics and commands go to stderr;
 generated directories and build artifact paths go to stdout. Child processes
 inherit the terminal streams. CLI syntax errors exit with 2; execution errors
 exit with 1.
@@ -12,37 +12,67 @@ exit with 1.
 To also configure Android, supply `--android`
 and `--application-id dev.example.app`. Existing configuration is never replaced.
 Initialization writes the default build and run steps into the configuration so
-they can be edited directly.
+they can be edited directly. It also writes `gpuiforge.schema.json` beside the
+configuration and sets `$schema` to that local file for offline editor completion
+and validation. Configuration uses strict JSON; comments and trailing commas are
+not accepted. Cargo manifests remain TOML.
 
-```toml
-[app]
-name = "My App"
+To export the schema independently:
 
-[[platforms.desktop.build]]
-program = "cargo"
-args = ["build", "--profile", "{{cargo_profile}}"]
+```sh
+gpuiforge schema > gpuiforge.schema.json
+gpuiforge schema --recipe > recipe.schema.json
+```
 
-[[platforms.desktop.run]]
-program = "cargo"
-args = ["run", "--profile", "{{cargo_profile}}"]
+Application configuration can reference `"$schema": "./gpuiforge.schema.json"`;
+custom recipes can reference `"$schema": "./recipe.schema.json"`. GPUiForge does
+not fetch schema URLs. The CLI validates configuration independently and also
+checks filesystem paths and platform-specific requirements.
 
-[platforms.android]
-application-id = "dev.example.app"
-abis = ["arm64-v8a", "x86_64"]
-
-[[platforms.android.build]]
-program = "bash"
-args = ["gradlew", "--no-daemon", "-PgpuiAbis={{abis}}", "-PgpuiForgeExecutable={{tool_path}}", ":app:assemble{{variant}}"]
-cwd = "{{project_dir}}"
-
-[[platforms.android.run]]
-program = "{{adb}}"
-args = ["-s", "{{device}}", "install", "-r", "{{artifact}}"]
-
-[[platforms.android.run]]
-program = "{{adb}}"
-args = ["-s", "{{device}}", "shell", "am", "start", "-W", "-n", "{{application_id}}/{{activity}}"]
-error-pattern = "Error:"
+```json
+{
+  "app": {
+    "name": "My App"
+  },
+  "platforms": {
+    "android": {
+      "abis": ["arm64-v8a", "x86_64"],
+      "application-id": "dev.example.app",
+      "build": [
+        {
+          "args": ["gradlew", "--no-daemon", "-PgpuiAbis={{abis}}", "-PgpuiForgeExecutable={{tool_path}}", ":app:assemble{{variant}}"],
+          "cwd": "{{project_dir}}",
+          "program": "bash"
+        }
+      ],
+      "run": [
+        {
+          "args": ["-s", "{{device}}", "install", "-r", "{{artifact}}"],
+          "program": "{{adb}}"
+        },
+        {
+          "args": ["-s", "{{device}}", "shell", "am", "start", "-W", "-n", "{{application_id}}/{{activity}}"],
+          "error-pattern": "Error:",
+          "program": "{{adb}}"
+        }
+      ]
+    },
+    "desktop": {
+      "build": [
+        {
+          "args": ["build", "--profile", "{{cargo_profile}}"],
+          "program": "cargo"
+        }
+      ],
+      "run": [
+        {
+          "args": ["run", "--profile", "{{cargo_profile}}"],
+          "program": "cargo"
+        }
+      ]
+    }
+  }
+}
 ```
 
 GPUiForge includes the Kotlin host, Gradle wrapper, Android template and Rust
@@ -66,12 +96,19 @@ another platform are rejected before generation or build steps begin.
 
 Optional Android settings can override the defaults:
 
-```toml
-[platforms.android.variables]
-min_sdk = "26"
-target_sdk = "36"
-version_code = "1"
-version_name = "0.1.0"
+```json
+{
+  "platforms": {
+    "android": {
+      "variables": {
+        "min_sdk": "26",
+        "target_sdk": "36",
+        "version_code": "1",
+        "version_name": "0.1.0"
+      }
+    }
+  }
+}
 ```
 
 `gpuiforge devices` lists connected Android devices with their model, ABI and
@@ -111,15 +148,20 @@ unavailable tools. GPUiForge does not provide a bundled Web recipe.
 
 Select optional host modules in the Android platform configuration:
 
-```toml
-[platforms.android]
-application-id = "dev.example.app"
-features = ["files", "sharing", "notifications"]
-icon = "assets/app.png"
-notification-icon = "assets/notification.xml"
+```json
+{
+  "platforms": {
+    "android": {
+      "application-id": "dev.example.app",
+      "features": ["files", "sharing", "notifications"],
+      "icon": "assets/app.png",
+      "notification-icon": "assets/notification.xml"
+    }
+  }
+}
 ```
 
-With `features = []` (the default), the host provides window rendering, input,
+With `"features": []` (the default), the host provides window rendering, input,
 IME, accessibility, lifecycle, permissions and other core system integration.
 Optional modules are:
 
@@ -139,7 +181,7 @@ are configured separately. Permissions remain explicit in `permissions`.
 
 `icon` sets the application and launcher icon. `notification-icon` sets the default
 small icon for general and media notifications; it requires either notification
-feature. Both paths resolve relative to `gpuiforge.toml` and accept PNG, WebP or
+feature. Both paths resolve relative to `gpuiforge.json` and accept PNG, WebP or
 Android drawable XML. Small notification icons should be monochrome with a
 transparent background. A per-notification resource icon overrides this default;
 missing resources fall back to the configured notification icon, then the app icon
@@ -164,9 +206,9 @@ templates define their own sources and resources.
 
 ## Recipes and templates
 
-A recipe is an optional custom TOML platform definition. Android uses bundled
+A recipe is an optional custom JSON platform definition. Android uses bundled
 defaults when neither `recipe` nor `template` is configured. Application fields override recipe fields;
-tables merge recursively and arrays replace the recipe's arrays. Recipes cannot
+objects merge recursively and arrays replace the recipe's arrays. Recipes cannot
 include another recipe. Unknown configuration fields are rejected.
 
 Platform fields:
@@ -195,12 +237,12 @@ when the substring appears, even if the process exits with zero. The default
 Android launch step uses this to detect errors reported by `adb shell am start`.
 
 Recipe `template`, `paths`, and copy `from` paths resolve relative to the recipe;
-application overrides resolve relative to `gpuiforge.toml`. `project-dir` always
+application overrides resolve relative to `gpuiforge.json`. `project-dir` always
 resolves relative to the application. Copy destinations must remain inside the
 generated project. Template/copy symlinks are rejected.
 
-Project-owned recipes can use `recipe = "platforms/android.toml"` or
-`gpuiforge init --android-recipe /path/to/android.toml --application-id dev.example.app`.
+Project-owned recipes can use `"recipe": "platforms/android.json"` or
+`gpuiforge init --android-recipe /path/to/android.json --application-id dev.example.app`.
 Custom recipes replace the bundled platform definition. GPUiForge does not link
 GPUI crates; the application selects its own framework dependencies.
 
@@ -238,8 +280,8 @@ gpuiforge platform eject android
 
 This exports current sources, including edits and additions, into
 `platforms/android`. Build caches and `local.properties` are excluded. It changes
-`management` to `manual` and records `project-dir` in the application's TOML,
-preserving comments. An existing destination is never overwritten. The exported
+`management` to `manual` and records `project-dir` in the application's JSON,
+preserving other fields and the schema reference. An existing destination is never overwritten. The exported
 project contains its host sources and retains references to its Rust application.
 
 In manual mode, builds execute the configured steps without generating native
@@ -262,10 +304,15 @@ framework update automation and native source overlays are not built-in commands
 
 Declare permission names on the Android platform:
 
-```toml
-[platforms.android]
-application-id = "dev.example.app"
-permissions = ["android.permission.INTERNET", "android.permission.RECORD_AUDIO"]
+```json
+{
+  "platforms": {
+    "android": {
+      "application-id": "dev.example.app",
+      "permissions": ["android.permission.INTERNET", "android.permission.RECORD_AUDIO"]
+    }
+  }
+}
 ```
 
 The bundled template writes these names as `uses-permission` entries in the
@@ -277,10 +324,15 @@ backend provides `AndroidPermissions` for these requests.
 
 ## Android links
 
-```toml
-[platforms.android]
-application-id = "dev.example.app"
-url-schemes = ["myapp"]
+```json
+{
+  "platforms": {
+    "android": {
+      "application-id": "dev.example.app",
+      "url-schemes": ["myapp"]
+    }
+  }
+}
 ```
 
 The bundled template generates `VIEW`, `DEFAULT`, and `BROWSABLE` intent filters
@@ -296,11 +348,16 @@ a custom manifest instead of `url-schemes`.
 
 ## Receiving Android shares
 
-```toml
-[platforms.android]
-application-id = "dev.example.app"
-features = ["sharing"]
-share-mime-types = ["text/plain", "image/*", "application/pdf"]
+```json
+{
+  "platforms": {
+    "android": {
+      "application-id": "dev.example.app",
+      "features": ["sharing"],
+      "share-mime-types": ["text/plain", "image/*", "application/pdf"]
+    }
+  }
+}
 ```
 
 The bundled template generates `SEND` and `SEND_MULTIPLE` filters with the
@@ -314,12 +371,19 @@ maintain their own manifest filters and forward incoming intents.
 
 ## Android release signing
 
-```toml
-[platforms.android.signing]
-keystore = ".gpuiforge/signing/release.jks"
-key-alias = "release"
-store-password-env = "ANDROID_STORE_PASSWORD"
-key-password-env = "ANDROID_KEY_PASSWORD"
+```json
+{
+  "platforms": {
+    "android": {
+      "signing": {
+        "key-alias": "release",
+        "key-password-env": "ANDROID_KEY_PASSWORD",
+        "keystore": ".gpuiforge/signing/release.jks",
+        "store-password-env": "ANDROID_STORE_PASSWORD"
+      }
+    }
+  }
+}
 ```
 
 The keystore must already exist. Paths are relative to the configuration file

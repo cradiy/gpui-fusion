@@ -5,6 +5,7 @@ mod config;
 mod devices;
 mod execute;
 mod generate;
+mod schema;
 include!(concat!(env!("OUT_DIR"), "/android_files.rs"));
 
 use anyhow::{Context, Result, ensure};
@@ -15,7 +16,7 @@ use std::{fs, io::Write, path::PathBuf};
 #[derive(Parser)]
 #[command(version, about = "Generate, build and run GPUI applications")]
 struct Cli {
-    #[arg(long, global = true, default_value = "gpuiforge.toml")]
+    #[arg(long, global = true, default_value = "gpuiforge.json")]
     config: PathBuf,
     #[command(subcommand)]
     command: Action,
@@ -23,6 +24,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Action {
+    /// Print the JSON Schema for application configuration or platform recipes.
+    Schema {
+        #[arg(long)]
+        recipe: bool,
+    },
     /// Create configuration for an existing Cargo application.
     Init {
         #[arg(long)]
@@ -120,6 +126,10 @@ fn run(cli: Cli) -> Result<()> {
     {
         return init(&cli.config, name, android_recipe, android, application_id);
     }
+    if let Action::Schema { recipe } = cli.command {
+        println!("{}", schema::text(recipe)?);
+        return Ok(());
+    }
     let project = Project::load(&cli.config)?;
     match cli.command {
         Action::Sync {
@@ -164,7 +174,10 @@ fn run(cli: Cli) -> Result<()> {
                 generate::eject(&project, &platform, &destination)?.display()
             );
         }
-        Action::Init { .. } | Action::PrepareAndroid { .. } | Action::Devices => unreachable!(),
+        Action::Schema { .. }
+        | Action::Init { .. }
+        | Action::PrepareAndroid { .. }
+        | Action::Devices => unreachable!(),
     }
     Ok(())
 }
@@ -194,26 +207,16 @@ fn init(
         .and_then(|p| p.get("name"))
         .and_then(toml::Value::as_str)
         .context("Cargo.toml must describe an application package")?;
-    let mut doc = toml_edit::DocumentMut::new();
-    doc["app"] = toml_edit::Item::Table(toml_edit::Table::new());
-    let mut platforms = toml_edit::Table::new();
-    platforms.set_implicit(true);
-    doc["platforms"] = toml_edit::Item::Table(platforms);
-    let mut desktop = toml_edit::Table::new();
-    desktop.set_implicit(true);
-    doc["platforms"]["desktop"] = toml_edit::Item::Table(desktop);
-    doc["app"]["name"] = toml_edit::value(name.unwrap_or_else(|| package.to_owned()));
+    let mut doc = serde_json::json!({
+        "$schema": "./gpuiforge.schema.json",
+        "app": {"name": name.unwrap_or_else(|| package.to_owned())},
+        "platforms": {"desktop": {}}
+    });
     for (kind, command) in [("build", "build"), ("run", "run")] {
-        let mut step = toml_edit::Table::new();
-        step["program"] = toml_edit::value("cargo");
-        step["args"] = toml_edit::value(
-            [command, "-p", package, "--profile", "{{cargo_profile}}"]
-                .into_iter()
-                .collect::<toml_edit::Array>(),
-        );
-        let mut steps = toml_edit::ArrayOfTables::new();
-        steps.push(step);
-        doc["platforms"]["desktop"][kind] = toml_edit::Item::ArrayOfTables(steps);
+        doc["platforms"]["desktop"][kind] = serde_json::json!([{
+            "program": "cargo",
+            "args": [command, "-p", package, "--profile", "{{cargo_profile}}"]
+        }]);
     }
     let android = android || recipe.is_some();
     ensure!(
@@ -221,33 +224,49 @@ fn init(
         "--application-id requires --android or --android-recipe"
     );
     if android {
-        doc["platforms"]["android"] = toml_edit::Item::Table(toml_edit::Table::new());
+        doc["platforms"]["android"] = serde_json::json!({});
         let id = id.context("--application-id is required for Android")?;
-        let defaults: toml_edit::DocumentMut = if let Some(recipe) = &recipe {
+        let defaults: serde_json::Value = if let Some(recipe) = &recipe {
             fs::read_to_string(recipe)?.parse()?
         } else {
-            include_str!("../android.toml").parse()?
+            include_str!("../android.json").parse()?
         };
         if let Some(recipe) = recipe {
-            doc["platforms"]["android"]["recipe"] = toml_edit::value(
+            doc["platforms"]["android"]["recipe"] = serde_json::Value::String(
                 recipe
                     .canonicalize()?
                     .to_str()
-                    .context("recipe path must be UTF-8")?,
+                    .context("recipe path must be UTF-8")?
+                    .to_owned(),
             );
         }
-        doc["platforms"]["android"]["application-id"] = toml_edit::value(id);
+        doc["platforms"]["android"]["application-id"] = serde_json::Value::String(id);
         for field in ["abis", "features", "permissions", "build", "run"] {
             if let Some(value) = defaults.get(field) {
                 doc["platforms"]["android"][field] = value.clone();
             }
         }
     }
+    let schema_path = root.join("gpuiforge.schema.json");
+    let schema_text = schema::text(false)? + "\n";
+    if schema_path.exists() {
+        ensure!(
+            fs::read_to_string(&schema_path)? == schema_text,
+            "schema already exists with different contents: {}",
+            schema_path.display()
+        );
+    } else {
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&schema_path)?
+            .write_all(schema_text.as_bytes())?;
+    }
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)?;
-    file.write_all(doc.to_string().as_bytes())?;
+    file.write_all((serde_json::to_string_pretty(&doc)? + "\n").as_bytes())?;
     println!("{}", path.display());
     Ok(())
 }

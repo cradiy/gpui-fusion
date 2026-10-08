@@ -1,4 +1,5 @@
 use gpui::{Context, IntoElement, Render, Window, WindowOptions, div, prelude::*, px, rgb};
+use uic::components::bottom_sheet::BottomSheet;
 use uic::components::modal::{self, Modal, ModalAppearance, ModalPlacement};
 
 struct ModalExample;
@@ -73,6 +74,17 @@ impl Render for ModalExample {
                         );
                     })
                     .child("Top"),
+            )
+            .child(
+                div().id("show-bottom-sheet").px_4().py_2().rounded_lg()
+                    .bg(rgb(0x2563eb)).text_color(rgb(0xffffff)).cursor_pointer()
+                    .on_click(|_, window, cx| {
+                        BottomSheet::new(|_, _| div().flex().flex_col().gap_3()
+                            .child("Drag the handle down, press Escape, or click outside to close.")
+                            .children((1..=20).map(|index| div().py_2().child(format!("Item {index}")))))
+                            .title("Bottom sheet")
+                            .show(window, cx);
+                    }).child("Bottom sheet")
             )
             // The layer must be the last child so it is above application content.
             .child(modal_layer)

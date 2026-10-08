@@ -6,6 +6,7 @@
 //! states and internal geometry that belong to the component itself.
 
 pub mod badge;
+pub mod bottom_sheet;
 pub mod calendar;
 pub mod collapsible;
 pub mod color_picker;

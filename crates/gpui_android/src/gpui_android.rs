@@ -5,6 +5,7 @@ mod accessibility;
 mod background;
 mod bridge;
 mod credentials;
+mod directory;
 mod dispatcher;
 mod file;
 mod file_dialog;

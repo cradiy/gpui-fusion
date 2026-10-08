@@ -1,6 +1,7 @@
 use gpui::{prelude::*, *};
 use std::{cell::RefCell, rc::Rc};
 use uic::components::input::{Input, InputActionEvent, InputEvent, InputMode, TextInput};
+mod directory;
 
 const INPUT_ACTIONS: [TextInputAction; 6] = [
     TextInputAction::Next,
@@ -91,6 +92,7 @@ fn main() {
                 credential_pending: false,
                 credential_status: "Check encrypted storage with disposable sample data.".into(),
                 document: None,
+                directory: None,
                 file_text: cx.new(|cx| {
                     TextInput::new(cx)
                         .multiline()
@@ -125,6 +127,8 @@ fn main() {
                 }),
             });
             view.update(cx, |this, cx| {
+                cx.observe(&uic::components::modal::layer(cx), |_, _, cx| cx.notify())
+                    .detach();
                 cx.subscribe(&this.title, |this, _, event, cx| {
                     if matches!(event, InputEvent::Submit(_)) {
                         this.submissions += 1;
@@ -165,6 +169,12 @@ fn main() {
             window.on_system_back(
                 cx,
                 window.handler_for(&view, |this, window, cx| {
+                    if uic::components::modal::is_open(cx) {
+                        uic::components::modal::dismiss(window, cx);
+                        window.set_back_enabled(this.details);
+                        cx.notify();
+                        return;
+                    }
                     this.details = false;
                     window.set_back_enabled(false);
                     cx.notify();
@@ -217,6 +227,7 @@ struct Counter {
     credential_pending: bool,
     credential_status: String,
     document: Option<SelectedFile>,
+    directory: Option<gpui::gpui_io::LocationHandle>,
     file_text: Entity<TextInput>,
     permission_status: String,
     background_status: String,
@@ -782,13 +793,19 @@ impl Render for Counter {
             WindowAppearance::Dark | WindowAppearance::VibrantDark
         );
         div()
+            .relative()
             .size_full()
             .bg(rgb(if dark { 0x101923 } else { 0xf4f7fb }))
-            .pt(padding.top)
-            .pr(padding.right)
-            .pb(padding.bottom)
-            .pl(padding.left)
-            .child(self.render_content(window, cx))
+            .child(
+                div()
+                    .size_full()
+                    .pt(padding.top)
+                    .pr(padding.right)
+                    .pb(padding.bottom)
+                    .pl(padding.left)
+                    .child(self.render_content(window, cx)),
+            )
+            .child(uic::components::modal::layer(cx))
     }
 }
 
@@ -803,7 +820,7 @@ impl Counter {
         } else {
             (0xf4f7fb, 0x172033, 0x52647a, 0xe3eaf3)
         };
-        window.set_back_enabled(self.details);
+        window.set_back_enabled(self.details || uic::components::modal::is_open(cx));
         if self.details {
             return div()
                 .id("details-page")
@@ -1233,6 +1250,30 @@ impl Counter {
                             .child(button("save-document", "Save").on_click(
                                 cx.listener(|this, _, _, cx| this.save_document(false, cx)),
                             ))
+                            .child(button("choose-directory", "Choose directory").on_click(
+                                cx.listener(|this, _, _, cx| this.directory_action(directory::Action::Choose, cx)),
+                            ))
+                            .children([true, false].map(|avoid| {
+                                button(if avoid { "show-sheet" } else { "show-edge-sheet" }, if avoid { "Bottom sheet" } else { "Sheet without safe area" })
+                                    .on_click(cx.listener(move |_, _, window, cx| {
+                                        uic::components::bottom_sheet::BottomSheet::new(|_, _| {
+                                            div().flex().flex_col().gap_3()
+                                                .child("Drag the handle down to close. The body scrolls independently.")
+                                                .children((1..=16).map(|index| div().py_2().child(format!("Item {index}"))))
+                                        }).title("Bottom sheet").avoid_safe_area(avoid).show(window, cx);
+                                        window.set_back_enabled(true);
+                                        cx.notify();
+                                    }))
+                            }))
+                            .child(button("write-directory", "Write in directory").on_click(
+                                cx.listener(|this, _, _, cx| this.directory_action(directory::Action::Write, cx)),
+                            ))
+                            .child(button("restore-directory", "Restore directory").on_click(
+                                cx.listener(|this, _, _, cx| this.directory_action(directory::Action::Restore, cx)),
+                            ))
+                            .child(button("forget-directory", "Forget directory").on_click(
+                                cx.listener(|this, _, _, cx| this.directory_action(directory::Action::Release, cx)),
+                            ))
                             .child(
                                 button("remember-file", "Remember file").on_click(cx.listener(
                                     |this, _, _, cx| {
@@ -1294,6 +1335,9 @@ impl Counter {
                             .text_sm()
                             .whitespace_normal()
                             .text_color(rgb(muted))
+                            .id("file-operation-status")
+                            .role(Role::Status)
+                            .aria_label(self.file_status.clone())
                             .child(self.file_status.clone()),
                     ),
             )

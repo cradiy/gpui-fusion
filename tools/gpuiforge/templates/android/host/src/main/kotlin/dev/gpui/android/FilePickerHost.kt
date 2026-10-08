@@ -5,9 +5,9 @@ import android.content.Intent
 import android.net.Uri
 import java.lang.ref.WeakReference
 
-internal class FilePickerHost(private val deliver: (Long, Array<SelectedDocument>?, String?) -> Unit) {
+internal class FilePickerHost(private val deliver: (Long, Array<out Any>?, String?) -> Unit) {
     private var owner = WeakReference<Activity>(null)
-    private data class Request(val token: Long, val code: Int, val multiple: Boolean, val writable: Boolean)
+    private data class Request(val token: Long, val code: Int, val multiple: Boolean, val writable: Boolean, val directory: Boolean)
     private var pending: Request? = null
 
     fun attach(activity: Activity) {
@@ -39,17 +39,22 @@ internal class FilePickerHost(private val deliver: (Long, Array<SelectedDocument
         })
     }
 
+    fun directory(token: Long, active: Boolean) {
+        launch(token, false, true, active, Intent(Intent.ACTION_OPEN_DOCUMENT_TREE))
+    }
+
     @Suppress("DEPRECATION")
     private fun launch(token: Long, multiple: Boolean, writable: Boolean, active: Boolean, intent: Intent) {
         val activity = owner.get()?.takeUnless { it.isFinishing || it.isDestroyed }
         if (!active || activity == null) { deliver(token, null, "File selection requires an active Activity"); return }
         if (pending != null) { deliver(token, null, "Another file selection is pending"); return }
         if (nextCode > 0xbfff) { deliver(token, null, "File request codes exhausted"); return }
-        val request = Request(token, nextCode++, multiple, writable)
+        val request = Request(token, nextCode++, multiple, writable, intent.action == Intent.ACTION_OPEN_DOCUMENT_TREE)
         pending = request
         try {
             activity.startActivityForResult(intent.apply {
-                addCategory(Intent.CATEGORY_OPENABLE)
+                if (!request.directory) addCategory(Intent.CATEGORY_OPENABLE)
+                else addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
                 if (writable) addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
@@ -78,6 +83,13 @@ internal class FilePickerHost(private val deliver: (Long, Array<SelectedDocument
             val persistent = if (flags and Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION != 0) {
                 flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             } else 0
+            if (request.directory) {
+                val uri = uris.single()
+                require(android.provider.DocumentsContract.isTreeUri(uri)) { "Picker did not return a directory tree" }
+                require(flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0) { "Provider did not grant read access" }
+                finish(arrayOf(SelectedDirectory(resolver, uri, persistent)), null)
+                return true
+            }
             finish(uris.map { SelectedDocument(resolver, it, request.writable, persistableFlags = persistent) }.toTypedArray(), null)
         } catch (error: RuntimeException) { finish(null, error.message ?: "Invalid file selection") }
         return true
@@ -85,7 +97,7 @@ internal class FilePickerHost(private val deliver: (Long, Array<SelectedDocument
 
     fun close() { pending = null; owner.clear() }
 
-    private fun finish(files: Array<SelectedDocument>?, error: String?) {
+    private fun finish(files: Array<out Any>?, error: String?) {
         val request = pending ?: return
         pending = null
         deliver(request.token, files, error)

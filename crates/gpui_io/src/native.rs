@@ -108,6 +108,15 @@ struct NativeLocation {
     executor: IoExecutor,
 }
 impl PlatformLocation for NativeLocation {
+    fn persist(&self) -> LocalBoxFuture<'static, Result<crate::LocationBookmark>> {
+        let path = self.path.clone();
+        self.executor.run(move || {
+            anyhow::ensure!(path.is_dir(), "directory is missing");
+            Ok(crate::LocationBookmark::from_path(std::path::absolute(
+                path,
+            )?))
+        })
+    }
     fn path(&self) -> Option<&Path> {
         Some(&self.path)
     }

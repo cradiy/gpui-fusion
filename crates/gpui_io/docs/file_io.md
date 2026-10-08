@@ -72,6 +72,42 @@ let remaining = reader.read_to_end_limited(4096).await?;
 
 ## Storage locations
 
+### Chosen directories
+
+Use `App::prompt_for_directory()` to let the user choose a writable destination.
+Cancellation returns `None`. Desktop platforms use their directory picker;
+Android uses a document-tree grant and requires the GPUiForge `files` feature.
+Browsers currently return an unsupported error.
+
+```rust,ignore
+let selection = cx.prompt_for_directory();
+let files = cx.file_system("com.example.app")?;
+// Await in an application task.
+if let Some(directory) = selection.await?? {
+    let bookmark = directory.persist().await?;
+    // Store the serializable LocationBookmark in application settings.
+    let restored = files.restore_location(&bookmark).await?;
+    let file = restored.create_file("Exports/report.txt", CreateOptions {
+        mime_type: Some("text/plain".into()),
+    }).await?;
+    file.write(b"Hello".to_vec()).await?;
+}
+```
+
+`persist()` explicitly retains the provider's grant. Dropping handles does not
+revoke it. `FileSystem::release_location(&bookmark)` releases persistent access
+without deleting files; other handles can share that grant. Restoring a revoked
+grant or a missing directory returns an error. Native directory bookmarks retain
+a path, not sandbox permissions; serialized native paths must be valid Unicode.
+
+Android directories support nested `create_file()` calls without exposing native
+paths. Synchronous `file()` lookup is not supported for document trees. Android
+11 and later restrict selection of storage roots, the Download root, and protected
+Android directories. Choose a permitted subdirectory; see the
+[Android directory access guide](https://developer.android.com/training/data-storage/shared/documents-files#grant-access-directory).
+
+### System locations
+
 `FileSystem::desktop(app_id, executor)` discovers desktop locations through `dirs`.
 `app_id` must be a stable ASCII application identifier, not a display name or path.
 GPUI applications can obtain the platform adapter with `App::file_system(app_id)`.

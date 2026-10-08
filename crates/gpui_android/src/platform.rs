@@ -283,6 +283,9 @@ impl Platform for AndroidPlatform {
     ) -> oneshot::Receiver<Result<Option<PathBuf>>> {
         unsupported()
     }
+    fn prompt_for_directory(&self) -> oneshot::Receiver<Result<Option<gpui_io::LocationHandle>>> {
+        self.files.prompt_directory()
+    }
     fn prompt_for_files(
         &self,
         options: FilePromptOptions,

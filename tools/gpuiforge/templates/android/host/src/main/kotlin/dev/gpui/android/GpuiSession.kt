@@ -162,6 +162,12 @@ class GpuiSession : AutoCloseable {
         }, this, SystemClock.uptimeMillis())
     }
 
+    private fun requestDirectory(token: Long) {
+        handler.postAtTime({
+            if (!closed) files.directory(token, active())
+        }, this, SystemClock.uptimeMillis())
+    }
+
     private fun requestFileSave(token: Long, name: String, mime: String) {
         handler.postAtTime({
             if (!closed) files.create(token, name, mime, active())
@@ -171,6 +177,7 @@ class GpuiSession : AutoCloseable {
     private fun fileStore(): Any = FileStore(requireContext())
 // gpuiforge:else
     private fun requestFiles(token: Long, multiple: Boolean, writable: Boolean) { unsupported("files") }
+    private fun requestDirectory(token: Long) { unsupported("files") }
     private fun requestFileSave(token: Long, name: String, mime: String) { unsupported("files") }
     private fun fileStore(): Any = unsupported("files")
 // gpuiforge:endif

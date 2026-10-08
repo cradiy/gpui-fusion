@@ -230,6 +230,36 @@ pub trait Platform: 'static {
         &self,
         options: PathPromptOptions,
     ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>>;
+    /// Choose a directory for file creation. Cancellation returns `None`.
+    fn prompt_for_directory(&self) -> oneshot::Receiver<Result<Option<gpui_io::LocationHandle>>> {
+        let paths = self.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: None,
+        });
+        let executor = self.background_executor();
+        let (tx, rx) = oneshot::channel();
+        self.foreground_executor()
+            .spawn(async move {
+                let result = async {
+                    let Some(mut paths) = paths.await?? else {
+                        return Ok(None);
+                    };
+                    anyhow::ensure!(
+                        paths.len() == 1,
+                        "directory picker must return one directory"
+                    );
+                    Ok(paths
+                        .pop()
+                        .map(|path| gpui_io::LocationHandle::from_path(path, executor)))
+                }
+                .await;
+                let _ = tx.send(result);
+            })
+            .detach();
+        rx
+    }
     /// Select files with readable handles and optional write access.
     fn prompt_for_files(
         &self,

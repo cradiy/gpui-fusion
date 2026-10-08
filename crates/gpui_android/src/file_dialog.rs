@@ -11,8 +11,12 @@ use std::{
     sync::Arc,
 };
 
-type Selection = Result<Option<Vec<SelectedFile>>>;
-type Pending = (u64, oneshot::Sender<Selection>);
+enum Selected {
+    Files(Vec<SelectedFile>),
+    Directory(gpui::gpui_io::LocationHandle),
+}
+type Selection = Result<Option<Selected>>;
+type Pending = (u64, bool, oneshot::Sender<Selection>);
 
 pub(crate) struct FileDialog {
     host: Arc<Host>,
@@ -41,24 +45,67 @@ impl FileDialog {
         })
     }
 
-    pub fn prompt(&self, options: FilePromptOptions) -> oneshot::Receiver<Selection> {
-        self.prompt_with(|token| {
+    pub fn prompt(
+        &self,
+        options: FilePromptOptions,
+    ) -> oneshot::Receiver<Result<Option<Vec<SelectedFile>>>> {
+        let selection = self.prompt_with(false, |token| {
             self.host
                 .request_files(token, options.multiple, options.writable)
-        })
+        });
+        let (tx, rx) = oneshot::channel();
+        self.foreground
+            .spawn(async move {
+                let result = async {
+                    match selection.await?? {
+                        Some(Selected::Files(files)) => Ok(Some(files)),
+                        None => Ok(None),
+                        _ => Err(anyhow!("unexpected directory selection")),
+                    }
+                }
+                .await;
+                let _ = tx.send(result);
+            })
+            .detach();
+        rx
+    }
+
+    pub fn prompt_directory(
+        &self,
+    ) -> oneshot::Receiver<Result<Option<gpui::gpui_io::LocationHandle>>> {
+        let selection = self.prompt_with(true, |token| self.host.request_directory(token));
+        let (tx, rx) = oneshot::channel();
+        self.foreground
+            .spawn(async move {
+                let result = async {
+                    match selection.await?? {
+                        Some(Selected::Directory(directory)) => Ok(Some(directory)),
+                        None => Ok(None),
+                        _ => Err(anyhow!("unexpected file selection")),
+                    }
+                }
+                .await;
+                let _ = tx.send(result);
+            })
+            .detach();
+        rx
     }
 
     pub fn prompt_save(
         &self,
         options: FileSaveOptions,
     ) -> oneshot::Receiver<Result<Option<SelectedFile>>> {
-        let selection = self.prompt_with(|token| self.host.request_file_save(token, &options));
+        let selection =
+            self.prompt_with(false, |token| self.host.request_file_save(token, &options));
         let (tx, rx) = oneshot::channel();
         self.foreground
             .spawn(async move {
                 let result = async {
-                    let Some(mut files) = selection.await?? else {
+                    let Some(selected) = selection.await?? else {
                         return Ok(None);
+                    };
+                    let Selected::Files(mut files) = selected else {
+                        return Err(anyhow!("unexpected directory selection"));
                     };
                     ensure!(files.len() == 1, "save picker must return one document");
                     Ok(files.pop())
@@ -70,7 +117,11 @@ impl FileDialog {
         rx
     }
 
-    fn prompt_with(&self, request: impl FnOnce(u64) -> Result<()>) -> oneshot::Receiver<Selection> {
+    fn prompt_with(
+        &self,
+        directory: bool,
+        request: impl FnOnce(u64) -> Result<()>,
+    ) -> oneshot::Receiver<Selection> {
         let (tx, rx) = oneshot::channel();
         if self.closed.get() || self.pending.borrow().is_some() {
             let _ = tx.send(Err(anyhow!(
@@ -83,7 +134,7 @@ impl FileDialog {
             return rx;
         };
         self.next.set(token);
-        *self.pending.borrow_mut() = Some((token, tx));
+        *self.pending.borrow_mut() = Some((token, directory, tx));
         if let Err(error) = request(token) {
             self.finish(token, Err(error));
         }
@@ -96,14 +147,10 @@ impl FileDialog {
         vm: Arc<JavaVM>,
         result: Result<Option<Vec<GlobalRef>>>,
     ) {
-        if !self
-            .pending
-            .borrow()
-            .as_ref()
-            .is_some_and(|(id, _)| *id == token)
-        {
-            return;
-        }
+        let directory = match self.pending.borrow().as_ref() {
+            Some((id, directory, _)) if *id == token => *directory,
+            _ => return,
+        };
         let objects = match result {
             Ok(Some(objects)) => objects,
             other => {
@@ -113,10 +160,21 @@ impl FileDialog {
         };
         let executor = crate::dispatcher::io_executor();
         let task = self.background.spawn(async move {
+            if directory {
+                ensure!(
+                    objects.len() == 1,
+                    "directory picker must return one directory"
+                );
+                let object = objects.into_iter().next().unwrap();
+                return crate::directory::selected_directory(vm, object, executor)
+                    .map(Selected::Directory)
+                    .map(Some);
+            }
             objects
                 .into_iter()
                 .map(|object| crate::file::selected_file(vm.clone(), object, executor.clone()))
                 .collect::<Result<Vec<_>>>()
+                .map(Selected::Files)
                 .map(Some)
         });
         let state = Rc::downgrade(self);
@@ -131,13 +189,13 @@ impl FileDialog {
     fn finish(&self, token: u64, result: Selection) {
         let pending = {
             let mut slot = self.pending.borrow_mut();
-            if slot.as_ref().is_some_and(|(id, _)| *id == token) {
+            if slot.as_ref().is_some_and(|(id, _, _)| *id == token) {
                 slot.take()
             } else {
                 None
             }
         };
-        if let Some((_, tx)) = pending {
+        if let Some((_, _, tx)) = pending {
             if let Some(task) = self.metadata.borrow_mut().take() {
                 task.detach();
             }
@@ -149,7 +207,7 @@ impl FileDialog {
         self.closed.set(true);
         self.metadata.borrow_mut().take();
         let pending = self.pending.borrow_mut().take();
-        if let Some((_, tx)) = pending {
+        if let Some((_, _, tx)) = pending {
             let _ = tx.send(Err(anyhow!("Android file selection session closed")));
         }
     }

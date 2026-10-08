@@ -185,6 +185,17 @@ impl Host {
             Ok(())
         })
     }
+    pub fn request_directory(&self, token: u64) -> Result<()> {
+        self.with_env(|env| {
+            env.call_method(
+                self.object.as_obj(),
+                "requestDirectory",
+                "(J)V",
+                &[JValue::Long(token as i64)],
+            )?;
+            Ok(())
+        })
+    }
     pub fn request_file_save(&self, token: u64, options: &gpui::FileSaveOptions) -> Result<()> {
         self.with_env(|env| {
             let name = env.new_string(&options.suggested_name)?;

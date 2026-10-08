@@ -140,6 +140,39 @@ fn relative_paths_create_parents_and_preserve_existing_files() {
     });
 }
 
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+#[test]
+fn directory_bookmark_restores_nested_writes_and_rejects_a_missing_directory() {
+    block_on(async {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("chosen");
+        std::fs::create_dir(&root).unwrap();
+        let io = gpui_io::FileSystem::desktop("gpui.io.test", executor()).unwrap();
+        let location = LocationHandle::from_path(&root, executor());
+        let bookmark = location.persist().await.unwrap();
+        drop(location);
+        let restored = io.restore_location(&bookmark).await.unwrap();
+        let file = restored
+            .create_file("中文/sub/file.txt", CreateOptions::default())
+            .await
+            .unwrap();
+        file.write(b"saved".to_vec()).await.unwrap();
+        assert!(
+            restored
+                .create_file("中文/sub/file.txt", CreateOptions::default())
+                .await
+                .is_err()
+        );
+        io.release_location(&bookmark).await.unwrap();
+        assert_eq!(
+            std::fs::read(root.join("中文/sub/file.txt")).unwrap(),
+            b"saved"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(io.restore_location(&bookmark).await.is_err());
+    });
+}
+
 #[derive(Debug)]
 struct UnboundedFile(Arc<AtomicUsize>);
 impl PlatformFile for UnboundedFile {

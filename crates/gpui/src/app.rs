@@ -1522,6 +1522,14 @@ impl App {
         self.platform.prompt_for_files(options)
     }
 
+    /// Select a directory for file creation. Cancellation returns `None`.
+    /// Call `LocationHandle::persist` to retain access across restarts.
+    pub fn prompt_for_directory(
+        &self,
+    ) -> oneshot::Receiver<Result<Option<gpui_io::LocationHandle>>> {
+        self.platform.prompt_for_directory()
+    }
+
     /// Obtain file I/O with app-specific locations identified by a stable application ID.
     pub fn file_system(&self, app_id: &str) -> Result<gpui_io::FileSystem> {
         self.platform.file_system(app_id)

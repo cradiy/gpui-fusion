@@ -3,6 +3,39 @@ use anyhow::{Result, ensure};
 use futures::future::LocalBoxFuture;
 use std::{path::Path, sync::Arc};
 
+/// Serializable directory reference. Native paths retain no additional OS permissions.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct LocationBookmark(LocationReference);
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+enum LocationReference {
+    Path(std::path::PathBuf),
+    Provider(FileBookmark),
+}
+
+impl LocationBookmark {
+    pub fn from_path(path: impl Into<std::path::PathBuf>) -> Self {
+        Self(LocationReference::Path(path.into()))
+    }
+    pub fn new(provider: impl Into<String>, data: Vec<u8>) -> Self {
+        Self(LocationReference::Provider(FileBookmark::new(
+            provider, data,
+        )))
+    }
+    pub fn path(&self) -> Option<&Path> {
+        match &self.0 {
+            LocationReference::Path(path) => Some(path),
+            _ => None,
+        }
+    }
+    pub fn provider(&self) -> Option<&FileBookmark> {
+        match &self.0 {
+            LocationReference::Provider(bookmark) => Some(bookmark),
+            _ => None,
+        }
+    }
+}
+
 /// Storage purpose. Availability and authorization are platform-dependent.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SystemLocation {
@@ -24,6 +57,9 @@ pub struct CreateOptions {
 
 /// A location can be a filesystem directory or a platform collection.
 pub trait PlatformLocation: Send + Sync {
+    fn persist(&self) -> LocalBoxFuture<'static, Result<LocationBookmark>> {
+        Box::pin(async { Err(unsupported("location does not support persistent access")) })
+    }
     fn path(&self) -> Option<&Path> {
         None
     }
@@ -43,6 +79,10 @@ pub trait PlatformLocation: Send + Sync {
 #[derive(Clone)]
 pub struct LocationHandle(Arc<dyn PlatformLocation>);
 impl LocationHandle {
+    /// Retain access explicitly; store the returned bookmark in application settings.
+    pub fn persist(&self) -> LocalBoxFuture<'static, Result<LocationBookmark>> {
+        self.0.persist()
+    }
     pub fn new(location: impl PlatformLocation + 'static) -> Self {
         Self(Arc::new(location))
     }
@@ -73,6 +113,15 @@ impl LocationHandle {
 
 /// Location discovery performs no permission prompts or fallback to a different destination.
 pub trait PlatformLocations: Send + Sync {
+    fn restore_location(
+        &self,
+        _bookmark: LocationBookmark,
+    ) -> LocalBoxFuture<'static, Result<LocationHandle>> {
+        Box::pin(async { Err(unsupported("location bookmark provider is unavailable")) })
+    }
+    fn release_location(&self, _bookmark: LocationBookmark) -> LocalBoxFuture<'static, Result<()>> {
+        Box::pin(async { Err(unsupported("location bookmark provider is unavailable")) })
+    }
     fn restore_file(&self, _bookmark: FileBookmark) -> LocalBoxFuture<'static, Result<FileHandle>> {
         Box::pin(async { Err(unsupported("file bookmark provider is unavailable")) })
     }
@@ -85,6 +134,20 @@ pub trait PlatformLocations: Send + Sync {
 #[derive(Clone)]
 pub struct FileSystem(Arc<dyn PlatformLocations>);
 impl FileSystem {
+    /// Restore a chosen directory. Revoked grants and missing directories return errors.
+    pub fn restore_location(
+        &self,
+        bookmark: &LocationBookmark,
+    ) -> LocalBoxFuture<'static, Result<LocationHandle>> {
+        self.0.restore_location(bookmark.clone())
+    }
+    /// Release persistent access without deleting any contents. Other handles may share the grant.
+    pub fn release_location(
+        &self,
+        bookmark: &LocationBookmark,
+    ) -> LocalBoxFuture<'static, Result<()>> {
+        self.0.release_location(bookmark.clone())
+    }
     /// Restore a file without opening a picker. Missing files or lost grants return errors.
     pub fn restore_file(
         &self,
@@ -163,6 +226,31 @@ struct DesktopLocations {
 
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 impl PlatformLocations for DesktopLocations {
+    fn restore_location(
+        &self,
+        bookmark: LocationBookmark,
+    ) -> LocalBoxFuture<'static, Result<LocationHandle>> {
+        let executor = self.executor.clone();
+        self.executor.run(move || {
+            let path = bookmark
+                .path()
+                .ok_or_else(|| unsupported("unsupported location bookmark provider"))?;
+            ensure!(
+                path.is_absolute() && path.is_dir(),
+                "directory is missing or invalid"
+            );
+            Ok(LocationHandle::from_path(path, executor))
+        })
+    }
+    fn release_location(&self, bookmark: LocationBookmark) -> LocalBoxFuture<'static, Result<()>> {
+        Box::pin(async move {
+            ensure!(
+                bookmark.path().is_some(),
+                "unsupported location bookmark provider"
+            );
+            Ok(())
+        })
+    }
     fn location(&self, kind: SystemLocation) -> LocalBoxFuture<'static, Result<LocationHandle>> {
         let app_id = self.app_id.clone();
         let executor = self.executor.clone();

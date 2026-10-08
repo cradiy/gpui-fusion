@@ -11,6 +11,7 @@ pub fn included(path: &str, platform: &Platform) -> bool {
     {
         "FilePickerHost.kt"
         | "SelectedDocument.kt"
+        | "SelectedDirectory.kt"
         | "DocumentGrants.kt"
         | "FileStore.kt"
         | "GpuiFileProvider.kt"

@@ -5,8 +5,8 @@ use crate::{
 use anyhow::{Result, ensure};
 use futures::future::LocalBoxFuture;
 use gpui::gpui_io::{
-    CreateOptions, FileBookmark, FileHandle, FileSystem, IoExecutor, LocationHandle,
-    PlatformLocation, PlatformLocations, SystemLocation,
+    CreateOptions, FileBookmark, FileHandle, FileSystem, IoExecutor, LocationBookmark,
+    LocationHandle, PlatformLocation, PlatformLocations, SystemLocation,
 };
 use jni::objects::{GlobalRef, JString, JValue};
 use std::{
@@ -92,6 +92,55 @@ struct AndroidLocations {
     executor: IoExecutor,
 }
 impl PlatformLocations for AndroidLocations {
+    fn restore_location(
+        &self,
+        bookmark: LocationBookmark,
+    ) -> LocalBoxFuture<'static, Result<LocationHandle>> {
+        let store = self.store.clone();
+        let executor = self.executor.clone();
+        self.executor.run(move || {
+            if let Some(path) = bookmark.path() {
+                ensure!(
+                    path.is_absolute() && path.is_dir(),
+                    "directory is missing or invalid"
+                );
+                return Ok(LocationHandle::from_path(path, executor));
+            }
+            let uri = crate::directory::bookmark_uri(&bookmark)?;
+            let object = store.call(|env| {
+                let uri = env.new_string(uri)?;
+                let directory = env
+                    .call_method(
+                        store.object.as_obj(),
+                        "restoreDirectory",
+                        "(Ljava/lang/String;)Ldev/gpui/android/SelectedDirectory;",
+                        &[JValue::Object(uri.as_ref())],
+                    )?
+                    .l()?;
+                Ok(env.new_global_ref(directory)?)
+            })?;
+            crate::directory::selected_directory(store.vm.clone(), object, executor)
+        })
+    }
+    fn release_location(&self, bookmark: LocationBookmark) -> LocalBoxFuture<'static, Result<()>> {
+        let store = self.store.clone();
+        self.executor.run(move || {
+            if bookmark.path().is_some() {
+                return Ok(());
+            }
+            let uri = crate::directory::bookmark_uri(&bookmark)?;
+            store.call(|env| {
+                let uri = env.new_string(uri)?;
+                env.call_method(
+                    store.object.as_obj(),
+                    "release",
+                    "(Ljava/lang/String;Z)V",
+                    &[JValue::Object(uri.as_ref()), JValue::Bool(1)],
+                )?;
+                Ok(())
+            })
+        })
+    }
     fn restore_file(&self, bookmark: FileBookmark) -> LocalBoxFuture<'static, Result<FileHandle>> {
         let store = self.store.clone();
         let executor = self.executor.clone();
@@ -147,7 +196,7 @@ impl PlatformLocations for AndroidLocations {
                 return Box::pin(async {
                     Err(io::Error::new(
                         io::ErrorKind::PermissionDenied,
-                        "Documents requires user selection through the document picker",
+                        "Documents requires user selection through the directory picker",
                     )
                     .into())
                 });

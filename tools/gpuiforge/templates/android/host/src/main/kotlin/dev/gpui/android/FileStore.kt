@@ -17,6 +17,7 @@ internal class FileStore(context: Context) {
     private val resolver = this.context.contentResolver
 
     fun restore(value: String, writable: Boolean): SelectedDocument = DocumentGrants.restore(resolver, value, writable)
+    fun restoreDirectory(value: String): SelectedDirectory = DocumentGrants.restoreDirectory(resolver, value)
     fun release(value: String, writable: Boolean) = DocumentGrants.release(resolver, value, writable)
 
     fun viewPathIntent(path: String): Intent {

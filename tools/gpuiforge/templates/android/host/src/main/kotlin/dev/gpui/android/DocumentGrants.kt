@@ -41,6 +41,14 @@ internal object DocumentGrants {
         return SelectedDocument(resolver, uri, writable, persistableFlags = required)
     }
 
+    @Synchronized fun restoreDirectory(resolver: ContentResolver, value: String): SelectedDirectory {
+        val uri = uri(value)
+        require(android.provider.DocumentsContract.isTreeUri(uri)) { "Invalid directory bookmark" }
+        val required = flags(true)
+        if (held(resolver, uri) and required != required) throw SecurityException("Persistent directory access is unavailable")
+        return SelectedDirectory(resolver, uri, required).also { it.validate() }
+    }
+
     @Synchronized fun release(resolver: ContentResolver, value: String, writable: Boolean) {
         val uri = uri(value)
         val release = held(resolver, uri) and flags(writable)

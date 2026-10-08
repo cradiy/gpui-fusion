@@ -24,6 +24,8 @@ pub struct ModalLayer {
     active: Option<ActiveModal>,
     focus_handle: FocusHandle,
     appearance: ModalAppearance,
+    sheet_drag: Option<(Option<gpui::TouchId>, gpui::Pixels)>,
+    sheet_offset: gpui::Pixels,
 }
 
 impl ModalLayer {
@@ -32,6 +34,8 @@ impl ModalLayer {
             active: None,
             focus_handle: cx.focus_handle(),
             appearance,
+            sheet_drag: None,
+            sheet_offset: gpui::px(0.),
         }
     }
 
@@ -40,6 +44,8 @@ impl ModalLayer {
     }
 
     fn show(&mut self, modal: Modal, window: &mut Window, cx: &mut Context<Self>) {
+        self.sheet_drag = None;
+        self.sheet_offset = gpui::px(0.);
         self.active = Some(ActiveModal {
             modal,
             window_id: window.window_handle().window_id(),
@@ -61,7 +67,21 @@ impl ModalLayer {
         if let Some(previous_focus) = active.previous_focus {
             window.focus(&previous_focus, cx);
         }
+        self.sheet_drag = None;
+        self.sheet_offset = gpui::px(0.);
         cx.notify();
+    }
+
+    fn finish_sheet_drag(&mut self, cancelled: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sheet_drag.take().is_none() {
+            return;
+        }
+        if !cancelled && self.sheet_offset >= gpui::px(72.) {
+            self.dismiss(window, cx);
+        } else {
+            self.sheet_offset = gpui::px(0.);
+            cx.notify();
+        }
     }
 
     fn execute_ok(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -132,9 +152,95 @@ impl Render for ModalLayer {
             panel.style().refine(&panel_style);
         }
 
+        if let ModalPlacement::Bottom {
+            drag_to_dismiss: true,
+            ..
+        } = placement
+        {
+            let weak = cx.entity().downgrade();
+            panel = panel.child(
+                div()
+                    .id("bottom-sheet-handle")
+                    .relative()
+                    .h(gpui::px(36.))
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_grab()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|layer, event: &gpui::MouseDownEvent, _, cx| {
+                            layer.sheet_drag = Some((None, event.position.y));
+                            layer.sheet_offset = gpui::px(0.);
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .w(gpui::px(36.))
+                            .h(gpui::px(4.))
+                            .rounded_full()
+                            .bg(gpui::rgba(0x80808066)),
+                    )
+                    .child(
+                        gpui::canvas(
+                            |bounds, window, _| {
+                                window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal)
+                            },
+                            move |_, hitbox, window, _| {
+                                window.on_mouse_event(
+                                    move |event: &gpui::TouchEvent, phase, window, cx| {
+                                        if !phase.bubble() {
+                                            return;
+                                        }
+                                        let _ = weak.update(cx, |layer, cx| {
+                                            if event.phase == gpui::TouchPhase::Started
+                                                && hitbox.bounds.contains(&event.position)
+                                                && layer.sheet_drag.is_none()
+                                            {
+                                                layer.sheet_drag =
+                                                    Some((Some(event.id), event.position.y));
+                                            }
+                                            let Some((Some(id), start)) = layer.sheet_drag else {
+                                                return;
+                                            };
+                                            if id != event.id {
+                                                return;
+                                            }
+                                            window.prevent_default();
+                                            cx.stop_propagation();
+                                            match event.phase {
+                                                gpui::TouchPhase::Moved => {
+                                                    layer.sheet_offset = (event.position.y - start)
+                                                        .max(gpui::px(0.));
+                                                    cx.notify();
+                                                }
+                                                gpui::TouchPhase::Ended
+                                                | gpui::TouchPhase::Cancelled => {
+                                                    layer.finish_sheet_drag(
+                                                        event.phase == gpui::TouchPhase::Cancelled,
+                                                        window,
+                                                        cx,
+                                                    );
+                                                }
+                                                _ => {}
+                                            }
+                                        });
+                                    },
+                                );
+                            },
+                        )
+                        .absolute()
+                        .inset_0(),
+                    ),
+            );
+        }
+
         if title.is_some() || close_button.is_some() {
             let header = div()
                 .relative()
+                .flex_shrink_0()
                 .flex()
                 .items_center()
                 .justify_between()
@@ -162,6 +268,8 @@ impl Render for ModalLayer {
         let body = div()
             .id("global-modal-body")
             .flex_1()
+            .min_h_0()
+            .min_w_0()
             .overflow_y_scroll()
             .when(styled, |this| {
                 this.px(appearance.body_padding_x)
@@ -193,6 +301,7 @@ impl Render for ModalLayer {
                 let on_cancel = modal.on_cancel.clone();
 
                 let footer = div()
+                    .flex_shrink_0()
                     .flex()
                     .items_center()
                     .justify_end()
@@ -229,6 +338,23 @@ impl Render for ModalLayer {
             }
         };
 
+        let insets = window.insets();
+        let zero = gpui::px(0.);
+        let ime_bottom = (insets.ime.bottom - insets.consumed.bottom).max(zero);
+        if let ModalPlacement::Bottom {
+            avoid_safe_area, ..
+        } = placement
+        {
+            let bottom = if avoid_safe_area {
+                (insets.safe_area.bottom - insets.consumed.bottom - ime_bottom).max(zero)
+            } else {
+                zero
+            };
+            panel = panel
+                .top(self.sheet_offset)
+                .child(div().flex_shrink_0().h(bottom));
+        }
+
         let backdrop = div()
             .id("global-modal-backdrop")
             .absolute()
@@ -238,6 +364,27 @@ impl Render for ModalLayer {
             .track_focus(&self.focus_handle)
             .bg(appearance.backdrop)
             .occlude()
+            .on_mouse_move(cx.listener(|layer, event: &gpui::MouseMoveEvent, _, cx| {
+                if let Some((None, start)) = layer.sheet_drag {
+                    if event.pressed_button != Some(MouseButton::Left) {
+                        layer.sheet_drag = None;
+                        layer.sheet_offset = gpui::px(0.);
+                    } else {
+                        layer.sheet_offset = (event.position.y - start).max(gpui::px(0.));
+                        cx.stop_propagation();
+                    }
+                    cx.notify();
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|layer, _, window, cx| {
+                    if matches!(layer.sheet_drag, Some((None, _))) {
+                        layer.finish_sheet_drag(window.default_prevented(), window, cx);
+                        cx.stop_propagation();
+                    }
+                }),
+            )
             .capture_action(cx.listener(move |layer, _: &Submit, window, cx| {
                 if ok_on_enter {
                     layer.execute_ok(window, cx);
@@ -272,6 +419,18 @@ impl Render for ModalLayer {
         let backdrop = match placement {
             ModalPlacement::Center => backdrop.items_center(),
             ModalPlacement::Top { offset } => backdrop.items_start().pt(offset),
+            ModalPlacement::Bottom {
+                avoid_safe_area, ..
+            } => {
+                let safe = insets.effective();
+                backdrop
+                    .items_end()
+                    .overflow_hidden()
+                    .pb(ime_bottom)
+                    .when(avoid_safe_area, |this| {
+                        this.pt(safe.top).pl(safe.left).pr(safe.right)
+                    })
+            }
         };
 
         deferred(backdrop.child(panel))

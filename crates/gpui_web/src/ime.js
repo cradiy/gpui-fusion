@@ -5,7 +5,7 @@ export function configureImeInput(input) {
     input.spellcheck = false;
 }
 
-export function positionImeInput(canvas, input, x, y, height, logicalWidth, logicalHeight) {
+export function positionImeInput(canvas, input, x, y, height, logicalWidth, logicalHeight, fieldWidth = null) {
     if (!(logicalWidth > 0 && logicalHeight > 0)) return;
     const rect = canvas.getBoundingClientRect();
     if (!(rect.width > 0 && rect.height > 0)) return;
@@ -29,6 +29,7 @@ export function positionImeInput(canvas, input, x, y, height, logicalWidth, logi
         rect.left + left * scaleX + x * contentScaleX,
         rect.top + top * scaleY + y * contentScaleY,
         Math.max(1, height * contentScaleY),
+        fieldWidth === null ? 1 : Math.max(1, fieldWidth * contentScaleX),
     ];
     if (!position.every(Number.isFinite)) return;
     const previous = positions.get(input);
@@ -37,6 +38,7 @@ export function positionImeInput(canvas, input, x, y, height, logicalWidth, logi
     input.style.left = `${position[0]}px`;
     input.style.top = `${position[1]}px`;
     input.style.height = `${position[2]}px`;
+    input.style.width = `${position[3]}px`;
     input.style.fontSize = `${position[2]}px`;
     input.style.lineHeight = `${position[2]}px`;
 }

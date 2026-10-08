@@ -382,6 +382,7 @@ pub struct TextInput {
     pub(super) disabled: bool,
     pub(super) mode: InputMode,
     input_purpose: gpui::TextInputPurpose,
+    pub(super) autofill: Option<gpui::AutofillOptions>,
     input_action: Option<gpui::TextInputAction>,
     pub(super) appearance: InputAppearance,
     pub(super) preferred_x: Option<Pixels>,
@@ -395,6 +396,20 @@ impl gpui::EventEmitter<InputEvent> for TextInput {}
 impl gpui::EventEmitter<InputActionEvent> for TextInput {}
 
 impl TextInput {
+    /// Offers this field to the system autofill service. Disabled by default.
+    /// The name must be nonempty, stable, and unique within the window.
+    /// Password hints expose the value only to the user's chosen autofill service.
+    pub fn autofill(mut self, name: impl Into<SharedString>, hint: gpui::AutofillHint) -> Self {
+        self.autofill = Some(gpui::AutofillOptions::new(name, hint));
+        self
+    }
+
+    /// Changes or disables system autofill for this field.
+    pub fn set_autofill(&mut self, options: Option<gpui::AutofillOptions>, cx: &mut Context<Self>) {
+        self.autofill = options;
+        cx.notify();
+    }
+
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
@@ -418,6 +433,7 @@ impl TextInput {
             disabled: false,
             mode: InputMode::Text,
             input_purpose: gpui::TextInputPurpose::default(),
+            autofill: None,
             input_action: None,
             appearance: InputAppearance::default(),
             preferred_x: None,

@@ -55,6 +55,8 @@ struct Callbacks {
 }
 
 pub(crate) struct AndroidWindow {
+    pub(crate) autofill_fields: RefCell<Vec<gpui::AutofillField>>,
+    pub(crate) autofill_callback: RefCell<Option<Box<dyn Fn(u64, String)>>>,
     pub(crate) accessibility: RefCell<Option<crate::accessibility::Accessibility>>,
     host: Arc<crate::bridge::Host>,
     back_enabled: Cell<bool>,
@@ -103,6 +105,8 @@ impl AndroidWindow {
         let reduced_motion = host.prefers_reduced_motion().unwrap_or(false);
         Self {
             accessibility: RefCell::new(None),
+            autofill_fields: RefCell::new(Vec::new()),
+            autofill_callback: RefCell::new(None),
             host,
             back_enabled: Cell::new(false),
             fullscreen: Cell::new(false),
@@ -576,6 +580,22 @@ impl HasDisplayHandle for AndroidWindowHandle {
     }
 }
 impl PlatformWindow for AndroidWindowHandle {
+    fn supports_autofill(&self) -> bool {
+        true
+    }
+    fn on_autofill(&self, callback: Box<dyn Fn(u64, String)>) {
+        *self.autofill_callback.borrow_mut() = Some(callback);
+    }
+    fn set_autofill_fields(&self, fields: Vec<gpui::AutofillField>) {
+        let encoded = crate::autofill::encode(&fields, self.scale_factor());
+        *self.autofill_fields.borrow_mut() = fields;
+        if let Err(error) = self.host.update_autofill(&encoded) {
+            log::error!("Android autofill update failed: {error:#}");
+        }
+    }
+    fn finish_autofill(&self, commit: bool) -> Result<()> {
+        self.host.finish_autofill(commit)
+    }
     fn bounds(&self) -> Bounds<Pixels> {
         self.display.bounds()
     }

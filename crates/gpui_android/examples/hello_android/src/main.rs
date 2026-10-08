@@ -117,10 +117,21 @@ fn main() {
                 permissions: gpui_android::current_platform().permissions(),
                 #[cfg(target_os = "android")]
                 background_execution: gpui_android::current_platform().background_execution(),
-                title: cx.new(|cx| TextInput::new(cx).placeholder("Name")),
+                title: cx.new(|cx| {
+                    TextInput::new(cx)
+                        .placeholder("Name")
+                        .autofill("login-username", gpui::AutofillHint::Username)
+                }),
                 text: cx.new(|cx| TextInput::new(cx).multiline().placeholder("Message")),
-                password: cx.new(|cx| TextInput::new(cx).password().placeholder("Password")),
+                password: cx.new(|cx| {
+                    TextInput::new(cx)
+                        .password()
+                        .placeholder("Password")
+                        .autofill("login-password", gpui::AutofillHint::Password)
+                }),
                 password_visible: false,
+                autofill_status: "Long-press Name or Password for Autofill. Use test credentials."
+                    .into(),
                 submissions: 0,
                 keyboard: 0,
                 input_action: 0,
@@ -266,6 +277,7 @@ struct Counter {
     title: Entity<TextInput>,
     password: Entity<TextInput>,
     password_visible: bool,
+    autofill_status: String,
     submissions: usize,
     keyboard: usize,
     keyboard_input: Entity<TextInput>,
@@ -1304,6 +1316,18 @@ impl Counter {
             )
             .child(Input::new(&self.text).rows(2).text_color(rgb(0x172033)))
             .child(Input::new(&self.password).text_color(rgb(0x172033)))
+            .child(button("finish-autofill", "Finish demo form").on_click(cx.listener(|this, _, window, cx| {
+                this.autofill_status = if this.title.read(cx).value().is_empty() || this.password.read(cx).value().is_empty() {
+                    "Enter a test username and password first.".into()
+                } else {
+                    match window.commit_autofill() {
+                        Ok(()) => "Form completed. The system decides whether to offer saving. No credentials were sent.".into(),
+                        Err(error) => error.to_string(),
+                    }
+                };
+                cx.notify();
+            })))
+            .child(div().text_sm().whitespace_normal().child(self.autofill_status.clone()))
             .child(
                 button("password-mode", "Show / hide password").on_click(cx.listener(
                     |this, _, window, cx| {

@@ -26,6 +26,7 @@ anyhow.workspace = true
 futures.workspace = true
 log.workspace = true
 smallvec.workspace = true
+serde_json.workspace = true
 uuid.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures = "0.4"

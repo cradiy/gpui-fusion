@@ -31,6 +31,8 @@ extern "C" {
 
 #[derive(Default)]
 pub(crate) struct WebWindowCallbacks {
+    pub(crate) autofill: Option<Box<dyn Fn(u64, String)>>,
+    pub(crate) autofill_focus: Option<Box<dyn Fn(u64)>>,
     pub(crate) request_frame: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     pub(crate) input: Option<Box<dyn FnMut(PlatformInput) -> DispatchEventResult>>,
     pub(crate) active_status_change: Option<Box<dyn FnMut(bool)>>,
@@ -59,13 +61,16 @@ pub(crate) struct WebWindowMutableState {
 }
 
 pub(crate) struct WebWindowInner {
+    pub(crate) autofill: crate::autofill::WebAutofill,
+    _autofill_callback: Closure<dyn FnMut(String, String)>,
+    _autofill_focus_callback: Closure<dyn FnMut(String)>,
     pub(crate) browser_window: web_sys::Window,
     pub(crate) canvas: web_sys::HtmlCanvasElement,
     pub(crate) input_element: web_sys::HtmlInputElement,
     pub(crate) has_device_pixel_support: bool,
     pub(crate) is_mac: bool,
     pub(crate) state: RefCell<WebWindowMutableState>,
-    pub(crate) callbacks: RefCell<WebWindowCallbacks>,
+    pub(crate) callbacks: Rc<RefCell<WebWindowCallbacks>>,
     pub(crate) click_state: RefCell<ClickState>,
     pub(crate) pressed_button: Cell<Option<MouseButton>>,
     pub(crate) last_physical_size: Cell<(u32, u32)>,
@@ -182,14 +187,44 @@ impl WebWindow {
 
         let is_mac = is_mac_platform(&browser_window);
 
+        let callbacks = Rc::new(RefCell::new(WebWindowCallbacks::default()));
+        let weak = Rc::downgrade(&callbacks);
+        let autofill_callback =
+            Closure::<dyn FnMut(String, String)>::new(move |id: String, value: String| {
+                if let Some(callbacks) = weak.upgrade()
+                    && let Ok(id) = id.parse()
+                    && let Some(callback) = &callbacks.borrow().autofill
+                {
+                    callback(id, value);
+                }
+            });
+        let weak = Rc::downgrade(&callbacks);
+        let autofill_focus_callback = Closure::<dyn FnMut(String)>::new(move |id: String| {
+            if let Some(callbacks) = weak.upgrade()
+                && let Ok(id) = id.parse()
+                && let Some(callback) = &callbacks.borrow().autofill_focus
+            {
+                callback(id);
+            }
+        });
+        let autofill = crate::autofill::WebAutofill::new(
+            &canvas,
+            &input_element,
+            autofill_callback.as_ref().unchecked_ref(),
+            autofill_focus_callback.as_ref().unchecked_ref(),
+        );
+
         let inner = Rc::new(WebWindowInner {
+            autofill,
+            _autofill_callback: autofill_callback,
+            _autofill_focus_callback: autofill_focus_callback,
             browser_window,
             canvas,
             input_element,
             has_device_pixel_support,
             is_mac,
             state: RefCell::new(mutable_state),
-            callbacks: RefCell::new(WebWindowCallbacks::default()),
+            callbacks,
             click_state: RefCell::new(ClickState::default()),
             pressed_button: Cell::new(None),
             last_physical_size: Cell::new((0, 0)),
@@ -366,6 +401,12 @@ impl WebWindowInner {
                 .flatten();
             this.ime_bounds.set(bounds);
             this.refresh_ime_position();
+            if let Some(Some(selection)) =
+                this.with_input_handler(|handler| handler.selected_text_range(false))
+            {
+                this.autofill
+                    .selection(selection.range.start, selection.range.end);
+            }
 
             // Re-schedule for the next frame
             if let Some(ref func) = *raf_handle_inner.borrow() {
@@ -555,7 +596,36 @@ impl raw_window_handle::HasDisplayHandle for WebWindow {
     }
 }
 
+impl Drop for WebWindow {
+    fn drop(&mut self) {
+        self.inner.autofill.dispose();
+        self.inner.callbacks.borrow_mut().autofill = None;
+        self.inner.callbacks.borrow_mut().autofill_focus = None;
+    }
+}
+
 impl PlatformWindow for WebWindow {
+    fn supports_autofill(&self) -> bool {
+        true
+    }
+    fn on_autofill(&self, callback: Box<dyn Fn(u64, String)>) {
+        self.inner.callbacks.borrow_mut().autofill = Some(callback);
+    }
+    fn on_autofill_focus(&self, callback: Box<dyn Fn(u64)>) {
+        self.inner.callbacks.borrow_mut().autofill_focus = Some(callback);
+    }
+    fn set_autofill_fields(&self, fields: Vec<gpui::AutofillField>) {
+        let size = self.inner.state.borrow().bounds.size;
+        self.inner.autofill.update(
+            &crate::autofill::encode(fields),
+            size.width.into(),
+            size.height.into(),
+        );
+    }
+    fn finish_autofill(&self, commit: bool) -> anyhow::Result<()> {
+        self.inner.autofill.finish(commit);
+        Ok(())
+    }
     fn bounds(&self) -> Bounds<Pixels> {
         self.inner.state.borrow().bounds
     }

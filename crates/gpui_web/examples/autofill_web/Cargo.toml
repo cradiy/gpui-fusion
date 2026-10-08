@@ -1,0 +1,16 @@
+[workspace]
+
+[package]
+name = "autofill_web"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "autofill_web"
+path = "../../../../uic/examples/autofill.rs"
+
+[dependencies]
+gpui = { path = "../../../gpui" }
+gpui_platform = { path = "../../../gpui_platform" }
+uic = { path = "../../../../uic" }

@@ -2,6 +2,7 @@
 #![cfg(target_os = "android")]
 
 mod accessibility;
+mod autofill;
 mod background;
 mod bridge;
 mod clipboard;

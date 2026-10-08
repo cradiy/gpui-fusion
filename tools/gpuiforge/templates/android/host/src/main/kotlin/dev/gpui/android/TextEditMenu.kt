@@ -115,6 +115,9 @@ internal class TextEditMenu(
         if (clipboard.primaryClipDescription?.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) == true) {
             item(android.R.id.paste, android.R.string.paste)
         }
+        if (view.autofillHost.canRequest()) {
+            item(android.R.id.autofill, android.R.string.autofill)
+        }
         return true
     }
 

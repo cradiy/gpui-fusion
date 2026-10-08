@@ -998,6 +998,15 @@ pub enum TextInputStateChange {
 
 #[expect(missing_docs)]
 pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
+    fn supports_autofill(&self) -> bool {
+        false
+    }
+    fn set_autofill_fields(&self, _fields: Vec<crate::AutofillField>) {}
+    fn on_autofill(&self, _callback: Box<dyn Fn(u64, String)>) {}
+    fn on_autofill_focus(&self, _callback: Box<dyn Fn(u64)>) {}
+    fn finish_autofill(&self, _commit: bool) -> Result<()> {
+        anyhow::bail!("system autofill is not supported on this platform")
+    }
     fn bounds(&self) -> Bounds<Pixels>;
     fn is_maximized(&self) -> bool;
     fn window_bounds(&self) -> WindowBounds;

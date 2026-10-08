@@ -251,6 +251,33 @@ impl Element for TextElement {
             )
         };
         if !disabled {
+            if window.supports_autofill()
+                && let Some(options) = self.input.read(cx).autofill.clone()
+            {
+                let value = self.input.read(cx).content.clone();
+                let weak = self.input.downgrade();
+                window.handle_autofill(
+                    &focus_handle,
+                    options.clone(),
+                    value,
+                    prepaint.viewport_bounds,
+                    move |value, window, cx| {
+                        let _ = weak.update(cx, |input, cx| {
+                            if input.disabled || input.autofill.as_ref() != Some(&options) {
+                                return;
+                            }
+                            let range = 0..input.content.encode_utf16().count();
+                            gpui::EntityInputHandler::replace_text_in_range(
+                                input,
+                                Some(range),
+                                &value,
+                                window,
+                                cx,
+                            );
+                        });
+                    },
+                );
+            }
             if let Some(hitbox) = prepaint.focus_hitbox.take() {
                 let input = self.input.clone();
                 window.on_mouse_event(move |event: &TextInputFocusEvent, phase, window, cx| {

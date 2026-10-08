@@ -50,6 +50,7 @@ use std::{
 };
 
 pub(crate) mod a11y;
+mod autofill;
 mod color_svg;
 mod diagnostics;
 mod effects;
@@ -871,6 +872,30 @@ impl Window {
         }
 
         let accessibility_force_disabled = cx.accessibility_force_disabled;
+        if platform_window.supports_autofill() {
+            let (sender, receiver) = async_channel::unbounded();
+            let focus_sender = sender.clone();
+            platform_window.on_autofill_focus(Box::new(move |id| {
+                let _ = focus_sender.try_send((id, None));
+            }));
+            platform_window.on_autofill(Box::new(move |id, value| {
+                let _ = sender.try_send((id, Some(value)));
+            }));
+            let mut async_cx = cx.to_async();
+            cx.foreground_executor()
+                .spawn(async move {
+                    while let Ok((id, value)) = receiver.recv().await {
+                        let _ = handle.update(&mut async_cx, |_, window, cx| {
+                            if let Some(value) = value {
+                                window.apply_autofill(id, value, cx);
+                            } else {
+                                window.focus_autofill(id, cx);
+                            }
+                        });
+                    }
+                })
+                .detach();
+        }
         let a11y_active_flag = Arc::new(AtomicBool::new(false));
 
         #[cfg(not(target_family = "wasm"))]

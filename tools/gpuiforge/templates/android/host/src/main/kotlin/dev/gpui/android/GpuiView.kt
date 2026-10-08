@@ -28,6 +28,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     SurfaceView(context), SurfaceHolder.Callback2, Choreographer.FrameCallback {
     private val choreographer = Choreographer.getInstance()
     private val accessibility = GpuiAccessibility(this, session)
+    internal val autofillHost = AutofillHost(this, session)
     private val scroll = TouchScroll(context, session)
     private val pinch = TouchPinch(context, session::pinch)
     private val mouse = MouseInput(context, session)
@@ -77,6 +78,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         isFocusableInTouchMode = true
         isClickable = true
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+        importantForAutofill = IMPORTANT_FOR_AUTOFILL_YES
     }
 
     override fun onAttachedToWindow() {
@@ -100,6 +102,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     }
 
     override fun onDetachedFromWindow() {
+        autofillHost.detach()
         accessibility.detach()
         releaseSurface()
         session.unbind(this)
@@ -174,7 +177,10 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     override fun onWindowFocusChanged(focused: Boolean) {
         super.onWindowFocusChanged(focused)
         inputDiagnostic { "window focus=$focused" }
-        if (initialized) updateFrameScheduling()
+        if (initialized) {
+            autofillHost.sync()
+            updateFrameScheduling()
+        }
     }
 
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
@@ -217,6 +223,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
                 scroll.frame()
                 textMenu.beforeFrame(frameTimeNanos)
                 val changed = session.frame()
+                autofillHost.sync()
                 val request = keyboardRequest
                 if (request == KeyboardRequest.HIDE) {
                     keyboardRequest = null
@@ -236,6 +243,15 @@ class GpuiView(context: Context, private val session: GpuiSession) :
             }
         }
         updateFrameScheduling()
+    }
+
+    override fun onProvideAutofillVirtualStructure(structure: android.view.ViewStructure, flags: Int) {
+        super.onProvideAutofillVirtualStructure(structure, flags)
+        autofillHost.structure(structure)
+    }
+
+    override fun autofill(values: SparseArray<android.view.autofill.AutofillValue>) {
+        autofillHost.fill(values)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -404,6 +420,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
 
     internal fun performTextAction(epoch: Long, id: Int): Boolean {
         val current = session.inputState()?.takeIf { it.epoch == epoch } ?: return false
+        if (id == android.R.id.autofill) return autofillHost.request()
         if (current.sensitive && (id == android.R.id.copy || id == android.R.id.cut)) return false
         val key = when (id) {
             android.R.id.selectAll -> "a"

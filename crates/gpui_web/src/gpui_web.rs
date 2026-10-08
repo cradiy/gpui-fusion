@@ -1,5 +1,6 @@
 #![cfg(target_family = "wasm")]
 
+mod autofill;
 mod clipboard;
 mod dispatcher;
 mod display;

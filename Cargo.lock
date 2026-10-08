@@ -3044,6 +3044,7 @@ dependencies = [
  "log",
  "parking_lot",
  "raw-window-handle",
+ "serde_json",
  "smallvec",
  "uuid",
  "wasm-bindgen",

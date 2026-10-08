@@ -85,6 +85,30 @@ pub(crate) struct Host {
     object: GlobalRef,
 }
 impl Host {
+    pub fn update_autofill(&self, fields: &str) -> Result<()> {
+        self.with_env(|env| {
+            let fields = env.new_string(fields)?;
+            env.call_method(
+                self.object.as_obj(),
+                "updateAutofill",
+                "(Ljava/lang/String;)V",
+                &[JValue::Object(fields.as_ref())],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn finish_autofill(&self, commit: bool) -> Result<()> {
+        self.with_env(|env| {
+            env.call_method(
+                self.object.as_obj(),
+                "finishAutofill",
+                "(Z)V",
+                &[JValue::Bool(commit.into())],
+            )?;
+            Ok(())
+        })
+    }
     pub fn raise_accessibility_events(&self, events: accesskit_android::QueuedEvents) {
         if let Err(error) = self.with_env(|env| {
             let view = env
@@ -766,6 +790,11 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
             edit as *mut c_void,
         ),
         method("nativeKey", "(JLjava/lang/String;IZ)Z", key as *mut c_void),
+        method(
+            "nativeAutofill",
+            "(JLjava/lang/String;Ljava/lang/String;)V",
+            crate::autofill::fill as *mut c_void,
+        ),
         method("nativeInputAction", "(JJI)Z", input_action as *mut c_void),
         method("nativeInputIndex", "(JJFF)I", input_index as *mut c_void),
         method("nativeScrollInput", "(JJFF)Z", scroll_input as *mut c_void),

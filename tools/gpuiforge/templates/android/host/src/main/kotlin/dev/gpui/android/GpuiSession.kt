@@ -506,6 +506,12 @@ class GpuiSession : AutoCloseable {
             .filter { it.isFile && it.extension.lowercase() in setOf("ttf", "otf", "ttc") }
             .map { it.absolutePath }.sorted().toTypedArray()
     }
+    private fun updateAutofill(fields: String) { view.get()?.autofillHost?.update(fields) }
+    private fun finishAutofill(commit: Boolean) { view.get()?.autofillHost?.finish(commit) }
+    internal fun autofill(field: String, value: String) {
+        checkThread()
+        if (id != 0L && !closed) { nativeAutofill(id, field, value); view.get()?.requestFrame() }
+    }
     internal fun inputState(): TextInputState? { checkThread(); return if (id != 0L) nativeInputState(id) else null }
     internal fun inputIndex(epoch: Long, x: Float, y: Float): Int {
         checkThread()
@@ -960,6 +966,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeDetach(id: Long)
         @JvmStatic private external fun nativeFrame(id: Long): Boolean
         @JvmStatic private external fun nativeInputState(id: Long): TextInputState?
+        @JvmStatic private external fun nativeAutofill(id: Long, field: String, value: String)
         @JvmStatic private external fun nativeInputIndex(id: Long, epoch: Long, x: Float, y: Float): Int
         @JvmStatic private external fun nativeScrollInput(id: Long, epoch: Long, dx: Float, dy: Float): Boolean
         @JvmStatic private external fun nativeEdit(id: Long, epoch: Long, operation: Int, text: String, a: Int, b: Int, cursor: Int): Boolean

@@ -7,6 +7,7 @@ pub enum Action {
     Write,
     Restore,
     Release,
+    TransferSample,
 }
 
 impl Counter {
@@ -32,9 +33,26 @@ impl Counter {
             let result: anyhow::Result<_> = async {
                 let location = io.location(SystemLocation::AppData).await?;
                 let storage = location.file("directory-bookmark.json")?;
-                if matches!(action, Action::Write) {
+                if matches!(action, Action::Write | Action::TransferSample) {
                     let directory = selected.ok_or_else(|| anyhow::anyhow!("Choose or restore a directory first"))?;
                     let id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis();
+                    if matches!(action, Action::TransferSample) {
+                        let options = CreateOptions { mime_type: Some("text/plain".into()) };
+                        let source = location.create_file(format!("Transfers/source-{id}.txt"), options.clone()).await?;
+                        source.write(contents.clone()).await?;
+                        let source = source.rename(format!("source-renamed-{id}.txt")).await?;
+                        let copy = source.copy_to(&directory, format!("GPUI/Transfers/copy-{id}.txt"), options.clone()).await?;
+                        let copy = copy.rename(format!("copy-renamed-{id}.txt")).await?;
+                        anyhow::ensure!(source.read().await? == contents && copy.read().await? == contents, "Copy contents differ");
+                        let downloads = io.location(SystemLocation::Downloads).await?;
+                        let moved = copy.move_to(&downloads, format!("GPUI/Transfers/moved-{id}.txt"), options.clone()).await?;
+                        let moved = moved.rename(format!("downloads-renamed-{id}.txt")).await?;
+                        anyhow::ensure!(copy.read().await.is_err() && moved.read().await? == contents, "Directory move did not complete");
+                        let final_file = moved.move_to(&directory, format!("GPUI/Transfers/moved-{id}.txt"), options).await?;
+                        anyhow::ensure!(moved.read().await.is_err() && final_file.read().await? == contents, "Downloads move did not complete");
+                        source.delete().await?;
+                        return Ok((format!("Copy, move, rename and delete verified. Saved GPUI/Transfers/{}", final_file.name()), Some(directory)));
+                    }
                     let file = directory.create_file(format!("GPUI/Samples/note-{id}.txt"), CreateOptions { mime_type: Some("text/plain".into()) }).await?;
                     file.write(contents).await?;
                     return Ok((format!("Saved GPUI/Samples/{}", file.name()), Some(directory)));
@@ -67,7 +85,7 @@ impl Counter {
                         storage.write(b"null".to_vec()).await?;
                         Ok(("Directory access released. Contents were not deleted.".into(), None))
                     }
-                    Action::Write => unreachable!(),
+                    Action::Write | Action::TransferSample => unreachable!(),
                 }
             }.await;
             let _ = this.update(cx, |this, cx| {

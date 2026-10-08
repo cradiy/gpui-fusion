@@ -1274,6 +1274,9 @@ impl Counter {
                             .child(button("write-directory", "Write in directory").on_click(
                                 cx.listener(|this, _, _, cx| this.directory_action(directory::Action::Write, cx)),
                             ))
+                            .child(button("transfer-sample", "Copy and move sample").on_click(
+                                cx.listener(|this, _, _, cx| this.directory_action(directory::Action::TransferSample, cx)),
+                            ))
                             .child(button("restore-directory", "Restore directory").on_click(
                                 cx.listener(|this, _, _, cx| this.directory_action(directory::Action::Restore, cx)),
                             ))

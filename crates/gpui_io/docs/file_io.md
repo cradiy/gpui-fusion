@@ -70,6 +70,78 @@ reader.read_exact(&mut header).await?;
 let remaining = reader.read_to_end_limited(4096).await?;
 ```
 
+## Copying, moving, renaming, and deleting files
+
+Use a file handle as the source and a location as the destination. Destination
+paths follow the same relative-path rules as `create_file()`; missing parent
+directories are created. Existing files are never overwritten, but a provider
+may choose a different display name. Use the returned handle as the result.
+
+```rust,ignore
+let copy = source.copy_to(&directory, "Archive/report.pdf", CreateOptions::default()).await?;
+let moved = copy.move_to(&downloads, "Reports/report.pdf", CreateOptions::default()).await?;
+if moved.can_delete().await? {
+    moved.delete().await?;
+}
+```
+
+`copy_to()` streams file contents in chunks of at most 64 KiB. If no MIME type is
+provided, it uses the source metadata when available. Native files without MIME
+metadata may need an explicit `CreateOptions::mime_type` when copying into a
+typed collection such as Pictures. Ownership, permissions, modification times,
+and other filesystem metadata are not preserved. These operations handle files,
+not recursive directory trees; native moves and deletes reject symbolic links.
+
+`move_to()` queries deletion support before creating a destination, then copies,
+closes the reader and writer, and deletes the source. It uses the same byte-copy
+path for transfers within and across providers, including native paths, Android
+document trees, and application-owned MediaStore files. It is not an atomic
+rename and does not use provider-side copy/move acceleration. Do not modify the
+source or target concurrently. Completion does not guarantee durable storage
+or remote synchronization.
+After a move, use the returned handle; other references and bookmarks to the
+old location are not updated automatically.
+
+Both operations return `TransferError` on failure:
+
+- `Prepare`: no destination handle was obtained.
+- `Copy`: input/output failed. Cleanup attempts to delete the newly created
+  output; `destination` is present if cleanup failed and may reference partial data.
+- `DeleteSource`: copying completed, but source deletion failed. `destination`
+  contains the complete copy. Reconcile the source before retrying the move.
+
+Cancellation releases I/O sessions, but can leave a partial or complete output,
+including when creation was already dispatched. No source deletion is started
+until copying and closing succeed. Cancellation after deletion was dispatched
+cannot undo that operation. Missing parent directories created by a failed
+transfer are not removed.
+
+`delete()` permanently removes a file; it does not send it to a trash directory.
+Deletion support is independent of content-write access. Android document
+providers are checked for [deletion support](https://developer.android.com/reference/android/provider/DocumentsContract.Document#FLAG_SUPPORTS_DELETE);
+read-only selections and arbitrary shared content URIs are not deletable through
+this API. Access can still change after `can_delete()`. No permission dialog is
+opened automatically. Browser-selected files can be copy sources when a writable
+destination is supplied by an integration, but do not support deletion or moves.
+
+`can_rename().await` checks renaming support independently. `rename("report.pdf")`
+renames a single file within its current directory and returns its new handle.
+The argument is one filename, not a relative path. Renaming uses native OS or
+provider operations without copying file contents. Native paths reject existing
+targets without overwriting them; Android providers determine conflicts and may
+return a different display name. A provider may also change the document URI.
+Use the returned handle and persist a new bookmark if needed. Renaming does not
+update other handles or previously saved bookmarks. Browser selections do not
+support renaming. Native rename support depends on the filesystem, and symbolic
+links are rejected.
+
+```rust,ignore
+if file.can_rename().await? {
+    let renamed = file.rename("report-final.pdf").await?;
+    // Retain `renamed` as the application's current file handle.
+}
+```
+
 ## Storage locations
 
 ### Chosen directories

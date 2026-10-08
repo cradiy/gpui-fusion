@@ -159,6 +159,49 @@ impl std::fmt::Debug for AndroidFile {
     }
 }
 impl PlatformFile for AndroidFile {
+    fn can_rename(&self) -> LocalBoxFuture<'static, Result<bool>> {
+        let document = self.document.clone();
+        self.executor.run(move || {
+            document.call(|env| {
+                Ok(env
+                    .call_method(document.object.as_obj(), "canRename", "()Z", &[])?
+                    .z()?)
+            })
+        })
+    }
+    fn rename(&self, new_name: String) -> LocalBoxFuture<'static, Result<FileHandle>> {
+        let document = self.document.clone();
+        let executor = self.executor.clone();
+        self.executor.run(move || {
+            let object = document.call(|env| {
+                let name = env.new_string(new_name)?;
+                let object = env
+                    .call_method(
+                        document.object.as_obj(),
+                        "rename",
+                        "(Ljava/lang/String;)Ldev/gpui/android/SelectedDocument;",
+                        &[JValue::Object(name.as_ref())],
+                    )?
+                    .l()?;
+                Ok(env.new_global_ref(object)?)
+            })?;
+            selected_file(document.vm.clone(), object, executor)
+        })
+    }
+    fn can_delete(&self) -> LocalBoxFuture<'static, Result<bool>> {
+        let document = self.document.clone();
+        self.executor.run(move || {
+            document.call(|env| {
+                Ok(env
+                    .call_method(document.object.as_obj(), "canDelete", "()Z", &[])?
+                    .z()?)
+            })
+        })
+    }
+    fn delete(&self) -> LocalBoxFuture<'static, Result<()>> {
+        let document = self.document.clone();
+        self.executor.run(move || document.void("delete"))
+    }
     fn persist(&self) -> LocalBoxFuture<'static, Result<FileBookmark>> {
         let document = self.document.clone();
         let writable = self.writable;

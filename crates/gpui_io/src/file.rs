@@ -72,6 +72,19 @@ impl WriteOptions {
 
 /// Platform resource behind a file handle. Sessions own their resources independently.
 pub trait PlatformFile: Any + Debug + Send + Sync {
+    fn can_rename(&self) -> LocalBoxFuture<'static, Result<bool>> {
+        Box::pin(async { Ok(false) })
+    }
+    fn rename(&self, _new_name: String) -> LocalBoxFuture<'static, Result<FileHandle>> {
+        Box::pin(async { Err(unsupported("file provider does not support renaming")) })
+    }
+    /// Query current support for permanent deletion, independently of content writing.
+    fn can_delete(&self) -> LocalBoxFuture<'static, Result<bool>> {
+        Box::pin(async { Ok(false) })
+    }
+    fn delete(&self) -> LocalBoxFuture<'static, Result<()>> {
+        Box::pin(async { Err(unsupported("file provider does not support deletion")) })
+    }
     fn persist(&self) -> LocalBoxFuture<'static, Result<FileBookmark>> {
         Box::pin(async {
             Err(unsupported(
@@ -103,6 +116,24 @@ pub trait PlatformFile: Any + Debug + Send + Sync {
 pub struct FileHandle(Arc<dyn PlatformFile>);
 
 impl FileHandle {
+    pub fn can_rename(&self) -> LocalBoxFuture<'static, Result<bool>> {
+        self.0.can_rename()
+    }
+    /// Rename within the same directory. Use the returned handle, whose name or URI may differ.
+    /// Native paths reject an existing target; document providers determine name conflicts.
+    pub async fn rename(&self, new_name: impl Into<String>) -> Result<FileHandle> {
+        let new_name = new_name.into();
+        crate::location::validate_name(&new_name)?;
+        self.0.rename(new_name).await
+    }
+    /// Query deletion support. A later delete can still fail if access changes.
+    pub fn can_delete(&self) -> LocalBoxFuture<'static, Result<bool>> {
+        self.0.can_delete()
+    }
+    /// Permanently delete this file. Does not recursively delete directories or use trash.
+    pub fn delete(&self) -> LocalBoxFuture<'static, Result<()>> {
+        self.0.delete()
+    }
     /// Retain access explicitly. The application must store the returned bookmark.
     /// Dropping a handle or bookmark does not release persistent permissions.
     pub fn persist(&self) -> LocalBoxFuture<'static, Result<FileBookmark>> {

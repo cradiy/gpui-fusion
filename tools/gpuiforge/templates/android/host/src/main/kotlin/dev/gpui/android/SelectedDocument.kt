@@ -7,14 +7,51 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.provider.DocumentsContract
 import java.io.FileNotFoundException
 import java.io.OutputStream
 
 /** Owns no Activity. Metadata and descriptor access run on Rust background workers. */
-internal class SelectedDocument(private val resolver: ContentResolver, private val uri: Uri, private val writable: Boolean, private var pending: Boolean = false, private val persistableFlags: Int = 0) {
+internal class SelectedDocument(private val resolver: ContentResolver, private val uri: Uri, private val writable: Boolean, private var pending: Boolean = false, private val persistableFlags: Int = 0, private val ownedCollection: Boolean = pending) {
     private var outputOpen = false
     private var discarded = false
     fun canWrite(): Boolean = writable
+    @Synchronized fun canDelete(): Boolean = supports(DocumentsContract.Document.FLAG_SUPPORTS_DELETE)
+    @Synchronized fun canRename(): Boolean = !pending && supports(DocumentsContract.Document.FLAG_SUPPORTS_RENAME)
+    private fun supports(flag: Int): Boolean {
+        if (!writable || discarded || outputOpen) return false
+        if (ownedCollection) return true
+        // Only document URIs support DocumentsContract operations; shared content URIs do not.
+        try { DocumentsContract.getDocumentId(uri) } catch (_: IllegalArgumentException) { return false }
+        val columns = arrayOf(DocumentsContract.Document.COLUMN_FLAGS, DocumentsContract.Document.COLUMN_MIME_TYPE)
+        return resolver.query(uri, columns, null, null, null)?.use {
+            it.moveToFirst() && it.getString(1) != DocumentsContract.Document.MIME_TYPE_DIR &&
+                it.getLong(0) and flag.toLong() != 0L
+        } ?: false
+    }
+    @Synchronized fun rename(newName: String): SelectedDocument {
+        require(newName.isNotEmpty() && newName != "." && newName != ".." && !newName.endsWith('.') && !newName.endsWith(' ') && newName.none { it == '/' || it == '\\' || it == ':' || it == '\u0000' }) { "Invalid filename" }
+        check(canRename()) { "File does not support renaming or has an active writer" }
+        val renamed = if (ownedCollection) {
+            val values = ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME, newName) }
+            check(resolver.update(uri, values, null, null) == 1) { "Provider did not rename the file" }
+            uri
+        } else {
+            DocumentsContract.renameDocument(resolver, uri, newName)
+                ?: throw FileNotFoundException("Provider did not return the renamed file")
+        }
+        return SelectedDocument(resolver, renamed, writable, persistableFlags = persistableFlags, ownedCollection = ownedCollection)
+    }
+    @Synchronized fun delete() {
+        // An aborted pending MediaStore output has already been removed.
+        if (discarded) return
+        check(canDelete()) { "File does not support deletion or has an active writer" }
+        val removed = if (ownedCollection) resolver.delete(uri, null, null) == 1
+            else DocumentsContract.deleteDocument(resolver, uri)
+        check(removed) { "Provider did not delete the file" }
+        pending = false
+        discarded = true
+    }
     fun url(): String = uri.toString()
     @Synchronized fun viewIntent(): Intent {
         check(!pending && !discarded && !outputOpen) { "Finish writing before opening the file" }

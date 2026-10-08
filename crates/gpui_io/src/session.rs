@@ -10,6 +10,10 @@ const CHUNK_SIZE: usize = 64 * 1024;
 
 /// Backend for a read session. Return a nonempty chunk of at most `limit` bytes, or `None` at EOF.
 pub trait PlatformReader: Send {
+    /// Release provider resources before completion. Called before a transfer deletes its source.
+    fn close(&mut self) -> LocalBoxFuture<'_, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
     fn read_chunk(&mut self, limit: usize) -> LocalBoxFuture<'_, Result<Option<Vec<u8>>>>;
     fn seek(&mut self, _position: SeekFrom) -> LocalBoxFuture<'_, Result<u64>> {
         Box::pin(async { Err(crate::unsupported("reader does not support seeking")) })
@@ -18,6 +22,10 @@ pub trait PlatformReader: Send {
 
 pub struct FileReader(Box<dyn PlatformReader>);
 impl FileReader {
+    /// Close the reader and await provider cleanup instead of scheduling it on drop.
+    pub async fn close(mut self) -> Result<()> {
+        self.0.close().await
+    }
     pub fn new(reader: impl PlatformReader + 'static) -> Self {
         Self(Box::new(reader))
     }
@@ -208,6 +216,12 @@ struct BlockingReader {
     resource: Resource<BlockingInput>,
 }
 impl PlatformReader for BlockingReader {
+    fn close(&mut self) -> LocalBoxFuture<'_, Result<()>> {
+        self.resource.run(|slot| {
+            slot.take();
+            Ok(())
+        })
+    }
     fn seek(&mut self, position: SeekFrom) -> LocalBoxFuture<'_, Result<u64>> {
         self.resource.run(move |slot| match slot {
             Some(BlockingInput::Seekable(reader)) => Ok(reader.seek(position)?),

@@ -199,7 +199,7 @@ pub fn validate_app_id(app_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_name(name: &str) -> Result<()> {
+pub(crate) fn validate_name(name: &str) -> Result<()> {
     ensure!(
         !name.is_empty()
             && name != "."
@@ -211,7 +211,7 @@ fn validate_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_relative_path(path: &str) -> Result<()> {
+pub(crate) fn validate_relative_path(path: &str) -> Result<()> {
     for component in path.split('/') {
         validate_name(component)?;
     }

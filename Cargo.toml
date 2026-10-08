@@ -95,7 +95,7 @@ reqwest_client = { path = "crates/reqwest_client" }
 #
 
 accesskit = "0.24.0"
-accesskit_android = "0.7.4"
+accesskit_android = { path = "crates/gpui_android/vendor/accesskit_android", version = "0.7.4" }
 accesskit_macos = "0.26.0"
 accesskit_unix = "0.21.0"
 accesskit_windows = "0.33.1"

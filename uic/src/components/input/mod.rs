@@ -42,6 +42,7 @@ macro_rules! input_appearance {
     };
 }
 
+mod accessibility;
 mod actions;
 mod appearance;
 mod element;

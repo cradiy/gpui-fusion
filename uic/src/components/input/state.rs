@@ -365,6 +365,7 @@ pub struct TextInput {
     pub(super) content: SharedString,
     pub(super) committed_content: SharedString,
     pub(super) placeholder: SharedString,
+    pub(super) accessible_label: Option<SharedString>,
     pub(super) selected_range: Range<usize>,
     pub(super) selection_reversed: bool,
     pub(super) caret_affinity: CaretAffinity,
@@ -400,6 +401,7 @@ impl TextInput {
             content: "".into(),
             committed_content: "".into(),
             placeholder: "".into(),
+            accessible_label: None,
             selected_range: 0..0,
             selection_reversed: false,
             caret_affinity: CaretAffinity::Downstream,
@@ -511,6 +513,18 @@ impl TextInput {
     pub fn placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.placeholder = placeholder.into();
         self
+    }
+
+    /// Sets the accessible name. The placeholder is used when no name is supplied.
+    pub fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.accessible_label = Some(label.into());
+        self
+    }
+
+    /// Updates the accessible name without changing the field's content.
+    pub fn set_aria_label(&mut self, label: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.accessible_label = Some(label.into());
+        cx.notify();
     }
 
     pub fn initial_value(mut self, value: impl Into<SharedString>) -> Self {
@@ -1541,11 +1555,15 @@ impl EntityInputHandler for TextInput {
 }
 
 impl Render for TextInput {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let multiline = self.mode == InputMode::Multiline;
         let scroll_handle = self.scroll_handle.clone();
         let input = cx.weak_entity();
-        div()
+        let accessibility = window
+            .is_a11y_active()
+            .then(|| super::accessibility::InputAccessibility::new(self));
+        let geometry = accessibility.as_ref().map(|state| state.geometry.clone());
+        let element = div()
             .on_paint_before_children(move |_, _, window, _| {
                 let moving_input = input.clone();
                 window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
@@ -1615,8 +1633,15 @@ impl Render for TextInput {
                     .w_full()
                     .min_w_0()
                     .when(multiline, |this| this.flex_none())
-                    .child(TextElement { input: cx.entity() }),
-            )
+                    .child(TextElement {
+                        input: cx.entity(),
+                        accessibility: geometry,
+                    }),
+            );
+        match accessibility {
+            Some(accessibility) => accessibility.decorate(element, cx),
+            None => element,
+        }
     }
 }
 

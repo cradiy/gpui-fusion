@@ -10,6 +10,7 @@ use super::{InputMode, TextInput, state::TextLayout};
 
 pub(super) struct TextElement {
     pub(super) input: Entity<TextInput>,
+    pub(super) accessibility: Option<super::accessibility::Geometry>,
 }
 
 pub(super) struct PrepaintState {
@@ -210,6 +211,12 @@ impl Element for TextElement {
                 None,
             )
         };
+
+        if let Some(geometry) = &self.accessibility {
+            geometry
+                .borrow_mut()
+                .update(&content, &layout, text_bounds, window.scale_factor());
+        }
 
         PrepaintState {
             focus_hitbox: (!disabled).then(|| window.insert_hitbox(bounds, HitboxBehavior::Normal)),

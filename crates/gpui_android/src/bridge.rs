@@ -85,6 +85,25 @@ pub(crate) struct Host {
     object: GlobalRef,
 }
 impl Host {
+    pub fn raise_accessibility_events(&self, events: accesskit_android::QueuedEvents) {
+        if let Err(error) = self.with_env(|env| {
+            let view = env
+                .call_method(
+                    self.object.as_obj(),
+                    "accessibilityView",
+                    "()Landroid/view/View;",
+                    &[],
+                )?
+                .l()?;
+            if !view.is_null() {
+                events.raise(env, &view);
+            }
+            Ok(())
+        }) {
+            log::error!("Android accessibility event failed: {error:#}");
+        }
+    }
+
     pub fn background_operation(&self, operation: &str, payload: &str) -> Result<()> {
         self.with_env(|env| {
             let operation = env.new_string(operation)?;
@@ -573,6 +592,26 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
     let mut env = vm.get_env()?;
     let methods = [
         method(
+            "nativeAccessibilityNode",
+            "(JLandroid/view/View;IZ)Landroid/view/accessibility/AccessibilityNodeInfo;",
+            crate::accessibility::node as *mut c_void,
+        ),
+        method(
+            "nativeAccessibilityAction",
+            "(JLandroid/view/View;IILandroid/os/Bundle;)Z",
+            crate::accessibility::action as *mut c_void,
+        ),
+        method(
+            "nativeAccessibilityHover",
+            "(JLandroid/view/View;IFF)Z",
+            crate::accessibility::hover as *mut c_void,
+        ),
+        method(
+            "nativeAccessibilityReset",
+            "(J)V",
+            crate::accessibility::reset as *mut c_void,
+        ),
+        method(
             "nativeBackgroundEvent",
             "(JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
             background_event as *mut c_void,
@@ -728,7 +767,11 @@ fn session(id: i64) -> Result<Rc<Session>> {
         .context("GpuiSession is closed or called from the wrong thread")
 }
 
-fn call<T: Default>(env: &mut JNIEnv, f: impl FnOnce(&mut JNIEnv) -> Result<T>) -> T {
+pub(crate) fn window(id: i64) -> Result<Rc<crate::window::AndroidWindow>> {
+    Ok(session(id)?.platform.window.clone())
+}
+
+pub(crate) fn call<T: Default>(env: &mut JNIEnv, f: impl FnOnce(&mut JNIEnv) -> Result<T>) -> T {
     match catch_unwind(AssertUnwindSafe(|| f(env))) {
         Ok(Ok(value)) => value,
         outcome => {

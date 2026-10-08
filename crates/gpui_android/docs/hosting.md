@@ -129,6 +129,27 @@ The generated application supplies light and dark Android themes. Applications
 choose their GPUI colors from the reported appearance; custom colors are not
 automatically recolored.
 
+## Accessibility
+
+`GpuiView` exposes the GPUI AccessKit tree to Android accessibility services and
+system UI automation. No GPUiForge feature or application permission is required.
+Use the shared GPUI `.id()`, `.role()`, `.aria_label()` and `.on_a11y_action()`
+APIs described in the [accessibility guide](../../gpui/src/_accessibility.rs).
+Only elements that publish semantic information appear in the tree; drawing text
+or implementing pointer input alone does not provide a complete accessible control.
+
+The host forwards accessibility focus, touch exploration and supported node
+actions to AccessKit. Existing GPUI click and focus handlers remain the action
+targets. Node bounds follow the View's screen position and GPUI scale. Nodes
+outside the visible host cannot be activated through the node provider.
+Tree collection starts when a service requests it and stops when Android
+accessibility is disabled or the View is detached.
+
+Custom embedded hosts keep using `GpuiView` and its normal attachment lifecycle.
+Do not replace its `AccessibilityNodeProvider`. InputConnection support and
+native text-selection handles are independent of the control's semantic tree;
+custom text editors must also supply their accessible text and selection data.
+
 ## Picture-in-picture host
 
 The GPUiForge `media` feature enables picture-in-picture in the generated

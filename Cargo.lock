@@ -12,6 +12,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "accesskit_android"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3081278e68324dd6cf602508cf52359ec9d99374b50d3172b8ee888b73e00f6"
+dependencies = [
+ "accesskit",
+ "accesskit_consumer 0.37.0",
+ "jni 0.21.1",
+ "log",
+]
+
+[[package]]
 name = "accesskit_atspi_common"
 version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2696,6 +2708,8 @@ dependencies = [
 name = "gpui_android"
 version = "0.1.0"
 dependencies = [
+ "accesskit",
+ "accesskit_android",
  "anyhow",
  "async-channel",
  "futures",

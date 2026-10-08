@@ -52,6 +52,7 @@ struct Callbacks {
 }
 
 pub(crate) struct AndroidWindow {
+    pub(crate) accessibility: RefCell<Option<crate::accessibility::Accessibility>>,
     host: Arc<crate::bridge::Host>,
     back_enabled: Cell<bool>,
     fullscreen: Cell<bool>,
@@ -95,6 +96,7 @@ impl AndroidWindow {
     ) -> Self {
         Self::watch_device(&renderer, &host);
         Self {
+            accessibility: RefCell::new(None),
             host,
             back_enabled: Cell::new(false),
             fullscreen: Cell::new(false),
@@ -723,6 +725,22 @@ impl PlatformWindow for AndroidWindowHandle {
         (!renderer.device_lost()).then(|| renderer.gpu_specs())
     }
     fn update_ime_position(&self, _: Bounds<Pixels>) {}
+
+    fn a11y_init(&self, callbacks: A11yCallbacks) {
+        *self.accessibility.borrow_mut() =
+            Some(crate::accessibility::Accessibility::new(callbacks));
+    }
+
+    fn a11y_tree_update(&self, update: accesskit::TreeUpdate) {
+        let events = self
+            .accessibility
+            .borrow_mut()
+            .as_mut()
+            .and_then(|state| state.adapter.update_if_active(|| update));
+        if let Some(events) = events {
+            self.host.raise_accessibility_events(events);
+        }
+    }
 
     fn perform_haptic_feedback(&self, feedback: HapticFeedback) -> bool {
         if !self.active.get() || self.native.borrow().is_none() {

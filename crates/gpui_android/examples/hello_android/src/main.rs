@@ -253,6 +253,8 @@ enum ShareAction {
 fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
     div()
         .id(id)
+        .role(Role::Button)
+        .aria_label(label)
         .p_4()
         .rounded_lg()
         .bg(rgb(0x375c91))

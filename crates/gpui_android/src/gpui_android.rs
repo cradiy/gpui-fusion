@@ -1,6 +1,7 @@
 //! Android View hosting for GPUI applications.
 #![cfg(target_os = "android")]
 
+mod accessibility;
 mod background;
 mod bridge;
 mod credentials;

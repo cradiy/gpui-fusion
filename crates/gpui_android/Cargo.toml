@@ -12,6 +12,8 @@ path = "src/gpui_android.rs"
 workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
+accesskit.workspace = true
+accesskit_android.workspace = true
 anyhow.workspace = true
 futures.workspace = true
 gpui.workspace = true

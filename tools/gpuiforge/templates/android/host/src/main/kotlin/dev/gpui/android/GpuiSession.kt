@@ -279,6 +279,7 @@ class GpuiSession : AutoCloseable {
     internal fun unbind(previous: GpuiView) {
         checkThread()
         if (view.get() === previous) {
+            resetAccessibility()
             keyboardRequestVersion++
             view.clear()
         }
@@ -346,6 +347,33 @@ class GpuiSession : AutoCloseable {
 
     internal fun detachSurface() { checkThread(); cancelBackGesture(); if (id != 0L) nativeDetach(id) }
     internal fun frame(): Boolean { checkThread(); return id != 0L && nativeFrame(id) }
+
+    private fun accessibilityView(): android.view.View? = view.get()?.takeIf {
+        it.isAttachedToWindow && it.context.getSystemService(android.view.accessibility.AccessibilityManager::class.java).isEnabled
+    }
+
+    internal fun accessibilityNode(host: GpuiView, node: Int, focus: Boolean): android.view.accessibility.AccessibilityNodeInfo? {
+        checkThread()
+        if (closed || id == 0L || view.get() !== host) return null
+        return nativeAccessibilityNode(id, host, node, focus)
+    }
+
+    internal fun accessibilityAction(host: GpuiView, node: Int, action: Int, arguments: android.os.Bundle?): Boolean {
+        checkThread()
+        return !closed && id != 0L && view.get() === host &&
+            nativeAccessibilityAction(id, host, node, action, arguments)
+    }
+
+    internal fun accessibilityHover(host: GpuiView, action: Int, x: Float, y: Float): Boolean {
+        checkThread()
+        return !closed && id != 0L && view.get() === host &&
+            nativeAccessibilityHover(id, host, action, x, y)
+    }
+
+    internal fun resetAccessibility() {
+        checkThread()
+        if (!closed && id != 0L) nativeAccessibilityReset(id)
+    }
     internal fun redraw() { checkThread(); if (!closed && id != 0L) nativeRedraw(id) }
     internal fun viewport(width: Int, height: Int, density: Float, insets: GpuiWindowInsets) {
         checkThread()
@@ -767,6 +795,10 @@ class GpuiSession : AutoCloseable {
         }
 
         @JvmStatic private external fun nativeCreate(host: GpuiSession, surface: Surface, width: Int, height: Int, density: Float): Long
+        @JvmStatic private external fun nativeAccessibilityNode(id: Long, host: android.view.View, node: Int, focus: Boolean): android.view.accessibility.AccessibilityNodeInfo?
+        @JvmStatic private external fun nativeAccessibilityAction(id: Long, host: android.view.View, node: Int, action: Int, arguments: android.os.Bundle?): Boolean
+        @JvmStatic private external fun nativeAccessibilityHover(id: Long, host: android.view.View, action: Int, x: Float, y: Float): Boolean
+        @JvmStatic private external fun nativeAccessibilityReset(id: Long)
         @JvmStatic private external fun nativeAttach(id: Long, surface: Surface, width: Int, height: Int, density: Float)
         @JvmStatic private external fun nativeDetach(id: Long)
         @JvmStatic private external fun nativeFrame(id: Long): Boolean

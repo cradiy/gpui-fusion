@@ -15,6 +15,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.accessibility.AccessibilityNodeProvider
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
@@ -26,6 +27,7 @@ import kotlin.math.hypot
 class GpuiView(context: Context, private val session: GpuiSession) :
     SurfaceView(context), SurfaceHolder.Callback2, Choreographer.FrameCallback {
     private val choreographer = Choreographer.getInstance()
+    private val accessibility = GpuiAccessibility(this, session)
     private val scroll = TouchScroll(context, session)
     private val pinch = TouchPinch(context, session::pinch)
     private val mouse = MouseInput(context, session)
@@ -74,11 +76,13 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         holder.addCallback(this)
         isFocusableInTouchMode = true
         isClickable = true
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
     }
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         session.bind(this)
+        accessibility.attach()
     }
 
     override fun onConfigurationChanged(configuration: Configuration) {
@@ -89,10 +93,14 @@ class GpuiView(context: Context, private val session: GpuiSession) :
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
-        if (changed) session.updatePictureInPictureSource()
+        if (changed) {
+            session.updatePictureInPictureSource()
+            accessibility.invalidate()
+        }
     }
 
     override fun onDetachedFromWindow() {
+        accessibility.detach()
         releaseSurface()
         session.unbind(this)
         super.onDetachedFromWindow()
@@ -114,6 +122,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         }
         surfaceReady = true
         requestFrame()
+        accessibility.invalidate()
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) = releaseSurface()
@@ -237,6 +246,12 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         }
         catch (error: RuntimeException) { session.fail(error); true }
     }
+
+    override fun getAccessibilityNodeProvider(): AccessibilityNodeProvider? =
+        if (initialized) accessibility.provider else super.getAccessibilityNodeProvider()
+
+    override fun dispatchHoverEvent(event: MotionEvent): Boolean =
+        accessibility.hover(event) || super.dispatchHoverEvent(event)
 
     override fun onHoverEvent(event: MotionEvent): Boolean =
         dispatchGenericMouse(event) || super.onHoverEvent(event)

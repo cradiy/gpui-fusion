@@ -48,6 +48,7 @@ struct Callbacks {
     hover: Option<Box<dyn FnMut(bool)>>,
     appearance: Option<Box<dyn FnMut()>>,
     font_size: Option<Box<dyn FnMut()>>,
+    reduced_motion: Option<Box<dyn FnMut()>>,
     resize: Option<Box<dyn FnMut(Size<Pixels>, f32)>>,
     insets: Option<Box<dyn FnMut(WindowInsets)>>,
     close: Option<Box<dyn FnOnce()>>,
@@ -71,6 +72,7 @@ pub(crate) struct AndroidWindow {
     pub active: Cell<bool>,
     pub appearance: Cell<WindowAppearance>,
     font_sizes: RefCell<HashMap<u32, Pixels>>,
+    reduced_motion: Cell<bool>,
     force_frame: Cell<bool>,
     recovery_retry_at: Cell<Option<Instant>>,
     recovery_failures: Cell<u32>,
@@ -98,6 +100,7 @@ impl AndroidWindow {
         appearance: WindowAppearance,
     ) -> Self {
         Self::watch_device(&renderer, &host);
+        let reduced_motion = host.prefers_reduced_motion().unwrap_or(false);
         Self {
             accessibility: RefCell::new(None),
             host,
@@ -121,6 +124,7 @@ impl AndroidWindow {
             active: Cell::new(false),
             appearance: Cell::new(appearance),
             font_sizes: RefCell::default(),
+            reduced_motion: Cell::new(reduced_motion),
             force_frame: Cell::new(true),
             recovery_retry_at: Cell::new(None),
             recovery_failures: Cell::new(0),
@@ -343,6 +347,20 @@ impl AndroidWindow {
             self.callbacks
                 .borrow_mut()
                 .font_size
+                .get_or_insert(callback);
+        }
+    }
+
+    pub(crate) fn reduced_motion_changed(&self, reduced: bool) {
+        if self.reduced_motion.replace(reduced) == reduced {
+            return;
+        }
+        let callback = self.callbacks.borrow_mut().reduced_motion.take();
+        if let Some(mut callback) = callback {
+            callback();
+            self.callbacks
+                .borrow_mut()
+                .reduced_motion
                 .get_or_insert(callback);
         }
     }
@@ -713,6 +731,12 @@ impl PlatformWindow for AndroidWindowHandle {
     }
     fn on_font_size_changed(&self, callback: Box<dyn FnMut()>) {
         self.callbacks.borrow_mut().font_size = Some(callback);
+    }
+    fn prefers_reduced_motion(&self) -> bool {
+        self.reduced_motion.get()
+    }
+    fn on_reduced_motion_changed(&self, callback: Box<dyn FnMut()>) {
+        self.callbacks.borrow_mut().reduced_motion = Some(callback);
     }
     fn scaled_font_size(&self, base_size: Pixels) -> Pixels {
         let value = f32::from(base_size);

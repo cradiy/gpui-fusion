@@ -1094,6 +1094,14 @@ impl Window {
                     .log_err();
             }
         }));
+        platform_window.on_reduced_motion_changed(Box::new({
+            let mut cx = cx.to_async();
+            move || {
+                handle
+                    .update(&mut cx, |_, window, _| window.refresh())
+                    .log_err();
+            }
+        }));
         platform_window.on_button_layout_changed(Box::new({
             let mut cx = cx.to_async();
             move || {
@@ -2057,6 +2065,15 @@ impl Window {
     /// Platforms without a text-size adapter return the base size unchanged.
     pub fn scaled_font_size(&self, base_size: Pixels) -> Pixels {
         self.platform_window.scaled_font_size(base_size)
+    }
+
+    /// Whether the system asks applications to reduce nonessential motion.
+    ///
+    /// Read during rendering to choose static content or disable an animation.
+    /// Preference changes refresh the window; GPUI does not automatically disable
+    /// animations. Platforms without an adapter return false.
+    pub fn prefers_reduced_motion(&self) -> bool {
+        self.platform_window.prefers_reduced_motion()
     }
 
     /// Device pixels per logical pixel for paint output, including the current capture density.

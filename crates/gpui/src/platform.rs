@@ -986,6 +986,13 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     }
     /// Notifies the window when system font-size conversion changes.
     fn on_font_size_changed(&self, _callback: Box<dyn FnMut()>) {}
+    /// Whether the system asks applications to reduce nonessential motion.
+    /// Platforms without an adapter return false.
+    fn prefers_reduced_motion(&self) -> bool {
+        false
+    }
+    /// Notifies the window when its reduced-motion preference changes.
+    fn on_reduced_motion_changed(&self, _callback: Box<dyn FnMut()>) {}
     fn display(&self) -> Option<Rc<dyn PlatformDisplay>>;
     fn mouse_position(&self) -> Point<Pixels>;
     fn modifiers(&self) -> Modifiers;

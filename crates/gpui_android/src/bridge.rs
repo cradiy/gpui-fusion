@@ -356,6 +356,14 @@ impl Host {
         })
     }
 
+    pub fn prefers_reduced_motion(&self) -> Result<bool> {
+        self.with_env(|env| {
+            Ok(env
+                .call_method(self.object.as_obj(), "prefersReducedMotion", "()Z", &[])?
+                .z()?)
+        })
+    }
+
     pub fn system_font_paths(&self) -> Result<Vec<std::path::PathBuf>> {
         self.with_env(|env| {
             let paths = JObjectArray::from(
@@ -740,6 +748,11 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         ),
         method("nativeFocus", "(JZ)V", focus as *mut c_void),
         method("nativeAppearance", "(JZ)V", appearance as *mut c_void),
+        method(
+            "nativeReducedMotionChanged",
+            "(JZ)V",
+            reduced_motion_changed as *mut c_void,
+        ),
         method(
             "nativeFontSizeChanged",
             "(J)V",
@@ -1306,6 +1319,21 @@ extern "system" fn appearance(mut env: JNIEnv, _: JClass, id: jlong, dark: jbool
 extern "system" fn font_size_changed(mut env: JNIEnv, _: JClass, id: jlong) {
     call(&mut env, |_| {
         session(id)?.platform.window.font_size_changed();
+        Ok(())
+    });
+}
+
+extern "system" fn reduced_motion_changed(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    reduced: jboolean,
+) {
+    call(&mut env, |_| {
+        session(id)?
+            .platform
+            .window
+            .reduced_motion_changed(reduced != 0);
         Ok(())
     });
 }

@@ -579,6 +579,30 @@ guaranteed before process termination: persist important state independently.
 See [Android memory callbacks](https://developer.android.com/reference/android/content/ComponentCallbacks2).
 Other backends may emit no events.
 
+### Reduced motion
+
+Read `window.prefers_reduced_motion()` during rendering to choose whether to
+animate. Preference changes refresh the window, including cached views.
+For effects with an `enabled` option:
+
+```rust,ignore
+gpui_effects::animated_style("card")
+    .enabled(!window.prefers_reduced_motion())
+    .bg(background)
+    .child(content)
+```
+
+Android reports reduced motion when the system's animator duration scale is
+zero, as set by Remove animations or the developer animation setting. A
+nonzero scale reports normal motion; the value does not adjust GPUI animation
+durations. GPUI does not automatically disable animations or media playback.
+The application chooses a static alternative or snaps to its target state.
+
+The preference is cached and observed for the session's lifetime, across View
+replacement. No permission or optional host feature is needed. Other backends
+currently return `false`, as does Android when the preference is unavailable.
+See [Android animator settings](https://developer.android.com/reference/android/provider/Settings.Global#ANIMATOR_DURATION_SCALE).
+
 ### System font size
 
 Use `window.scaled_font_size` during rendering to opt text into the system's

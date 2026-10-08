@@ -136,6 +136,9 @@ class GpuiSession : AutoCloseable {
     private var networkMonitor: NetworkMonitor? = null
     private var thermalMonitor: AutoCloseable? = null
     private var thermalStatus = 0
+    private var motionPreferences: MotionPreferences? = null
+
+    private fun prefersReducedMotion(): Boolean { checkThread(); return motionPreferences?.reduced ?: false }
 
     private fun thermalStatus(): Int { checkThread(); return thermalStatus }
 
@@ -362,6 +365,15 @@ class GpuiSession : AutoCloseable {
             componentContext = context
         }
         monitorThermalState(next.context.applicationContext)
+        if (motionPreferences == null) {
+            try {
+                motionPreferences = MotionPreferences(next.context, handler) { reduced ->
+                    if (!closed && id != 0L) nativeReducedMotionChanged(id, reduced)
+                }
+            } catch (error: RuntimeException) {
+                android.util.Log.w("GPUI", "Motion preferences unavailable", error)
+            }
+        }
     }
 
     internal fun unbind(previous: GpuiView) {
@@ -852,6 +864,12 @@ class GpuiSession : AutoCloseable {
             android.util.Log.w("GPUI", "Could not unregister thermal status listener", error)
         }
         thermalMonitor = null
+        try {
+            motionPreferences?.close()
+        } catch (error: Exception) {
+            android.util.Log.w("GPUI", "Could not unregister motion preference observer", error)
+        }
+        motionPreferences = null
         componentContext?.unregisterComponentCallbacks(componentCallbacks)
         componentContext = null
         cancelBackGesture()
@@ -927,6 +945,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeTrimMemory(id: Long, level: Int)
         @JvmStatic private external fun nativeThermalStateChanged(id: Long, status: Int)
         @JvmStatic private external fun nativeFontSizeChanged(id: Long)
+        @JvmStatic private external fun nativeReducedMotionChanged(id: Long, reduced: Boolean)
         @JvmStatic private external fun nativePictureInPictureChanged(id: Long, enabled: Boolean)
         @JvmStatic private external fun nativePictureInPictureResult(id: Long, error: String?)
         @JvmStatic private external fun nativeFocus(id: Long, active: Boolean)

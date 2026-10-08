@@ -105,6 +105,7 @@ fn main() {
                 memory_subscription: None,
                 thermal_subscription: None,
                 thermal_changes: 0,
+                motion_preview: 0,
                 thermal_status: String::new(),
                 memory_trims: 0,
                 memory_status: "No memory trim event received.".into(),
@@ -248,6 +249,7 @@ struct Counter {
     memory_subscription: Option<Subscription>,
     thermal_subscription: Option<Subscription>,
     thermal_changes: usize,
+    motion_preview: usize,
     thermal_status: String,
     memory_trims: usize,
     memory_status: String,
@@ -980,6 +982,28 @@ impl Counter {
             f32::from(window.scaled_font_size(px(16.))),
             f32::from(window.scaled_font_size(px(30.)))
         );
+        let reduced_motion = window.prefers_reduced_motion();
+        let motion_status = if reduced_motion {
+            "Motion: Reduced"
+        } else {
+            "Motion: Standard"
+        };
+        let motion_dot = div()
+            .size(px(16.))
+            .ml(px(120.))
+            .rounded_full()
+            .bg(rgb(0x5e96e8));
+        let motion_preview = if reduced_motion || self.motion_preview == 0 {
+            motion_dot.into_any_element()
+        } else {
+            motion_dot
+                .with_animation(
+                    ("motion-preview", self.motion_preview),
+                    Animation::new(std::time::Duration::from_millis(600)),
+                    |dot, progress| dot.ml(px(120. * progress)),
+                )
+                .into_any_element()
+        };
         div()
             .id("page")
             .size_full()
@@ -1002,6 +1026,13 @@ impl Counter {
                 .child("This text follows your system font size. 系统字号示例。"))
             .child(div().id("system-font-status").role(Role::Status)
                 .aria_label(font_status.clone()).text_xs().child(font_status))
+            .child(div().id("motion-status").role(Role::Status)
+                .aria_label(motion_status).text_sm().child(motion_status))
+            .child(button("motion-preview-button", "Preview motion").on_click(cx.listener(|this, _, _, cx| {
+                this.motion_preview += 1;
+                cx.notify();
+            })))
+            .child(div().h(px(16.)).flex_shrink_0().child(motion_preview))
             .child(div().text_xs().text_color(rgb(muted)).child({
                 let insets = window.insets();
                 format!(

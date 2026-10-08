@@ -1,7 +1,11 @@
 use crate::{FileBookmark, FileHandle, IoExecutor, unsupported};
 use anyhow::{Result, ensure};
 use futures::future::LocalBoxFuture;
-use std::{path::Path, sync::Arc};
+use std::{
+    ffi::OsString,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 /// Serializable directory reference. Native paths retain no additional OS permissions.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -55,8 +59,32 @@ pub struct CreateOptions {
     pub mime_type: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DirectoryEntryKind {
+    File,
+    Directory,
+    Symlink,
+    Other,
+}
+
+/// One immediate child. Native names retain their original OS encoding.
+#[derive(Clone, Debug)]
+pub struct DirectoryEntry {
+    pub name: OsString,
+    pub kind: DirectoryEntryKind,
+}
+
 /// A location can be a filesystem directory or a platform collection.
 pub trait PlatformLocation: Send + Sync {
+    fn open_file(&self, _relative_path: PathBuf) -> LocalBoxFuture<'static, Result<FileHandle>> {
+        Box::pin(async { Err(unsupported("location cannot look up existing files")) })
+    }
+    fn read_dir(
+        &self,
+        _relative_path: PathBuf,
+    ) -> LocalBoxFuture<'static, Result<Vec<DirectoryEntry>>> {
+        Box::pin(async { Err(unsupported("location cannot list directories")) })
+    }
     fn persist(&self) -> LocalBoxFuture<'static, Result<LocationBookmark>> {
         Box::pin(async { Err(unsupported("location does not support persistent access")) })
     }
@@ -79,6 +107,19 @@ pub trait PlatformLocation: Send + Sync {
 #[derive(Clone)]
 pub struct LocationHandle(Arc<dyn PlatformLocation>);
 impl LocationHandle {
+    /// Look up an existing file without creating it. Access is checked again when reading/writing.
+    pub async fn open_file(&self, relative_path: impl Into<PathBuf>) -> Result<FileHandle> {
+        let relative_path = relative_path.into();
+        validate_lookup_path(&relative_path, false)?;
+        self.0.open_file(relative_path).await
+    }
+    /// List immediate children, without sorting or recursion. An empty path selects this location.
+    /// Returns an in-memory listing, not an atomic snapshot or a directory watcher.
+    pub async fn read_dir(&self, relative_path: impl Into<PathBuf>) -> Result<Vec<DirectoryEntry>> {
+        let relative_path = relative_path.into();
+        validate_lookup_path(&relative_path, true)?;
+        self.0.read_dir(relative_path).await
+    }
     /// Retain access explicitly; store the returned bookmark in application settings.
     pub fn persist(&self) -> LocalBoxFuture<'static, Result<LocationBookmark>> {
         self.0.persist()
@@ -214,6 +255,25 @@ pub(crate) fn validate_name(name: &str) -> Result<()> {
 pub(crate) fn validate_relative_path(path: &str) -> Result<()> {
     for component in path.split('/') {
         validate_name(component)?;
+    }
+    Ok(())
+}
+
+fn validate_lookup_path(path: &Path, allow_empty: bool) -> Result<()> {
+    let bytes = path.as_os_str().as_encoded_bytes();
+    if allow_empty && bytes.is_empty() {
+        return Ok(());
+    }
+    for part in bytes.split(|byte| *byte == b'/' || (cfg!(windows) && *byte == b'\\')) {
+        ensure!(
+            !part.is_empty()
+                && part != b"."
+                && part != b".."
+                && !part.ends_with(b".")
+                && !part.ends_with(b" ")
+                && !part.iter().any(|b| matches!(b, b'\\' | b':' | 0)),
+            "expected a relative path without empty, dot or parent components"
+        );
     }
     Ok(())
 }

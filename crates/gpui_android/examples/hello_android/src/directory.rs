@@ -1,6 +1,6 @@
 use super::Counter;
 use gpui::Context;
-use gpui::gpui_io::{CreateOptions, LocationBookmark, SystemLocation};
+use gpui::gpui_io::{CreateOptions, DirectoryEntryKind, LocationBookmark, SystemLocation};
 
 pub enum Action {
     Choose,
@@ -8,6 +8,8 @@ pub enum Action {
     Restore,
     Release,
     TransferSample,
+    List,
+    TrashSample,
 }
 
 impl Counter {
@@ -33,6 +35,31 @@ impl Counter {
             let result: anyhow::Result<_> = async {
                 let location = io.location(SystemLocation::AppData).await?;
                 let storage = location.file("directory-bookmark.json")?;
+                if matches!(action, Action::TrashSample) {
+                    let downloads = io.location(SystemLocation::Downloads).await?;
+                    let id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis();
+                    #[cfg(target_os = "android")]
+                    {
+                        let private = location.create_file(format!("Trash/sample-{id}.txt"), CreateOptions::default()).await?;
+                        private.write(b"Keep without system trash".to_vec()).await?;
+                        anyhow::ensure!(!private.can_trash().await? && private.trash().await.is_err(), "Private file unexpectedly supports trash");
+                        anyhow::ensure!(private.read().await? == b"Keep without system trash", "Unsupported trash changed private contents");
+                        private.delete().await?;
+                    }
+                    let sample = downloads.create_file(format!("GPUI/Trash/sample-{id}.txt"), CreateOptions { mime_type: Some("text/plain".into()) }).await?;
+                    sample.write(b"GPUI recoverable trash sample".to_vec()).await?;
+                    if !sample.can_trash().await? {
+                        return Ok((format!("Trash unsupported. Sample retained: {}", sample.name()), selected));
+                    }
+                    sample.trash().await?;
+                    return Ok((format!("Sample moved to system trash: {}", sample.url().unwrap_or(sample.name())), selected));
+                }
+                if matches!(action, Action::List) {
+                    let directory = selected.ok_or_else(|| anyhow::anyhow!("Choose or restore a directory first"))?;
+                    let entries = directory.read_dir("").await?;
+                    let names = entries.iter().take(20).map(|entry| format!("{}{}", entry.name.to_string_lossy(), if entry.kind == DirectoryEntryKind::Directory { "/" } else { "" })).collect::<Vec<_>>().join("\n");
+                    return Ok((format!("{} entries (showing up to 20):\n{names}", entries.len()), Some(directory)));
+                }
                 if matches!(action, Action::Write | Action::TransferSample) {
                     let directory = selected.ok_or_else(|| anyhow::anyhow!("Choose or restore a directory first"))?;
                     let id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis();
@@ -50,6 +77,13 @@ impl Counter {
                         anyhow::ensure!(copy.read().await.is_err() && moved.read().await? == contents, "Directory move did not complete");
                         let final_file = moved.move_to(&directory, format!("GPUI/Transfers/moved-{id}.txt"), options).await?;
                         anyhow::ensure!(moved.read().await.is_err() && final_file.read().await? == contents, "Downloads move did not complete");
+                        let path = format!("GPUI/Transfers/{}", final_file.name());
+                        let reopened = directory.open_file(&path).await?;
+                        anyhow::ensure!(reopened.read().await? == contents, "Reopened contents differ");
+                        let entries = directory.read_dir("GPUI/Transfers").await?;
+                        anyhow::ensure!(entries.iter().any(|entry| entry.name == std::ffi::OsStr::new(final_file.name()) && entry.kind == DirectoryEntryKind::File), "Saved file missing from directory listing");
+                        anyhow::ensure!(directory.read_dir(&path).await.is_err() && directory.open_file("GPUI/Transfers").await.is_err(), "File/directory mismatch was accepted");
+                        anyhow::ensure!(directory.open_file(format!("GPUI/Transfers/missing-{id}.txt")).await.is_err(), "Missing file lookup succeeded");
                         source.delete().await?;
                         return Ok((format!("Copy, move, rename and delete verified. Saved GPUI/Transfers/{}", final_file.name()), Some(directory)));
                     }
@@ -85,7 +119,7 @@ impl Counter {
                         storage.write(b"null".to_vec()).await?;
                         Ok(("Directory access released. Contents were not deleted.".into(), None))
                     }
-                    Action::Write | Action::TransferSample => unreachable!(),
+                    Action::Write | Action::TransferSample | Action::List | Action::TrashSample => unreachable!(),
                 }
             }.await;
             let _ = this.update(cx, |this, cx| {

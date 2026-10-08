@@ -70,6 +70,41 @@ reader.read_exact(&mut header).await?;
 let remaining = reader.read_to_end_limited(4096).await?;
 ```
 
+## Reading directories and opening existing files
+
+`read_dir()` lists immediate children on an I/O worker. An empty relative path
+selects the location itself; a path such as `"Archive/2026"` selects a child
+directory. Results contain each child's `name` and `DirectoryEntryKind` and are
+not sorted or recursive. `open_file()` looks up an existing file without creating
+it. Both work with native directories and Android document-tree grants.
+
+```rust,ignore
+let entries = directory.read_dir("Archive").await?;
+for entry in entries {
+    if entry.kind == DirectoryEntryKind::File {
+        let file = directory.open_file(std::path::Path::new("Archive").join(entry.name)).await?;
+        let metadata = file.metadata().await?;
+    }
+}
+```
+
+Paths follow the relative-component restrictions of `create_file()`. Native
+names are `OsString` values so non-UTF-8 names can be passed back without lossy
+conversion. Android document paths require UTF-8. Native listings identify
+symbolic links without following them; opening a file or listing a directory
+through a symbolic link follows normal filesystem behavior. A location is not
+a filesystem sandbox.
+
+A listing is collected in memory and can become outdated while storage changes.
+Missing entries, lost access, and file/directory mismatches return errors.
+Android providers that report loading or query errors return an error rather
+than an incomplete listing; retry when appropriate. Name lookup rejects ambiguous
+duplicate display names. These APIs do not prompt for permission or query
+MediaStore collections. Use a selected document tree for directory browsing.
+
+The synchronous `file()` helper only constructs a native path handle and does
+not check existence. Use `open_file().await` for lookup across providers.
+
 ## Copying, moving, renaming, and deleting files
 
 Use a file handle as the source and a location as the destination. Destination
@@ -123,6 +158,36 @@ read-only selections and arbitrary shared content URIs are not deletable through
 this API. Access can still change after `can_delete()`. No permission dialog is
 opened automatically. Browser-selected files can be copy sources when a writable
 destination is supplied by an integration, but do not support deletion or moves.
+
+Use `trash()` to request recoverable removal instead. It never falls back to
+`delete()`. Applications choose which operation to offer and whether to ask for
+confirmation; `can_trash()` is an advisory capability check, not a reservation.
+
+```rust,ignore
+if file.can_trash().await? {
+    file.trash().await?;
+} else {
+    // Let the user or application policy choose what to do.
+}
+// Permanent removal is a separate, explicit operation:
+// file.delete().await?;
+```
+
+Linux uses the desktop trash, Windows uses the Recycle Bin, and macOS uses
+Finder's Trash through NSFileManager. Native operations accept regular files,
+not directories or symbolic links. The volume, permissions or system policy can
+still prevent trashing. macOS may require manually moving an item out of Trash
+rather than offering Finder's Put Back command.
+
+On Android 11 and later, published MediaStore files created by the application
+can be marked as trashed. Document-tree and picker files require Android API 37
+and a provider advertising trash support. Private filesystem paths, older
+document providers and browser handles return unsupported. The operation does
+not open a permission dialog or create an application-owned recycle directory.
+Close active readers and writers before trashing. Discard old handles/bookmarks
+after success; the provider may change the URI. Retention, expiry and restoration
+are controlled by the system/provider; this API does not enumerate or restore
+trash. Cancelling an already dispatched operation does not undo it.
 
 `can_rename().await` checks renaming support independently. `rename("report.pdf")`
 renames a single file within its current directory and returns its new handle.

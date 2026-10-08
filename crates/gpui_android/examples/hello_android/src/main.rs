@@ -1277,6 +1277,12 @@ impl Counter {
                             .child(button("transfer-sample", "Copy and move sample").on_click(
                                 cx.listener(|this, _, _, cx| this.directory_action(directory::Action::TransferSample, cx)),
                             ))
+                            .child(button("list-directory", "List directory").on_click(
+                                cx.listener(|this, _, _, cx| this.directory_action(directory::Action::List, cx)),
+                            ))
+                            .child(button("trash-sample", "Trash sample").on_click(
+                                cx.listener(|this, _, _, cx| this.directory_action(directory::Action::TrashSample, cx)),
+                            ))
                             .child(button("restore-directory", "Restore directory").on_click(
                                 cx.listener(|this, _, _, cx| this.directory_action(directory::Action::Restore, cx)),
                             ))

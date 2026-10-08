@@ -72,6 +72,12 @@ impl WriteOptions {
 
 /// Platform resource behind a file handle. Sessions own their resources independently.
 pub trait PlatformFile: Any + Debug + Send + Sync {
+    fn can_trash(&self) -> LocalBoxFuture<'static, Result<bool>> {
+        Box::pin(async { Ok(false) })
+    }
+    fn trash(&self) -> LocalBoxFuture<'static, Result<()>> {
+        Box::pin(async { Err(unsupported("file provider does not support trash")) })
+    }
     fn can_rename(&self) -> LocalBoxFuture<'static, Result<bool>> {
         Box::pin(async { Ok(false) })
     }
@@ -116,6 +122,15 @@ pub trait PlatformFile: Any + Debug + Send + Sync {
 pub struct FileHandle(Arc<dyn PlatformFile>);
 
 impl FileHandle {
+    /// Query trash support, independently of permanent deletion. Later access can still fail.
+    pub fn can_trash(&self) -> LocalBoxFuture<'static, Result<bool>> {
+        self.0.can_trash()
+    }
+    /// Move to the system/provider trash. Never falls back to permanent deletion.
+    /// Retention and restoration belong to the system/provider. Close active I/O first.
+    pub fn trash(&self) -> LocalBoxFuture<'static, Result<()>> {
+        self.0.trash()
+    }
     pub fn can_rename(&self) -> LocalBoxFuture<'static, Result<bool>> {
         self.0.can_rename()
     }

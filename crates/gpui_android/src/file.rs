@@ -159,6 +159,34 @@ impl std::fmt::Debug for AndroidFile {
     }
 }
 impl PlatformFile for AndroidFile {
+    fn can_trash(&self) -> LocalBoxFuture<'static, Result<bool>> {
+        let document = self.document.clone();
+        self.executor.run(move || {
+            document.call(|env| {
+                Ok(env
+                    .call_method(document.object.as_obj(), "canTrash", "()Z", &[])?
+                    .z()?)
+            })
+        })
+    }
+    fn trash(&self) -> LocalBoxFuture<'static, Result<()>> {
+        let document = self.document.clone();
+        self.executor.run(move || {
+            let supported = document.call(|env| {
+                Ok(env
+                    .call_method(document.object.as_obj(), "canTrash", "()Z", &[])?
+                    .z()?)
+            })?;
+            if !supported {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "file provider does not support trash",
+                )
+                .into());
+            }
+            document.void("trash")
+        })
+    }
     fn can_rename(&self) -> LocalBoxFuture<'static, Result<bool>> {
         let document = self.document.clone();
         self.executor.run(move || {

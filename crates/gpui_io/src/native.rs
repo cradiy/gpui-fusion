@@ -1,6 +1,7 @@
 use crate::{
-    BlockingWrite, CreateOptions, FileHandle, FileMetadata, FileReader, FileWriter, IoExecutor,
-    LocationHandle, PlatformFile, PlatformLocation, WriteMode, WriteOptions,
+    BlockingWrite, CreateOptions, DirectoryEntry, DirectoryEntryKind, FileHandle, FileMetadata,
+    FileReader, FileWriter, IoExecutor, LocationHandle, PlatformFile, PlatformLocation, WriteMode,
+    WriteOptions,
 };
 use anyhow::Result;
 use futures::future::LocalBoxFuture;
@@ -36,6 +37,28 @@ impl std::fmt::Debug for NativeFile {
     }
 }
 impl PlatformFile for NativeFile {
+    fn can_trash(&self) -> LocalBoxFuture<'static, Result<bool>> {
+        if !cfg!(any(
+            target_os = "linux",
+            target_os = "macos",
+            target_os = "windows"
+        )) {
+            return Box::pin(async { Ok(false) });
+        }
+        self.can_delete()
+    }
+    fn trash(&self) -> LocalBoxFuture<'static, Result<()>> {
+        let path = self.path.clone();
+        let writable = self.writable;
+        self.executor.run(move || {
+            anyhow::ensure!(writable, "file handle is read-only");
+            anyhow::ensure!(
+                std::fs::symlink_metadata(&path)?.is_file(),
+                "only regular files can be trashed"
+            );
+            crate::native_trash::trash(&path)
+        })
+    }
     fn can_rename(&self) -> LocalBoxFuture<'static, Result<bool>> {
         self.can_delete()
     }
@@ -196,6 +219,44 @@ struct NativeLocation {
     executor: IoExecutor,
 }
 impl PlatformLocation for NativeLocation {
+    fn open_file(&self, relative_path: PathBuf) -> LocalBoxFuture<'static, Result<FileHandle>> {
+        let path = self.path.join(relative_path);
+        let executor = self.executor.clone();
+        self.executor.run(move || {
+            anyhow::ensure!(
+                std::fs::metadata(&path)?.is_file(),
+                "path is not a regular file"
+            );
+            Ok(file(path, executor, true))
+        })
+    }
+    fn read_dir(
+        &self,
+        relative_path: PathBuf,
+    ) -> LocalBoxFuture<'static, Result<Vec<DirectoryEntry>>> {
+        let path = self.path.join(relative_path);
+        self.executor.run(move || {
+            std::fs::read_dir(path)?
+                .map(|entry| {
+                    let entry = entry?;
+                    let ty = entry.file_type()?;
+                    let kind = if ty.is_symlink() {
+                        DirectoryEntryKind::Symlink
+                    } else if ty.is_dir() {
+                        DirectoryEntryKind::Directory
+                    } else if ty.is_file() {
+                        DirectoryEntryKind::File
+                    } else {
+                        DirectoryEntryKind::Other
+                    };
+                    Ok(DirectoryEntry {
+                        name: entry.file_name(),
+                        kind,
+                    })
+                })
+                .collect()
+        })
+    }
     fn persist(&self) -> LocalBoxFuture<'static, Result<crate::LocationBookmark>> {
         let path = self.path.clone();
         self.executor.run(move || {

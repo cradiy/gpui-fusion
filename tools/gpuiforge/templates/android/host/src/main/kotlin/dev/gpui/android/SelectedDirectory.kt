@@ -4,6 +4,9 @@ import android.content.ContentResolver
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
+import android.database.Cursor
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.FileNotFoundException
 import java.io.IOException
 
@@ -27,21 +30,69 @@ internal class SelectedDirectory(
 
     fun persist(): String = DocumentGrants.persist(resolver, tree, true, persistableFlags)
 
+    private fun checkComplete(cursor: Cursor) {
+        if (cursor.extras.getBoolean(DocumentsContract.EXTRA_LOADING, false)) throw IOException("Directory is still loading; retry the query")
+        cursor.extras.getString(DocumentsContract.EXTRA_ERROR)?.let { throw IOException(it) }
+    }
+
+    private fun parts(relativePath: String): List<String> {
+        val parts = relativePath.split('/')
+        require(parts.all { it.isNotEmpty() && it != "." && it != ".." && !it.endsWith('.') && !it.endsWith(' ') && !it.contains('\\') && !it.contains(':') && !it.contains('\u0000') }) { "Invalid relative path" }
+        return parts
+    }
+
+    private fun resolve(relativePath: String): Pair<Uri, String> {
+        var current = root to Document.MIME_TYPE_DIR
+        if (relativePath.isEmpty()) return current
+        for (part in parts(relativePath)) {
+            require(current.second == Document.MIME_TYPE_DIR) { "Parent path is not a directory" }
+            current = child(current.first, part) ?: throw FileNotFoundException(relativePath)
+        }
+        return current
+    }
+
+    @Synchronized fun openFile(relativePath: String): SelectedDocument {
+        require(relativePath.isNotEmpty()) { "Expected a file path" }
+        val (uri, mime) = resolve(relativePath)
+        require(mime != Document.MIME_TYPE_DIR) { "Path is a directory" }
+        return SelectedDocument(resolver, uri, true)
+    }
+
+    @Synchronized fun readDir(relativePath: String): String {
+        val (parent, mime) = resolve(relativePath)
+        require(mime == Document.MIME_TYPE_DIR) { "Path is not a directory" }
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getDocumentId(parent))
+        val cursor = resolver.query(children, arrayOf(Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE), null, null, null)
+            ?: throw IOException("Unable to list directory")
+        val entries = JSONArray()
+        cursor.use {
+            while (it.moveToNext()) {
+                entries.put(JSONObject().put("name", it.getString(0)).put("directory", it.getString(1) == Document.MIME_TYPE_DIR))
+            }
+            checkComplete(it)
+        }
+        return entries.toString()
+    }
+
     private fun child(parent: Uri, name: String): Pair<Uri, String>? {
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, DocumentsContract.getDocumentId(parent))
         val cursor = resolver.query(children, arrayOf(Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE), null, null, null)
             ?: throw IOException("Unable to list directory")
         cursor.use {
+            var result: Pair<Uri, String>? = null
             while (it.moveToNext()) {
-                if (it.getString(1) == name) return DocumentsContract.buildDocumentUriUsingTree(tree, it.getString(0)) to it.getString(2)
+                if (it.getString(1) == name) {
+                    if (result != null) throw IOException("Ambiguous document name: $name")
+                    result = DocumentsContract.buildDocumentUriUsingTree(tree, it.getString(0)) to it.getString(2)
+                }
             }
+            checkComplete(it)
+            return result
         }
-        return null
     }
 
     @Synchronized fun create(relativePath: String, mime: String): SelectedDocument {
-        val parts = relativePath.split('/')
-        require(parts.all { it.isNotEmpty() && it != "." && it != ".." && !it.endsWith('.') && !it.endsWith(' ') && !it.contains('\\') && !it.contains(':') && !it.contains('\u0000') }) { "Invalid relative path" }
+        val parts = parts(relativePath)
         require(mime.matches(Regex("[^/\\s]+/[^/\\s]+")) && !mime.contains('*') && mime != Document.MIME_TYPE_DIR) { "A concrete file MIME type is required" }
         var parent = root
         for (part in parts.dropLast(1)) {

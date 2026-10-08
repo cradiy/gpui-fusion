@@ -2,13 +2,14 @@ use crate::file::{Document, selected_file};
 use anyhow::{Result, ensure};
 use futures::future::LocalBoxFuture;
 use gpui::gpui_io::{
-    CreateOptions, FileHandle, IoExecutor, LocationBookmark, LocationHandle, PlatformLocation,
+    CreateOptions, DirectoryEntry, DirectoryEntryKind, FileHandle, IoExecutor, LocationBookmark,
+    LocationHandle, PlatformLocation,
 };
 use jni::{
     JavaVM,
     objects::{GlobalRef, JString, JValue},
 };
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 pub(crate) fn selected_directory(
     vm: Arc<JavaVM>,
@@ -41,6 +42,68 @@ struct Directory {
 }
 
 impl PlatformLocation for Directory {
+    fn open_file(&self, relative_path: PathBuf) -> LocalBoxFuture<'static, Result<FileHandle>> {
+        let document = self.document.clone();
+        let executor = self.executor.clone();
+        self.executor.run(move || {
+            let object =
+                document.call(|env| {
+                    let path = env.new_string(relative_path.to_str().ok_or_else(|| {
+                        anyhow::anyhow!("Android document paths must be UTF-8")
+                    })?)?;
+                    let file = env
+                        .call_method(
+                            document.object.as_obj(),
+                            "openFile",
+                            "(Ljava/lang/String;)Ldev/gpui/android/SelectedDocument;",
+                            &[JValue::Object(path.as_ref())],
+                        )?
+                        .l()?;
+                    Ok(env.new_global_ref(file)?)
+                })?;
+            selected_file(document.vm.clone(), object, executor)
+        })
+    }
+
+    fn read_dir(
+        &self,
+        relative_path: PathBuf,
+    ) -> LocalBoxFuture<'static, Result<Vec<DirectoryEntry>>> {
+        let document = self.document.clone();
+        self.executor.run(move || {
+            let json: String =
+                document.call(|env| {
+                    let path = env.new_string(relative_path.to_str().ok_or_else(|| {
+                        anyhow::anyhow!("Android document paths must be UTF-8")
+                    })?)?;
+                    let value = env
+                        .call_method(
+                            document.object.as_obj(),
+                            "readDir",
+                            "(Ljava/lang/String;)Ljava/lang/String;",
+                            &[JValue::Object(path.as_ref())],
+                        )?
+                        .l()?;
+                    Ok(env.get_string(&JString::from(value))?.into())
+                })?;
+            #[derive(serde::Deserialize)]
+            struct Entry {
+                name: String,
+                directory: bool,
+            }
+            Ok(serde_json::from_str::<Vec<Entry>>(&json)?
+                .into_iter()
+                .map(|entry| DirectoryEntry {
+                    name: entry.name.into(),
+                    kind: if entry.directory {
+                        DirectoryEntryKind::Directory
+                    } else {
+                        DirectoryEntryKind::File
+                    },
+                })
+                .collect())
+        })
+    }
     fn persist(&self) -> LocalBoxFuture<'static, Result<LocationBookmark>> {
         let document = self.document.clone();
         self.executor.run(move || {

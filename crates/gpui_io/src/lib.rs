@@ -4,6 +4,7 @@ mod executor;
 mod file;
 mod location;
 mod native;
+mod native_trash;
 mod session;
 mod transfer;
 

@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.DocumentsContract
@@ -15,7 +16,35 @@ import java.io.OutputStream
 internal class SelectedDocument(private val resolver: ContentResolver, private val uri: Uri, private val writable: Boolean, private var pending: Boolean = false, private val persistableFlags: Int = 0, private val ownedCollection: Boolean = pending) {
     private var outputOpen = false
     private var discarded = false
+    private var trashed = false
     fun canWrite(): Boolean = writable
+    @Synchronized fun canTrash(): Boolean {
+        if (!writable || pending || discarded || trashed || outputOpen) return false
+        if (ownedCollection) {
+            if (Build.VERSION.SDK_INT < 30) return false
+            return resolver.query(uri, arrayOf(MediaStore.MediaColumns.IS_TRASHED), null, null, null)?.use {
+                it.moveToFirst() && it.getInt(0) == 0
+            } ?: false
+        }
+        if (Build.VERSION.SDK_INT < 37) return false
+        // API 37 is accessed through its public API while the host compiles against SDK 36.
+        val flag = try { DocumentsContract.Document::class.java.getField("FLAG_SUPPORTS_TRASH").getInt(null) }
+            catch (_: ReflectiveOperationException) { return false }
+        return supports(flag)
+    }
+    @Synchronized fun trash() {
+        if (!canTrash()) throw UnsupportedOperationException("File does not support trash")
+        if (ownedCollection) {
+            val values = ContentValues().apply { put(MediaStore.MediaColumns.IS_TRASHED, 1) }
+            check(resolver.update(uri, values, null, null) == 1) { "Provider did not trash the file" }
+        } else {
+            try {
+                val method = DocumentsContract::class.java.getMethod("trashDocument", ContentResolver::class.java, Uri::class.java)
+                check(method.invoke(null, resolver, uri) != null) { "Provider did not return the trashed document" }
+            } catch (error: java.lang.reflect.InvocationTargetException) { throw error.targetException }
+        }
+        trashed = true
+    }
     @Synchronized fun canDelete(): Boolean = supports(DocumentsContract.Document.FLAG_SUPPORTS_DELETE)
     @Synchronized fun canRename(): Boolean = !pending && supports(DocumentsContract.Document.FLAG_SUPPORTS_RENAME)
     private fun supports(flag: Int): Boolean {

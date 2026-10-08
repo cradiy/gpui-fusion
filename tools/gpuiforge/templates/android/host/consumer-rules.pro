@@ -11,4 +11,5 @@
 # gpuiforge:endif
 # gpuiforge:if media
 -keep class dev.gpui.android.MediaSession { *; }
+-keep class dev.gpui.android.MediaFrames { *; }
 # gpuiforge:endif

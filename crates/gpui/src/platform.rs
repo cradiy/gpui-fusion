@@ -850,6 +850,27 @@ pub enum HapticFeedback {
     GestureEnd,
 }
 
+/// Foreground color of system-bar icons and text, independently of their background.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SystemBarStyle {
+    /// Follow the system light/dark appearance.
+    #[default]
+    Automatic,
+    /// Light icons and text for a dark background.
+    Light,
+    /// Dark icons and text for a light background.
+    Dark,
+}
+
+/// Foreground appearance of the status and navigation bars.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SystemBarAppearance {
+    /// Foreground of the status bar, including the clock and status icons.
+    pub status: SystemBarStyle,
+    /// Foreground of the navigation bar, including buttons or the gesture indicator.
+    pub navigation: SystemBarStyle,
+}
+
 /// System occlusion and host avoidance, in logical pixels from the host window edges.
 /// Use [`Self::effective`] for additional padding inside GPUI's current viewport.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1116,6 +1137,11 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn update_ime_position(&self, _bounds: Bounds<Pixels>);
 
     // Mobile platform methods.
+
+    /// Requests system-bar foreground styles. Returns false when unsupported.
+    fn set_system_bar_appearance(&self, _appearance: SystemBarAppearance) -> bool {
+        false
+    }
 
     /// The regions of this window currently obscured or reserved by the
     /// system. Zero on platforms without such regions.

@@ -215,6 +215,26 @@ impl Host {
                 .z()?)
         })
     }
+    pub fn set_system_bar_appearance(&self, appearance: gpui::SystemBarAppearance) -> Result<bool> {
+        let encode = |style| match style {
+            gpui::SystemBarStyle::Automatic => 0,
+            gpui::SystemBarStyle::Light => 1,
+            gpui::SystemBarStyle::Dark => 2,
+        };
+        self.with_env(|env| {
+            Ok(env
+                .call_method(
+                    self.object.as_obj(),
+                    "setSystemBarAppearance",
+                    "(II)Z",
+                    &[
+                        JValue::Int(encode(appearance.status)),
+                        JValue::Int(encode(appearance.navigation)),
+                    ],
+                )?
+                .z()?)
+        })
+    }
     pub fn supports_picture_in_picture(&self) -> Result<bool> {
         self.with_env(|env| {
             Ok(env

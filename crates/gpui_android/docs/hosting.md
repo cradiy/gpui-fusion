@@ -259,6 +259,23 @@ For independent header and footer placement, use `safe_area.top` and
 pixels and must not be scaled by display density again. Insets can change with
 rotation, navigation mode, system-bar visibility and keyboard animation.
 
+Choose readable system-bar foreground colors when drawing behind the bars:
+
+```rust
+window.set_system_bar_appearance(gpui::SystemBarAppearance {
+    status: gpui::SystemBarStyle::Light,
+    navigation: gpui::SystemBarStyle::Light,
+});
+```
+
+`Light` means light icons and text on a dark background; `Dark` means dark
+foreground on a light background. `Automatic` follows the system theme and is
+the default. Status and navigation styles are independent. The setting retains
+across Activity recreation and does not change bar visibility or layout. The
+method returns `false` on unsupported platforms or hosts. A custom Android host
+uses `GpuiSession.setOnSystemBarAppearanceChanged` to apply retained styles to
+its current window and clears the callback when detaching.
+
 Embedded hosts supply `GpuiWindowInsets` with physical-pixel `EdgeInsets` for
 `safeArea`, `ime`, and `consumed`, all measured from the same host window edges.
 Include the View's placement and any `viewportBottomInset` in `consumed`.

@@ -39,6 +39,9 @@ class GpuiSession : AutoCloseable {
     private var backChanged: Consumer<Boolean>? = null
     private var fullscreen = false
     private var fullscreenChanged: Consumer<Boolean>? = null
+    private var systemBarAppearance = SystemBarAppearance()
+    private var systemBarAppearanceChanged: Consumer<SystemBarAppearance>? = null
+    private var systemBarAppearancePosted = false
     private var pictureInPicture = false
 // gpuiforge:if media
     private var pictureInPictureHost: PictureInPictureHost? = null
@@ -459,6 +462,29 @@ class GpuiSession : AutoCloseable {
         return true
     }
 
+    /** Applies retained foreground styles to the current host window. Main thread only. */
+    fun setOnSystemBarAppearanceChanged(callback: Consumer<SystemBarAppearance>?) {
+        checkThread()
+        systemBarAppearanceChanged = callback
+        callback?.accept(systemBarAppearance)
+    }
+
+    private fun setSystemBarAppearance(status: Int, navigation: Int): Boolean {
+        checkThread()
+        if (closed || systemBarAppearanceChanged == null) return false
+        val next = SystemBarAppearance(SystemBarStyle.entries[status], SystemBarStyle.entries[navigation])
+        if (systemBarAppearance == next) return true
+        systemBarAppearance = next
+        if (!systemBarAppearancePosted) {
+            systemBarAppearancePosted = true
+            handler.postAtTime({
+                systemBarAppearancePosted = false
+                if (!closed) systemBarAppearanceChanged?.accept(systemBarAppearance)
+            }, this, SystemClock.uptimeMillis())
+        }
+        return true
+    }
+
     /** Dispatches committed system Back after the IME has had a chance to consume it. */
     fun handleSystemBack(): Boolean {
         checkThread()
@@ -703,6 +729,10 @@ class GpuiSession : AutoCloseable {
                 fullscreen = false
                 fullscreenChanged?.accept(false)
                 fullscreenChanged = null
+                systemBarAppearance = SystemBarAppearance()
+                systemBarAppearanceChanged?.accept(systemBarAppearance)
+                systemBarAppearanceChanged = null
+                systemBarAppearancePosted = false
                 pictureInPicture = false
 // gpuiforge:if media
                 pictureInPictureHost = null

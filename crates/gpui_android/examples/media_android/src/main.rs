@@ -469,6 +469,10 @@ fn log_state(state: &gpui_media::PlaybackState) {
 
 impl Render for MediaDemo {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        window.set_system_bar_appearance(SystemBarAppearance {
+            status: SystemBarStyle::Light,
+            navigation: SystemBarStyle::Light,
+        });
         let fullscreen = window.is_fullscreen();
         let mut column = div()
             .id("media-demo")

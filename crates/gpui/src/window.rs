@@ -1641,6 +1641,13 @@ impl Window {
         self.platform_window.insets()
     }
 
+    /// Sets system-bar icon and text colors without changing visibility or layout.
+    /// Supported by the Android host; other platforms return false without changes.
+    /// Automatic styles follow the system theme, not the application's background.
+    pub fn set_system_bar_appearance(&mut self, appearance: crate::SystemBarAppearance) -> bool {
+        self.platform_window.set_system_bar_appearance(appearance)
+    }
+
     /// Promotes the active process-local drag to the platform drag-and-drop protocol.
     ///
     /// This keeps the typed payload inside GPUI. The platform transports only the opaque session

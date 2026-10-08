@@ -23,6 +23,7 @@ abstract class GpuiActivity : Activity() {
     protected open fun insetHandling() = InsetHandling.APPLICATION
     private lateinit var session: GpuiSession
     private lateinit var fullscreen: FullscreenHost
+    private var systemBarAppearance = SystemBarAppearance()
     private var backEnabled = false
     private var resumed = false
     private var imeVisible = false
@@ -46,6 +47,10 @@ abstract class GpuiActivity : Activity() {
         session = retained ?: GpuiSession()
         fullscreen = FullscreenHost(window)
         session.setOnFullscreenChanged { fullscreen.setEnabled(it) }
+        session.setOnSystemBarAppearanceChanged {
+            systemBarAppearance = it
+            applySystemBarAppearance()
+        }
         if (retained == null) session.onOpenIntent(intent)
         session.attachPermissionHost(this)
 // gpuiforge:if media
@@ -115,6 +120,24 @@ abstract class GpuiActivity : Activity() {
 
     override fun onRetainNonConfigurationInstance(): Any? = if (session.isClosed()) null else session
 
+    override fun onConfigurationChanged(configuration: android.content.res.Configuration) {
+        super.onConfigurationChanged(configuration)
+        applySystemBarAppearance()
+    }
+
+    private fun applySystemBarAppearance() {
+        val dark = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        fun darkIcons(style: SystemBarStyle) = when (style) {
+            SystemBarStyle.AUTOMATIC -> !dark
+            SystemBarStyle.LIGHT -> false
+            SystemBarStyle.DARK -> true
+        }
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = darkIcons(systemBarAppearance.status)
+        controller.isAppearanceLightNavigationBars = darkIcons(systemBarAppearance.navigation)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
 // gpuiforge:if notifications
@@ -156,6 +179,7 @@ abstract class GpuiActivity : Activity() {
         backRegistration = null
         session.setOnBackEnabledChanged(null)
         session.setOnFullscreenChanged(null)
+        session.setOnSystemBarAppearanceChanged(null)
         fullscreen.setEnabled(false)
         session.setOnCloseRequested(null)
         session.setOnError(null)

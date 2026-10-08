@@ -54,6 +54,7 @@ pub(crate) struct AndroidWindow {
     host: Arc<crate::bridge::Host>,
     back_enabled: Cell<bool>,
     fullscreen: Cell<bool>,
+    system_bar_appearance: Cell<Option<SystemBarAppearance>>,
     picture_in_picture: Cell<bool>,
     picture_in_picture_request: RefCell<Option<oneshot::Sender<Result<()>>>>,
     picture_in_picture_source: Cell<Option<Bounds<Pixels>>>,
@@ -93,6 +94,7 @@ impl AndroidWindow {
             host,
             back_enabled: Cell::new(false),
             fullscreen: Cell::new(false),
+            system_bar_appearance: Cell::new(None),
             picture_in_picture: Cell::new(false),
             picture_in_picture_request: RefCell::default(),
             picture_in_picture_source: Cell::default(),
@@ -166,7 +168,14 @@ impl AndroidWindow {
             .as_ref()
             .is_some_and(|current| current.is_same_window(&native));
         let drawable_size = size(DevicePixels(width), DevicePixels(height));
-        if same_window {
+        // EGL can retain the old native buffer size until its next swap. Recreate
+        // the presentation surface on GL resize so the first frame fills the window,
+        // including when an idle application does not schedule a subsequent frame.
+        let recreate_egl_surface = self.renderer.borrow().viewport_size() != drawable_size
+            && context.borrow().as_ref().is_some_and(|context| {
+                context.adapter.get_info().backend == gpui_wgpu::wgpu::Backend::Gl
+            });
+        if same_window && !recreate_egl_surface {
             self.renderer
                 .borrow_mut()
                 .update_drawable_size(drawable_size);
@@ -547,6 +556,22 @@ impl PlatformWindow for AndroidWindowHandle {
     }
     fn is_fullscreen(&self) -> bool {
         self.fullscreen.get()
+    }
+    fn set_system_bar_appearance(&self, appearance: SystemBarAppearance) -> bool {
+        if self.system_bar_appearance.get() == Some(appearance) {
+            return true;
+        }
+        match self.host.set_system_bar_appearance(appearance) {
+            Ok(true) => {
+                self.system_bar_appearance.set(Some(appearance));
+                true
+            }
+            Ok(false) => false,
+            Err(error) => {
+                log::error!("Android system-bar appearance request failed: {error}");
+                false
+            }
+        }
     }
     fn supports_picture_in_picture(&self) -> bool {
         self.host.supports_picture_in_picture().unwrap_or(false)

@@ -352,6 +352,7 @@ impl Application {
 }
 
 type Handler = Box<dyn FnMut(&mut App) -> bool + 'static>;
+type MemoryTrimHandler = Box<dyn FnMut(crate::MemoryTrimLevel, &mut App)>;
 type Listener = Box<dyn FnMut(&dyn Any, &mut App) -> bool + 'static>;
 pub(crate) type KeystrokeObserver =
     Box<dyn FnMut(&KeystrokeEvent, &mut Window, &mut App) -> bool + 'static>;
@@ -736,6 +737,7 @@ pub struct App {
     pub(crate) keystroke_interceptors: SubscriberSet<(), KeystrokeObserver>,
     pub(crate) keyboard_layout_observers: SubscriberSet<(), Handler>,
     pub(crate) thermal_state_observers: SubscriberSet<(), Handler>,
+    memory_trim_observers: SubscriberSet<(), MemoryTrimHandler>,
     pub(crate) release_listeners: SubscriberSet<EntityId, ReleaseListener>,
     pub(crate) global_observers: SubscriberSet<TypeId, Handler>,
     pub(crate) quit_observers: SubscriberSet<(), QuitHandler>,
@@ -862,6 +864,7 @@ impl App {
                 keystroke_interceptors: SubscriberSet::new(),
                 keyboard_layout_observers: SubscriberSet::new(),
                 thermal_state_observers: SubscriberSet::new(),
+                memory_trim_observers: SubscriberSet::new(),
                 global_observers: SubscriberSet::new(),
                 quit_observers: SubscriberSet::new(),
                 restart_observers: SubscriberSet::new(),
@@ -930,6 +933,20 @@ impl App {
                     cx.thermal_state_observers
                         .clone()
                         .retain(&(), move |callback| (callback)(cx));
+                }
+            }
+        }));
+
+        platform.on_memory_trim(Box::new({
+            let app = Rc::downgrade(&app);
+            move |level| {
+                if let Some(app) = app.upgrade() {
+                    app.borrow_mut().update(|cx| {
+                        cx.memory_trim_observers.clone().retain(&(), |callback| {
+                            callback(level, cx);
+                            true
+                        });
+                    });
                 }
             }
         }));
@@ -1369,6 +1386,19 @@ impl App {
                 true
             }),
         );
+        activate();
+        subscription
+    }
+
+    /// Invokes a foreground-thread callback when the OS recommends releasing memory.
+    /// Keep the subscription to receive events. No cache is cleared automatically.
+    /// Unsupported backends do not emit events. Events are not guaranteed before
+    /// termination; persist application data independently of this callback.
+    pub fn on_memory_trim(
+        &self,
+        callback: impl FnMut(crate::MemoryTrimLevel, &mut App) + 'static,
+    ) -> Subscription {
+        let (subscription, activate) = self.memory_trim_observers.insert((), Box::new(callback));
         activate();
         subscription
     }

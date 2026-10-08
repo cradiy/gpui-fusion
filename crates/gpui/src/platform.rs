@@ -7,7 +7,7 @@ mod keystroke;
 mod share;
 mod system_services;
 mod tray;
-pub use system_services::{AppSettings, NetworkStatus};
+pub use system_services::{AppSettings, MemoryTrimLevel, NetworkStatus};
 
 #[cfg(all(target_os = "linux", feature = "wayland"))]
 #[expect(missing_docs)]
@@ -391,11 +391,16 @@ pub trait Platform: 'static {
     /// Desktop platforms never invoke this.
     fn on_app_lifecycle(&self, _callback: Box<dyn FnMut(AppLifecyclePhase)>) {}
 
-    /// Registers a callback invoked when the OS signals memory pressure
-    /// (iOS `didReceiveMemoryWarning`, Android `onTrimMemory`).
-    ///
-    /// Desktop platforms never invoke this.
+    /// Registers a callback invoked when the OS signals memory pressure.
+    /// Background transitions are not memory warnings.
     fn on_memory_warning(&self, _callback: Box<dyn FnMut()>) {}
+
+    /// Registers a foreground-thread callback for OS memory reclamation advice.
+    /// Never invoke inline during registration or from inside a GPUI platform call.
+    /// The default adapter maps an ungraded memory warning to critical pressure.
+    fn on_memory_trim(&self, mut callback: Box<dyn FnMut(MemoryTrimLevel)>) {
+        self.on_memory_warning(Box::new(move || callback(MemoryTrimLevel::Critical)));
+    }
 
     /// The platform's gesture recognition services, if it provides any
     /// beyond gpui's portable recognizers. See

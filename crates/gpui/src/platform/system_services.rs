@@ -21,3 +21,17 @@ pub enum AppSettings {
     /// The application's notification preferences.
     Notifications,
 }
+
+/// Why the operating system recommends releasing rebuildable memory.
+/// These are advisory events, not a guarantee of notice before process termination.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MemoryTrimLevel {
+    /// The application's UI is no longer visible. Release unused UI resources.
+    UiHidden,
+    /// The process is eligible for background reclamation. Reduce rebuildable caches.
+    Background,
+    /// The system reports memory pressure. Release unneeded allocations.
+    Moderate,
+    /// The system reports severe memory pressure. Release nonessential resources promptly.
+    Critical,
+}

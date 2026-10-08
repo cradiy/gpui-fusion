@@ -16,6 +16,9 @@ use std::{
     sync::Arc,
 };
 
+type MemoryTrimCallback = Rc<RefCell<Box<dyn FnMut(MemoryTrimLevel)>>>;
+type MemoryWarningCallback = Rc<RefCell<Box<dyn FnMut()>>>;
+
 /// Platform owned by one Android `GpuiSession`. Its window survives View and
 /// Surface replacement until the session is explicitly closed.
 pub struct AndroidPlatform {
@@ -32,6 +35,8 @@ pub struct AndroidPlatform {
     pub(crate) services: Rc<crate::system_services::SystemServices>,
     handle: Cell<Option<AnyWindowHandle>>,
     lifecycle: RefCell<Option<Box<dyn FnMut(AppLifecyclePhase)>>>,
+    memory_trim: RefCell<Option<MemoryTrimCallback>>,
+    memory_warning: RefCell<Option<MemoryWarningCallback>>,
     quit: RefCell<Option<Box<dyn FnMut()>>>,
     open_urls: RefCell<Option<Box<dyn FnMut(Vec<String>)>>>,
     pending_urls: RefCell<Vec<String>>,
@@ -106,6 +111,8 @@ impl AndroidPlatform {
             window,
             handle: Cell::new(None),
             lifecycle: RefCell::default(),
+            memory_trim: RefCell::default(),
+            memory_warning: RefCell::default(),
             quit: RefCell::default(),
             open_urls: RefCell::default(),
             pending_urls: RefCell::default(),
@@ -120,7 +127,31 @@ impl AndroidPlatform {
         }
     }
 
+    pub(crate) fn trim_memory(&self, level: i32) {
+        let level = match level {
+            80.. => MemoryTrimLevel::Critical,
+            60.. => MemoryTrimLevel::Moderate,
+            40.. => MemoryTrimLevel::Background,
+            20.. => MemoryTrimLevel::UiHidden,
+            15.. => MemoryTrimLevel::Critical,
+            5.. => MemoryTrimLevel::Moderate,
+            _ => return,
+        };
+        let callback = self.memory_trim.borrow().clone();
+        if let Some(callback) = callback {
+            callback.borrow_mut()(level);
+        }
+        if matches!(level, MemoryTrimLevel::Moderate | MemoryTrimLevel::Critical) {
+            let callback = self.memory_warning.borrow().clone();
+            if let Some(callback) = callback {
+                callback.borrow_mut()();
+            }
+        }
+    }
+
     pub(crate) fn close(&self) {
+        self.memory_trim.borrow_mut().take();
+        self.memory_warning.borrow_mut().take();
         self.open_urls.borrow_mut().take();
         self.pending_urls.borrow_mut().clear();
         self.permissions.close();
@@ -356,6 +387,12 @@ impl Platform for AndroidPlatform {
     fn on_system_wake(&self, _: Box<dyn FnMut()>) {}
     fn on_app_lifecycle(&self, callback: Box<dyn FnMut(AppLifecyclePhase)>) {
         *self.lifecycle.borrow_mut() = Some(callback);
+    }
+    fn on_memory_trim(&self, callback: Box<dyn FnMut(MemoryTrimLevel)>) {
+        *self.memory_trim.borrow_mut() = Some(Rc::new(RefCell::new(callback)));
+    }
+    fn on_memory_warning(&self, callback: Box<dyn FnMut()>) {
+        *self.memory_warning.borrow_mut() = Some(Rc::new(RefCell::new(callback)));
     }
     fn set_menus(&self, _: Vec<Menu>, _: &Keymap) {}
     fn set_dock_menu(&self, _: Vec<MenuItem>, _: &Keymap) {}

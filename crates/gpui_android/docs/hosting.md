@@ -547,6 +547,38 @@ the user changed a permission. Recheck permission status after returning.
 Unavailable settings activities and inactive Views return errors. These APIs
 are currently implemented on Android; other platforms return `Unsupported`.
 
+### Memory reclamation
+
+Use `cx.on_memory_trim` to release application-owned caches when the operating
+system recommends it:
+
+```rust,ignore
+let subscription = cx.on_memory_trim(|level, cx| {
+    match level {
+        gpui::MemoryTrimLevel::UiHidden => { /* Drop unused UI caches. */ }
+        gpui::MemoryTrimLevel::Background => { /* Reduce rebuildable caches. */ }
+        gpui::MemoryTrimLevel::Moderate => { /* Release unneeded allocations. */ }
+        gpui::MemoryTrimLevel::Critical => { /* Release nonessential resources promptly. */ }
+    }
+});
+```
+
+Retain the subscription to receive events. Dropping it stops delivery. Callbacks
+run on the GPUI thread and should return promptly. GPUI does not clear application
+data, stop transfers, or force garbage collection.
+
+`GpuiSession` registers with the application context and unregisters on close.
+Embedded Views require no Activity callback forwarding. Subscriptions survive
+View and Surface recreation, including retained Activity recreation.
+
+Android 14 and later send `UiHidden` and `Background` trim advice, but no longer
+send the older pressure levels or `onLowMemory`. On earlier releases, running
+moderate/low and background moderate pressure map to `Moderate`; running critical,
+background complete, and `onLowMemory` map to `Critical`. These events are not
+guaranteed before process termination: persist important state independently.
+See [Android memory callbacks](https://developer.android.com/reference/android/content/ComponentCallbacks2).
+Other backends may emit no events.
+
 ### Network state
 
 Add `"android.permission.ACCESS_NETWORK_STATE"` to

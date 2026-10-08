@@ -102,6 +102,9 @@ fn main() {
                 permission_status: "Microphone permission has not been requested.".into(),
                 network_status: "Network monitoring is stopped.".into(),
                 network_subscription: None,
+                memory_subscription: None,
+                memory_trims: 0,
+                memory_status: "No memory trim event received.".into(),
                 settings_status: String::new(),
                 background_status: "Start a 60-second execution demo, then press Home.".into(),
                 background_task: None,
@@ -132,6 +135,7 @@ fn main() {
             });
             view.update(cx, |this, cx| {
                 this.toggle_network(cx);
+                this.toggle_memory_trim(cx);
                 cx.observe(&uic::components::modal::layer(cx), |_, _, cx| cx.notify())
                     .detach();
                 cx.subscribe(&this.title, |this, _, event, cx| {
@@ -237,6 +241,9 @@ struct Counter {
     permission_status: String,
     network_status: String,
     network_subscription: Option<Subscription>,
+    memory_subscription: Option<Subscription>,
+    memory_trims: usize,
+    memory_status: String,
     settings_status: String,
     background_status: String,
     background_task: Option<Task<()>>,
@@ -282,6 +289,23 @@ fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
 }
 
 impl Counter {
+    fn toggle_memory_trim(&mut self, cx: &mut Context<Self>) {
+        if self.memory_subscription.take().is_some() {
+            self.memory_status = "Memory monitoring is stopped.".into();
+        } else {
+            let entity = cx.entity().downgrade();
+            self.memory_subscription = Some(cx.on_memory_trim(move |level, cx| {
+                let _ = entity.update(cx, |this, cx| {
+                    this.memory_trims += 1;
+                    this.memory_status = format!("Memory trim {}: {level:?}", this.memory_trims);
+                    cx.notify();
+                });
+            }));
+            self.memory_status = "Waiting for a memory trim event. Try pressing Home.".into();
+        }
+        cx.notify();
+    }
+
     fn toggle_network(&mut self, cx: &mut Context<Self>) {
         if self.network_subscription.take().is_some() {
             self.network_status = "Network monitoring is stopped.".into();
@@ -1125,6 +1149,8 @@ impl Counter {
             .child(div().id("settings-status").role(Role::Status).aria_label(self.settings_status.clone()).text_sm().child(self.settings_status.clone()))
             .child(button("network-monitor", "Start / stop network monitoring").on_click(cx.listener(|this, _, _, cx| this.toggle_network(cx))))
             .child(div().id("network-status").role(Role::Status).aria_label(self.network_status.clone()).text_sm().whitespace_normal().child(self.network_status.clone()))
+            .child(button("memory-monitor", "Start / stop memory monitoring").on_click(cx.listener(|this, _, _, cx| this.toggle_memory_trim(cx))))
+            .child(div().id("memory-status").role(Role::Status).aria_label(self.memory_status.clone()).text_sm().whitespace_normal().child(self.memory_status.clone()))
             .child(
                 button("background-execution", "Start / stop background execution")
                     .on_click(cx.listener(Self::toggle_background)),

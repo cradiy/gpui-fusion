@@ -701,6 +701,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         method("nativeInputIndex", "(JJFF)I", input_index as *mut c_void),
         method("nativeScrollInput", "(JJFF)Z", scroll_input as *mut c_void),
         method("nativeLifecycle", "(JI)V", lifecycle as *mut c_void),
+        method("nativeTrimMemory", "(JI)V", trim_memory as *mut c_void),
         method(
             "nativePictureInPictureChanged",
             "(JZ)V",
@@ -1576,6 +1577,15 @@ extern "system" fn permission_result(
     call(&mut env, |_| {
         if let Ok(session) = session(id) {
             session.platform.permissions.complete(token as u64, status);
+        }
+        Ok(())
+    });
+}
+
+extern "system" fn trim_memory(mut env: JNIEnv, _: JClass, id: jlong, level: jint) {
+    call(&mut env, |_| {
+        if let Ok(session) = session(id) {
+            session.platform.trim_memory(level);
         }
         Ok(())
     });

@@ -3,6 +3,7 @@ package dev.gpui.android
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -133,6 +134,20 @@ class GpuiSession : AutoCloseable {
     private var keyboardRequestVersion = 0L
     private var permissionHostVersion = 0L
     private var networkMonitor: NetworkMonitor? = null
+    private var componentContext: Context? = null
+    private val componentCallbacks = object : ComponentCallbacks2 {
+        override fun onConfigurationChanged(configuration: Configuration) = Unit
+        override fun onTrimMemory(level: Int) { dispatchMemoryTrim(level) }
+        @Suppress("OVERRIDE_DEPRECATION", "DEPRECATION")
+        override fun onLowMemory() { dispatchMemoryTrim(ComponentCallbacks2.TRIM_MEMORY_COMPLETE) }
+    }
+
+    private fun dispatchMemoryTrim(level: Int) {
+        // A system callback can arrive during an Activity or Surface operation.
+        handler.postAtTime({
+            if (!closed && id != 0L) nativeTrimMemory(id, level)
+        }, this, SystemClock.uptimeMillis())
+    }
 
     private fun networks(): NetworkMonitor {
         checkThread()
@@ -323,6 +338,11 @@ class GpuiSession : AutoCloseable {
             "Detach the previous GpuiView before attaching another"
         }
         view = WeakReference(next)
+        if (componentContext == null) {
+            val context = next.context.applicationContext
+            context.registerComponentCallbacks(componentCallbacks)
+            componentContext = context
+        }
     }
 
     internal fun unbind(previous: GpuiView) {
@@ -790,6 +810,8 @@ class GpuiSession : AutoCloseable {
         checkThread()
         if (closed) return
         closed = true
+        componentContext?.unregisterComponentCallbacks(componentCallbacks)
+        componentContext = null
         cancelBackGesture()
         pendingUrls.clear()
 // gpuiforge:if sharing
@@ -860,6 +882,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeKey(id: Long, name: String, modifiers: Int, down: Boolean): Boolean
         @JvmStatic private external fun nativeInputAction(id: Long, epoch: Long, action: Int): Boolean
         @JvmStatic private external fun nativeLifecycle(id: Long, phase: Int)
+        @JvmStatic private external fun nativeTrimMemory(id: Long, level: Int)
         @JvmStatic private external fun nativePictureInPictureChanged(id: Long, enabled: Boolean)
         @JvmStatic private external fun nativePictureInPictureResult(id: Long, error: String?)
         @JvmStatic private external fun nativeFocus(id: Long, active: Boolean)

@@ -975,6 +975,11 @@ impl Counter {
                 })))
                 .into_any_element();
         }
+        let font_status = format!(
+            "System font · 16 → {:.1} · 30 → {:.1}",
+            f32::from(window.scaled_font_size(px(16.))),
+            f32::from(window.scaled_font_size(px(30.)))
+        );
         div()
             .id("page")
             .size_full()
@@ -987,7 +992,16 @@ impl Counter {
             .flex()
             .flex_col()
             .gap_5()
-            .child(div().text_3xl().child("GPUI on Android"))
+            .child(div().text_size(window.scaled_font_size(px(30.))).child("GPUI on Android"))
+            .child(div()
+                .id("system-font-sample")
+                .role(Role::Status)
+                .aria_label("System font sample")
+                .text_size(window.scaled_font_size(px(16.)))
+                .whitespace_normal()
+                .child("This text follows your system font size. 系统字号示例。"))
+            .child(div().id("system-font-status").role(Role::Status)
+                .aria_label(font_status.clone()).text_xs().child(font_status))
             .child(div().text_xs().text_color(rgb(muted)).child({
                 let insets = window.insets();
                 format!(

@@ -979,6 +979,13 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn resize(&mut self, size: Size<Pixels>);
     fn scale_factor(&self) -> f32;
     fn appearance(&self) -> WindowAppearance;
+    /// Applies the system text-size preference to a base size in logical pixels.
+    /// Platforms without a text-size adapter return the base size unchanged.
+    fn scaled_font_size(&self, base_size: Pixels) -> Pixels {
+        base_size
+    }
+    /// Notifies the window when system font-size conversion changes.
+    fn on_font_size_changed(&self, _callback: Box<dyn FnMut()>) {}
     fn display(&self) -> Option<Rc<dyn PlatformDisplay>>;
     fn mouse_position(&self) -> Point<Pixels>;
     fn modifiers(&self) -> Modifiers;

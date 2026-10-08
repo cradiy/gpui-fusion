@@ -8,6 +8,7 @@ use raw_window_handle::{
 };
 use std::{
     cell::{Cell, RefCell},
+    collections::HashMap,
     rc::Rc,
     sync::Arc,
     time::{Duration, Instant},
@@ -46,6 +47,7 @@ struct Callbacks {
     active: Option<Box<dyn FnMut(bool)>>,
     hover: Option<Box<dyn FnMut(bool)>>,
     appearance: Option<Box<dyn FnMut()>>,
+    font_size: Option<Box<dyn FnMut()>>,
     resize: Option<Box<dyn FnMut(Size<Pixels>, f32)>>,
     insets: Option<Box<dyn FnMut(WindowInsets)>>,
     close: Option<Box<dyn FnOnce()>>,
@@ -68,6 +70,7 @@ pub(crate) struct AndroidWindow {
     pub display: Rc<AndroidDisplay>,
     pub active: Cell<bool>,
     pub appearance: Cell<WindowAppearance>,
+    font_sizes: RefCell<HashMap<u32, Pixels>>,
     force_frame: Cell<bool>,
     recovery_retry_at: Cell<Option<Instant>>,
     recovery_failures: Cell<u32>,
@@ -117,6 +120,7 @@ impl AndroidWindow {
             }),
             active: Cell::new(false),
             appearance: Cell::new(appearance),
+            font_sizes: RefCell::default(),
             force_frame: Cell::new(true),
             recovery_retry_at: Cell::new(None),
             recovery_failures: Cell::new(0),
@@ -327,6 +331,18 @@ impl AndroidWindow {
             self.callbacks
                 .borrow_mut()
                 .appearance
+                .get_or_insert(callback);
+        }
+    }
+
+    pub(crate) fn font_size_changed(&self) {
+        self.font_sizes.borrow_mut().clear();
+        let callback = self.callbacks.borrow_mut().font_size.take();
+        if let Some(mut callback) = callback {
+            callback();
+            self.callbacks
+                .borrow_mut()
+                .font_size
                 .get_or_insert(callback);
         }
     }
@@ -694,6 +710,35 @@ impl PlatformWindow for AndroidWindowHandle {
     }
     fn on_appearance_changed(&self, callback: Box<dyn FnMut()>) {
         self.callbacks.borrow_mut().appearance = Some(callback);
+    }
+    fn on_font_size_changed(&self, callback: Box<dyn FnMut()>) {
+        self.callbacks.borrow_mut().font_size = Some(callback);
+    }
+    fn scaled_font_size(&self, base_size: Pixels) -> Pixels {
+        let value = f32::from(base_size);
+        if !value.is_finite() || value <= 0. {
+            return base_size;
+        }
+        let key = value.to_bits();
+        if let Some(size) = self.font_sizes.borrow().get(&key) {
+            return *size;
+        }
+        match self.host.scaled_font_size(value) {
+            Ok(size) if size.is_finite() && size > 0. => {
+                let mut cache = self.font_sizes.borrow_mut();
+                // Bound storage for applications that animate their base font size.
+                if cache.len() >= 128 {
+                    cache.clear();
+                }
+                cache.insert(key, px(size));
+                px(size)
+            }
+            Ok(_) => base_size,
+            Err(error) => {
+                log::warn!("Unable to read system font size: {error:#}");
+                base_size
+            }
+        }
     }
     fn draw(&self, scene: &Scene) {
         let mut renderer = self.renderer.borrow_mut();

@@ -579,6 +579,32 @@ guaranteed before process termination: persist important state independently.
 See [Android memory callbacks](https://developer.android.com/reference/android/content/ComponentCallbacks2).
 Other backends may emit no events.
 
+### System font size
+
+Use `window.scaled_font_size` during rendering to opt text into the system's
+font-size preference:
+
+```rust,ignore
+div()
+    .text_size(window.scaled_font_size(px(16.)))
+    .whitespace_normal()
+    .child("Text that follows the system font size")
+```
+
+The argument and result are logical pixels. Android uses the system's `sp`
+conversion, including nonlinear scaling on Android 14 and later. Convert each
+base font size separately; do not multiply all sizes by a single factor or
+convert a result twice. The window refreshes when the preference changes,
+including after its View is replaced. Recompute sizes in `render` rather than
+keeping them in application state. Conversions are cached by base size until
+the configuration changes.
+
+`px`, `rem`, display density, and fixed layout dimensions keep their usual
+meaning. Allow text to wrap and its container to grow; a fixed height can clip
+larger text. Other backends currently return the base size unchanged. No
+permission or optional host feature is required. See
+[Android font scaling](https://developer.android.com/about/versions/14/features#non-linear-font-scaling).
+
 ### Thermal state
 
 Read `cx.thermal_state()` for the current system thermal state. Subscribe to

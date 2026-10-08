@@ -1086,6 +1086,14 @@ impl Window {
                     .log_err();
             }
         }));
+        platform_window.on_font_size_changed(Box::new({
+            let mut cx = cx.to_async();
+            move || {
+                handle
+                    .update(&mut cx, |_, window, _| window.refresh())
+                    .log_err();
+            }
+        }));
         platform_window.on_button_layout_changed(Box::new({
             let mut cx = cx.to_async();
             move || {
@@ -2038,6 +2046,17 @@ impl Window {
     /// be rendered as two pixels on screen.
     pub fn scale_factor(&self) -> f32 {
         self.scale_factor
+    }
+
+    /// Applies the system text-size preference to a base font size in logical pixels.
+    ///
+    /// Call during rendering and pass the result to `text_size`. System preference
+    /// changes refresh the window. Scaling may be nonlinear, so convert each base
+    /// size independently; do not scale an already converted size. This does not
+    /// change `px`, `rem`, window density, or other layout dimensions.
+    /// Platforms without a text-size adapter return the base size unchanged.
+    pub fn scaled_font_size(&self, base_size: Pixels) -> Pixels {
+        self.platform_window.scaled_font_size(base_size)
     }
 
     /// Device pixels per logical pixel for paint output, including the current capture density.

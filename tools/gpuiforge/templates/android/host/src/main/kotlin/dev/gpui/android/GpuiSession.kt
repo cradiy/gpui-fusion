@@ -383,7 +383,7 @@ class GpuiSession : AutoCloseable {
         } else {
             nativeAttach(id, surface, width, height, density)
         }
-        updateAppearance()
+        updateConfiguration()
         for (url in pendingUrls) nativeOpenUrl(id, url)
         pendingUrls.clear()
 // gpuiforge:if sharing
@@ -428,9 +428,26 @@ class GpuiSession : AutoCloseable {
     private fun darkAppearance(): Boolean =
         view.get()?.resources?.configuration?.uiMode?.and(Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
 
-    internal fun updateAppearance() {
+    private var fontConfiguration: Pair<Float, Int>? = null
+
+    private fun scaledFontSize(baseSize: Float): Float {
         checkThread()
-        if (!closed && id != 0L) nativeAppearance(id, darkAppearance())
+        val metrics = requireContext().resources.displayMetrics
+        return android.util.TypedValue.applyDimension(
+            android.util.TypedValue.COMPLEX_UNIT_SP, baseSize, metrics
+        ) / metrics.density
+    }
+
+    internal fun updateConfiguration() {
+        checkThread()
+        if (closed || id == 0L) return
+        nativeAppearance(id, darkAppearance())
+        val configuration = requireContext().resources.configuration
+        val next = configuration.fontScale to configuration.densityDpi
+        if (fontConfiguration != next) {
+            fontConfiguration = next
+            nativeFontSizeChanged(id)
+        }
     }
 
     internal fun detachSurface() { checkThread(); cancelBackGesture(); if (id != 0L) nativeDetach(id) }
@@ -909,6 +926,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeLifecycle(id: Long, phase: Int)
         @JvmStatic private external fun nativeTrimMemory(id: Long, level: Int)
         @JvmStatic private external fun nativeThermalStateChanged(id: Long, status: Int)
+        @JvmStatic private external fun nativeFontSizeChanged(id: Long)
         @JvmStatic private external fun nativePictureInPictureChanged(id: Long, enabled: Boolean)
         @JvmStatic private external fun nativePictureInPictureResult(id: Long, error: String?)
         @JvmStatic private external fun nativeFocus(id: Long, active: Boolean)

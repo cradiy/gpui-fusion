@@ -343,6 +343,19 @@ impl Host {
         })
     }
 
+    pub fn scaled_font_size(&self, base_size: f32) -> Result<f32> {
+        self.with_env(|env| {
+            Ok(env
+                .call_method(
+                    self.object.as_obj(),
+                    "scaledFontSize",
+                    "(F)F",
+                    &[JValue::Float(base_size)],
+                )?
+                .f()?)
+        })
+    }
+
     pub fn system_font_paths(&self) -> Result<Vec<std::path::PathBuf>> {
         self.with_env(|env| {
             let paths = JObjectArray::from(
@@ -727,6 +740,11 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         ),
         method("nativeFocus", "(JZ)V", focus as *mut c_void),
         method("nativeAppearance", "(JZ)V", appearance as *mut c_void),
+        method(
+            "nativeFontSizeChanged",
+            "(J)V",
+            font_size_changed as *mut c_void,
+        ),
         method("nativeBack", "(J)Z", system_back as *mut c_void),
         method("nativeBackGesture", "(JIFI)V", back_gesture as *mut c_void),
         method("nativeTouch", "(JIIFF)Z", touch as *mut c_void),
@@ -1281,6 +1299,13 @@ extern "system" fn appearance(mut env: JNIEnv, _: JClass, id: jlong, dark: jbool
         } else {
             gpui::WindowAppearance::Light
         });
+        Ok(())
+    });
+}
+
+extern "system" fn font_size_changed(mut env: JNIEnv, _: JClass, id: jlong) {
+    call(&mut env, |_| {
+        session(id)?.platform.window.font_size_changed();
         Ok(())
     });
 }

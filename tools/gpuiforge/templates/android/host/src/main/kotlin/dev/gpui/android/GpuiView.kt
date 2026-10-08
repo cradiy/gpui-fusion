@@ -87,7 +87,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
 
     override fun onConfigurationChanged(configuration: Configuration) {
         super.onConfigurationChanged(configuration)
-        try { session.updateAppearance() }
+        try { session.updateConfiguration() }
         catch (error: RuntimeException) { session.fail(error) }
     }
 

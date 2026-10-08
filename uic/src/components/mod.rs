@@ -20,6 +20,7 @@ mod overlay_anchor;
 pub mod popover;
 pub mod progress;
 mod range;
+pub mod refresh;
 pub mod screen_color_picker;
 pub mod scrollbar;
 pub mod selection;

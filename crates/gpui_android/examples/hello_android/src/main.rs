@@ -2,6 +2,7 @@ use gpui::{prelude::*, *};
 use std::{cell::RefCell, rc::Rc};
 use uic::components::input::{Input, InputActionEvent, InputEvent, InputMode, TextInput};
 mod directory;
+mod refresh;
 
 const INPUT_ACTIONS: [TextInputAction; 6] = [
     TextInputAction::Next,
@@ -1230,6 +1231,11 @@ impl Counter {
                     .flex_col()
                     .gap_4()
                     .child(div().text_xl().child("Files"))
+                    .child(button("open-refresh-demo", "Pull to refresh").on_click(|_, window, cx| {
+                        let demo = cx.new(|cx| refresh::RefreshDemo::new(window, cx));
+                        uic::components::bottom_sheet::BottomSheet::view(demo)
+                            .title("Documents").h(relative(0.9)).show(window, cx);
+                    }))
                     .child(
                         Input::new(&self.file_text)
                             .rows(3)

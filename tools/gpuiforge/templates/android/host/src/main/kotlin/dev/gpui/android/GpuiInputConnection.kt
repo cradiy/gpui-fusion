@@ -1,6 +1,6 @@
 package dev.gpui.android
 
-import android.annotation.TargetApi
+import androidx.annotation.RequiresApi
 import android.os.Build
 import android.text.Editable
 import android.text.TextUtils
@@ -34,7 +34,7 @@ internal open class GpuiInputConnection(
             else GpuiInputConnection(view, session, epoch)
     }
 
-    @TargetApi(34)
+    @RequiresApi(34)
     private class Api34Connection(view: GpuiView, session: GpuiSession, epoch: Long) :
         GpuiInputConnection(view, session, epoch) {
         override fun replaceText(start: Int, end: Int, text: CharSequence, cursor: Int, attributes: TextAttribute?): Boolean {

@@ -113,7 +113,7 @@
           "type": "array"
         },
         "features": {
-          "description": "Optional modules for the bundled Android host. Defaults to an empty list: window rendering, input, IME and lifecycle remain available. Disabled modules omit their Kotlin files, Manifest components and dedicated dependencies. Cargo features and Android permissions are configured separately. Android TalkBack semantics are not implemented.",
+          "description": "Optional modules for the bundled Android host. Defaults to an empty list: window rendering, input, IME, lifecycle and accessibility remain available. Disabled modules omit their Kotlin files, Manifest components and dedicated dependencies. Cargo features and Android permissions are configured separately. TalkBack uses the semantics published by GPUI controls; no extra host feature is required.",
           "examples": [
             [
               "files",

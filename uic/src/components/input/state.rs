@@ -2890,7 +2890,7 @@ mod tests {
         window
             .update(&mut visual.cx, |view, window, cx| {
                 view.state.update(cx, |input, cx| {
-                    input.set_selected_text_range(3..1, window, cx);
+                    input.set_selected_text_range(std::ops::Range { start: 3, end: 1 }, window, cx);
                     let selection = input.selected_text_range(false, window, cx).unwrap();
                     assert_eq!(selection.range, 1..3);
                     assert!(selection.reversed);

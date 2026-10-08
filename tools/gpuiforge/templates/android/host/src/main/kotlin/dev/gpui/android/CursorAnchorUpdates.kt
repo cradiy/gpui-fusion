@@ -26,7 +26,8 @@ internal class CursorAnchorUpdates(
         if (closed || mode and supported.inv() != 0 || current() == null) return false
         monitoring = mode and InputConnection.CURSOR_UPDATE_MONITOR != 0
         immediate = mode and InputConnection.CURSOR_UPDATE_IMMEDIATE != 0
-        filters = mode and (InputConnection.CURSOR_UPDATE_FILTER_INSERTION_MARKER or InputConnection.CURSOR_UPDATE_FILTER_EDITOR_BOUNDS)
+        filters = if (Build.VERSION.SDK_INT >= 33) mode and
+            (InputConnection.CURSOR_UPDATE_FILTER_INSERTION_MARKER or InputConnection.CURSOR_UPDATE_FILTER_EDITOR_BOUNDS) else 0
         if (immediate) view.post { update(current()) }
         return true
     }

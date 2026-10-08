@@ -4,6 +4,7 @@ import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.graphics.Rect
 import android.icu.text.BreakIterator
+import android.os.Build
 import android.view.ActionMode
 import android.view.Menu
 import android.view.MenuItem
@@ -116,7 +117,7 @@ internal class TextEditMenu(
             item(android.R.id.paste, android.R.string.paste)
         }
         if (view.autofillHost.canRequest()) {
-            item(android.R.id.autofill, android.R.string.autofill)
+            item(android.R.id.autofill, if (Build.VERSION.SDK_INT >= 27) android.R.string.autofill else R.string.gpui_autofill)
         }
         return true
     }

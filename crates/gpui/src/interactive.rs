@@ -24,10 +24,9 @@ macro_rules! impl_mouse_event {
     ($event:ty) => {
         impl MouseEvent for $event {
             fn map_position(&self, map: impl Fn(Point<Pixels>) -> Point<Pixels>) -> Self {
-                Self {
-                    position: map(self.position),
-                    ..self.clone()
-                }
+                let mut event = self.clone();
+                event.position = map(self.position);
+                event
             }
         }
     };

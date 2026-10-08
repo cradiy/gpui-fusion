@@ -7,6 +7,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Handler
+import androidx.annotation.RequiresPermission
 
 /** One default-network callback per session, shared by its Rust subscriptions. */
 internal class NetworkMonitor(context: Context, private val handler: Handler,
@@ -24,12 +25,14 @@ internal class NetworkMonitor(context: Context, private val handler: Handler,
         }
     }
 
+    @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     fun snapshot(): Int {
         checkPermission()
         val network = manager.activeNetwork ?: return 0
         return encode(manager.getNetworkCapabilities(network))
     }
 
+    @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     fun subscribe(token: Long) {
         checkPermission()
         if (callback == null) {

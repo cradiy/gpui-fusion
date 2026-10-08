@@ -11,6 +11,8 @@ import android.util.Log
 import android.util.Rational
 import android.view.View
 
+private const val PIP_LOG_TAG = "GPUI"
+
 internal class PictureInPictureHost(val activity: Activity) {
     private var lastSource: Rect? = null
 
@@ -35,9 +37,9 @@ internal class PictureInPictureHost(val activity: Activity) {
             activity.setPictureInPictureParams(PictureInPictureParams.Builder()
                 .setSourceRectHint(source).build())
             lastSource = source
-            if (Log.isLoggable("GPUI", Log.DEBUG)) Log.d("GPUI", "PiP source bounds: $source")
+            if (Log.isLoggable(PIP_LOG_TAG, Log.DEBUG)) Log.d(PIP_LOG_TAG, "PiP source bounds: $source")
         } catch (error: RuntimeException) {
-            Log.w("GPUI", "Unable to update picture-in-picture source bounds", error)
+            Log.w(PIP_LOG_TAG, "Unable to update picture-in-picture source bounds", error)
         }
     }
 

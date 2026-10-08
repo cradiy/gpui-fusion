@@ -47,7 +47,7 @@ pub struct Platform {
     /// Optional editor schema reference for a platform recipe. Relative references resolve from the JSON file. GPUiForge does not fetch schema URLs.
     #[serde(default, rename = "$schema")]
     pub _schema: Option<String>,
-    /// Optional modules for the bundled Android host. Defaults to an empty list: window rendering, input, IME and lifecycle remain available. Disabled modules omit their Kotlin files, Manifest components and dedicated dependencies. Cargo features and Android permissions are configured separately. Android TalkBack semantics are not implemented.
+    /// Optional modules for the bundled Android host. Defaults to an empty list: window rendering, input, IME, lifecycle and accessibility remain available. Disabled modules omit their Kotlin files, Manifest components and dedicated dependencies. Cargo features and Android permissions are configured separately. TalkBack uses the semantics published by GPUI controls; no extra host feature is required.
     #[serde(default)]
     pub features: BTreeSet<AndroidFeature>,
     /// Application and launcher icon for the bundled Android host. Accepts PNG, WebP or Android drawable XML. Resolve relative paths from gpuiforge.json. Omit to leave the application icon unspecified; no copy entry is required.

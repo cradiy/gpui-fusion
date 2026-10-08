@@ -1,11 +1,11 @@
 package dev.gpui.android
 
-import android.annotation.TargetApi
+import androidx.annotation.RequiresApi
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsAnimation
 
-@TargetApi(30)
+@RequiresApi(30)
 internal class KeyboardInsets(
     private val container: View,
     private val gpui: GpuiView,

@@ -1,6 +1,7 @@
 package dev.gpui.android
 
 import android.app.Activity
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentCallbacks2
@@ -14,6 +15,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.Surface
+import androidx.annotation.RequiresPermission
 import androidx.core.view.HapticFeedbackConstantsCompat
 import java.lang.ref.WeakReference
 import java.util.function.Consumer
@@ -178,8 +180,10 @@ class GpuiSession : AutoCloseable {
         }.also { networkMonitor = it }
     }
 
+    @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     private fun networkStatus(): Int = networks().snapshot()
 
+    @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     private fun observeNetwork(token: Long, enable: Boolean) {
         checkThread()
         if (enable) networks().subscribe(token) else networkMonitor?.unsubscribe(token)

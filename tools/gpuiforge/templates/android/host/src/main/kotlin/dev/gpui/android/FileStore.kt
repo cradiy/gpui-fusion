@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileNotFoundException
@@ -44,10 +45,11 @@ internal class FileStore(context: Context) {
         else -> throw IllegalArgumentException("Unknown private location")
     }.absolutePath
 
+    @ChecksSdkIntAtLeast(api = 29)
     fun collectionsSupported(): Boolean = Build.VERSION.SDK_INT >= 29
 
     fun create(kind: Int, name: String, mime: String, subdirectory: String): SelectedDocument {
-        check(collectionsSupported()) { "Public collections require Android 10 or later" }
+        if (!collectionsSupported()) throw IllegalStateException("Public collections require Android 10 or later")
         require(name.isNotBlank() && name != "." && name != ".." && !name.contains('/') && !name.contains('\\') && !name.contains('\u0000')) { "Invalid filename" }
         require(mime.matches(Regex("[^/\\s]+/[^/\\s]+")) && !mime.contains('*')) { "A concrete MIME type is required" }
         require(subdirectory.isEmpty() || subdirectory.split('/').all { part ->

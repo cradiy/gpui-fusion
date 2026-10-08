@@ -12,6 +12,7 @@ import android.window.OnBackAnimationCallback
 import android.window.BackEvent
 import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.annotation.RequiresApi
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -222,6 +223,7 @@ abstract class GpuiActivity : Activity() {
         }
     }
 
+    @RequiresApi(33)
     private object BackApi33 {
         fun register(activity: Activity, action: () -> Unit): AutoCloseable {
             val dispatcher = activity.onBackInvokedDispatcher
@@ -231,6 +233,7 @@ abstract class GpuiActivity : Activity() {
         }
     }
 
+    @RequiresApi(34)
     private object BackApi34 {
         fun register(activity: Activity, session: GpuiSession, preview: () -> Boolean, action: () -> Unit): AutoCloseable {
             val dispatcher = activity.onBackInvokedDispatcher

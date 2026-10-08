@@ -5,7 +5,9 @@ pub use atlas_memory::AtlasImageLifetimes;
 mod keyboard;
 mod keystroke;
 mod share;
+mod system_services;
 mod tray;
+pub use system_services::{AppSettings, NetworkStatus};
 
 #[cfg(all(target_os = "linux", feature = "wayland"))]
 #[expect(missing_docs)]
@@ -133,6 +135,25 @@ pub fn guess_compositor() -> &'static str {
 
 #[expect(missing_docs)]
 pub trait Platform: 'static {
+    /// Queries the app's default network. Unsupported platforms return an error.
+    fn network_status(&self) -> Result<NetworkStatus> {
+        Err(std::io::Error::from(std::io::ErrorKind::Unsupported).into())
+    }
+    /// Delivers an initial snapshot and changes on the foreground thread, never inline.
+    /// Dropping the subscription stops delivery and releases its platform observer.
+    fn observe_network(
+        &self,
+        _callback: Box<dyn FnMut(NetworkStatus)>,
+    ) -> Result<crate::Subscription> {
+        Err(std::io::Error::from(std::io::ErrorKind::Unsupported).into())
+    }
+    /// Opens system settings. Success means the page was launched, not that a
+    /// permission or preference changed. Unsupported platforms return an error.
+    fn open_app_settings(&self, _page: AppSettings) -> Task<Result<()>> {
+        Task::ready(Err(
+            std::io::Error::from(std::io::ErrorKind::Unsupported).into()
+        ))
+    }
     fn system_media_session(
         &self,
         options: gpui_notifications::MediaSessionOptions,

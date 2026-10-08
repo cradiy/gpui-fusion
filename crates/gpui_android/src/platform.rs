@@ -29,6 +29,7 @@ pub struct AndroidPlatform {
     pub(crate) background: Rc<crate::background::BackgroundState>,
     pub(crate) files: Rc<crate::file_dialog::FileDialog>,
     pub(crate) shares: Rc<crate::share::ShareReceiver>,
+    pub(crate) services: Rc<crate::system_services::SystemServices>,
     handle: Cell<Option<AnyWindowHandle>>,
     lifecycle: RefCell<Option<Box<dyn FnMut(AppLifecyclePhase)>>>,
     quit: RefCell<Option<Box<dyn FnMut()>>>,
@@ -94,6 +95,7 @@ impl AndroidPlatform {
                 foreground.clone(),
             ),
             shares: crate::share::ShareReceiver::new(host.clone(), &foreground),
+            services: crate::system_services::SystemServices::new(host.clone()),
             foreground,
             dispatcher,
             permissions: crate::permissions::PermissionState::new(host.clone()),
@@ -122,6 +124,7 @@ impl AndroidPlatform {
         self.open_urls.borrow_mut().take();
         self.pending_urls.borrow_mut().clear();
         self.permissions.close();
+        self.services.close();
         self.files.close();
         self.shares.close();
         self.window.detach();
@@ -179,6 +182,17 @@ fn unsupported<T>() -> oneshot::Receiver<Result<T>> {
 }
 
 impl Platform for AndroidPlatform {
+    fn network_status(&self) -> Result<NetworkStatus> {
+        self.services.network_status()
+    }
+
+    fn observe_network(&self, callback: Box<dyn FnMut(NetworkStatus)>) -> Result<Subscription> {
+        self.services.observe_network(callback)
+    }
+
+    fn open_app_settings(&self, page: AppSettings) -> Task<Result<()>> {
+        self.services.open_settings(page, &self.foreground)
+    }
     fn system_media_session(
         &self,
         options: gpui::gpui_notifications::MediaSessionOptions,

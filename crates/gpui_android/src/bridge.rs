@@ -379,6 +379,42 @@ impl Host {
         })
     }
 
+    pub fn network_status(&self) -> Result<i32> {
+        self.with_env(|env| {
+            Ok(env
+                .call_method(self.object.as_obj(), "networkStatus", "()I", &[])?
+                .i()?)
+        })
+    }
+
+    pub fn observe_network(&self, token: u64, enable: bool) -> Result<()> {
+        self.with_env(|env| {
+            env.call_method(
+                self.object.as_obj(),
+                "observeNetwork",
+                "(JZ)V",
+                &[JValue::Long(token as i64), JValue::Bool(enable.into())],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn open_app_settings(&self, token: u64, page: gpui::AppSettings) -> Result<()> {
+        self.with_env(|env| {
+            let page = match page {
+                gpui::AppSettings::Application => 0,
+                gpui::AppSettings::Notifications => 1,
+            };
+            env.call_method(
+                self.object.as_obj(),
+                "openAppSettings",
+                "(JI)V",
+                &[JValue::Long(token as i64), JValue::Int(page)],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn request_permission(&self, permission: &str, token: u64) -> Result<()> {
         self.with_env(|env| {
             let permission = env.new_string(permission)?;
@@ -707,6 +743,16 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
             "nativePermissionResult",
             "(JJI)V",
             permission_result as *mut c_void,
+        ),
+        method(
+            "nativeNetworkChanged",
+            "(JJI)V",
+            network_changed as *mut c_void,
+        ),
+        method(
+            "nativeSettingsResult",
+            "(JJLjava/lang/String;)V",
+            settings_result as *mut c_void,
         ),
         method(
             "nativeFileResult",
@@ -1530,6 +1576,47 @@ extern "system" fn permission_result(
     call(&mut env, |_| {
         if let Ok(session) = session(id) {
             session.platform.permissions.complete(token as u64, status);
+        }
+        Ok(())
+    });
+}
+
+extern "system" fn network_changed(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    token: jlong,
+    status: jint,
+) {
+    call(&mut env, |_| {
+        if let Ok(session) = session(id) {
+            session
+                .platform
+                .services
+                .network_changed(token as u64, status)?;
+        }
+        Ok(())
+    });
+}
+
+extern "system" fn settings_result(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    token: jlong,
+    error: JString,
+) {
+    call(&mut env, |env| {
+        if let Ok(session) = session(id) {
+            let error = if error.is_null() {
+                None
+            } else {
+                Some(env.get_string(&error)?.into())
+            };
+            session
+                .platform
+                .services
+                .settings_result(token as u64, error);
         }
         Ok(())
     });

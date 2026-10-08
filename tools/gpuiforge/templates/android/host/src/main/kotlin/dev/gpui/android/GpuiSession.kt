@@ -132,6 +132,48 @@ class GpuiSession : AutoCloseable {
     }
     private var keyboardRequestVersion = 0L
     private var permissionHostVersion = 0L
+    private var networkMonitor: NetworkMonitor? = null
+
+    private fun networks(): NetworkMonitor {
+        checkThread()
+        check(!closed) { "GpuiSession is closed" }
+        return networkMonitor ?: NetworkMonitor(requireContext(), handler) { token, status ->
+            if (!closed && id != 0L) nativeNetworkChanged(id, token, status)
+        }.also { networkMonitor = it }
+    }
+
+    private fun networkStatus(): Int = networks().snapshot()
+
+    private fun observeNetwork(token: Long, enable: Boolean) {
+        checkThread()
+        if (enable) networks().subscribe(token) else networkMonitor?.unsubscribe(token)
+    }
+
+    private fun openAppSettings(token: Long, page: Int) {
+        checkThread()
+        check(!closed) { "GpuiSession is closed" }
+        // Activity launch may change focus or resize the Surface. Leave Rust first.
+        handler.postAtTime({
+            if (!closed && id != 0L) {
+                val error = try {
+                    check(active()) { "Opening app settings requires an active GpuiView" }
+                    val context = requireContext()
+                    val intent = when (page) {
+                        0 -> Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.fromParts("package", context.packageName, null))
+                        1 -> Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        else -> error("Unknown app settings page")
+                    }
+                    startIntent(intent)
+                    null
+                } catch (error: Exception) {
+                    error.toString()
+                }
+                if (!closed && id != 0L) nativeSettingsResult(id, token, error)
+            }
+        }, this, SystemClock.uptimeMillis())
+    }
     private val permissions = PermissionHost { token, status ->
         handler.postAtTime({
             if (!closed && id != 0L) nativePermissionResult(id, token, status)
@@ -754,6 +796,8 @@ class GpuiSession : AutoCloseable {
         pendingShares.clear()
 // gpuiforge:endif
         permissions.close()
+        networkMonitor?.close()
+        networkMonitor = null
 // gpuiforge:if files
         files.close()
 // gpuiforge:endif
@@ -835,6 +879,8 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeRunTask(id: Long, token: Long)
         @JvmStatic private external fun nativeClose(id: Long)
         @JvmStatic private external fun nativePermissionResult(id: Long, token: Long, status: Int)
+        @JvmStatic private external fun nativeNetworkChanged(id: Long, token: Long, status: Int)
+        @JvmStatic private external fun nativeSettingsResult(id: Long, token: Long, error: String?)
         @JvmStatic private external fun nativeBackgroundEvent(id: Long, token: String, event: String, error: String)
         @JvmStatic private external fun nativeNotificationEvent(id: Long, event: String): Boolean
         @JvmStatic private external fun nativeMediaCommand(id: Long, event: String)

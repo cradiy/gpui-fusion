@@ -528,6 +528,55 @@ including configuration recreation, cancels pending requests; stale results
 are ignored. Closing the session also completes pending requests with an error.
 The requesting task should be cancelled with its owning UI when appropriate.
 
+### App settings
+
+Open the application's permission or notification settings from a user action:
+
+```rust,ignore
+let request = cx.open_app_settings(gpui::AppSettings::Application);
+cx.spawn(async move |_cx| {
+    if let Err(error) = request.await {
+        log::error!("Could not open app settings: {error}");
+    }
+}).detach();
+```
+
+Use `AppSettings::Notifications` for notification preferences. Call while the
+View is active. Success means Android launched the page; it does not mean
+the user changed a permission. Recheck permission status after returning.
+Unavailable settings activities and inactive Views return errors. These APIs
+are currently implemented on Android; other platforms return `Unsupported`.
+
+### Network state
+
+Add `"android.permission.ACCESS_NETWORK_STATE"` to
+`platforms.android.permissions` in `gpuiforge.json`. This manifest permission
+does not show a runtime permission dialog. Run `gpuiforge sync` after changing
+the configuration.
+
+```rust,ignore
+let current = cx.network_status()?;
+let subscription = cx.observe_network(|status, cx| {
+    // Store the status in application state and update interested views.
+    cx.refresh_windows();
+})?;
+```
+
+Retain the `Subscription` while updates are needed. The callback receives an
+initial snapshot and subsequent changes on the GPUI thread. Dropping the last
+subscription unregisters the system callback. Closing the session releases
+all observers; View or Surface recreation does not end the subscription.
+
+`NetworkStatus::Disconnected` means no default network is available to the app.
+`Connected` reports `internet_validated` and `metered`; either may be unknown
+during a network transition. Validation is Android's assessment of Internet
+access, not proof that a particular server is reachable. Meteredness follows
+network capabilities rather than assuming Wi-Fi is free. The interface does
+not probe servers, retry requests, or change transfer policy.
+
+Network queries and subscriptions return errors if the permission is missing.
+Other platform backends currently return `Unsupported`.
+
 The example's Request microphone permission button only checks authorization;
 it does not record audio.
 

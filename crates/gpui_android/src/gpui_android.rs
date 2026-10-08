@@ -17,6 +17,7 @@ mod permissions;
 mod platform;
 mod share;
 mod surface;
+mod system_services;
 mod window;
 
 pub use background::{

@@ -1472,6 +1472,33 @@ impl App {
         self.platform.open_url(url);
     }
 
+    /// Queries the application's default network. Unsupported platforms return an error.
+    /// Android requires the manifest permission `android.permission.ACCESS_NETWORK_STATE`.
+    pub fn network_status(&self) -> Result<crate::NetworkStatus> {
+        self.platform.network_status()
+    }
+
+    /// Observes an initial network snapshot and subsequent changes on the app thread.
+    /// Retain the subscription for as long as updates are needed. Callbacks are never
+    /// invoked inline. Android requires `android.permission.ACCESS_NETWORK_STATE`.
+    pub fn observe_network(
+        &self,
+        mut callback: impl FnMut(crate::NetworkStatus, &mut App) + 'static,
+    ) -> Result<Subscription> {
+        let app = self.this.clone();
+        self.platform.observe_network(Box::new(move |status| {
+            if let Some(app) = app.upgrade() {
+                app.borrow_mut().update(|cx| callback(status, cx));
+            }
+        }))
+    }
+
+    /// Opens settings for this application. Success reports launch only; recheck
+    /// permissions when the application becomes active again. Currently supported on Android.
+    pub fn open_app_settings(&self, page: crate::AppSettings) -> Task<Result<()>> {
+        self.platform.open_app_settings(page)
+    }
+
     /// Registers the given URL scheme (e.g. `zed` for `zed://` urls) to be
     /// opened by the current app.
     ///

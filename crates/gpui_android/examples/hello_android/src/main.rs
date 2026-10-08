@@ -100,6 +100,9 @@ fn main() {
                         .initial_value("Hello from GPUI — 你好！\n")
                 }),
                 permission_status: "Microphone permission has not been requested.".into(),
+                network_status: "Network monitoring is stopped.".into(),
+                network_subscription: None,
+                settings_status: String::new(),
                 background_status: "Start a 60-second execution demo, then press Home.".into(),
                 background_task: None,
                 #[cfg(target_os = "android")]
@@ -128,6 +131,7 @@ fn main() {
                 }),
             });
             view.update(cx, |this, cx| {
+                this.toggle_network(cx);
                 cx.observe(&uic::components::modal::layer(cx), |_, _, cx| cx.notify())
                     .detach();
                 cx.subscribe(&this.title, |this, _, event, cx| {
@@ -231,6 +235,9 @@ struct Counter {
     directory: Option<gpui::gpui_io::LocationHandle>,
     file_text: Entity<TextInput>,
     permission_status: String,
+    network_status: String,
+    network_subscription: Option<Subscription>,
+    settings_status: String,
     background_status: String,
     background_task: Option<Task<()>>,
     #[cfg(target_os = "android")]
@@ -275,6 +282,38 @@ fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
 }
 
 impl Counter {
+    fn toggle_network(&mut self, cx: &mut Context<Self>) {
+        if self.network_subscription.take().is_some() {
+            self.network_status = "Network monitoring is stopped.".into();
+        } else {
+            let entity = cx.entity().downgrade();
+            match cx.observe_network(move |status, cx| {
+                let _ = entity.update(cx, |this, cx| {
+                    this.network_status = format!("Network: {status:?}");
+                    cx.notify();
+                });
+            }) {
+                Ok(subscription) => self.network_subscription = Some(subscription),
+                Err(error) => self.network_status = format!("Network: {error}"),
+            }
+        }
+        cx.notify();
+    }
+
+    fn open_settings(&mut self, page: AppSettings, cx: &mut Context<Self>) {
+        let request = cx.open_app_settings(page);
+        cx.spawn(async move |this, cx| {
+            let result = request.await;
+            let _ = this.update(cx, |this, cx| {
+                this.settings_status = match result {
+                    Ok(()) => "Settings opened. Recheck permissions after returning.".into(),
+                    Err(error) => format!("Settings: {error}"),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+    }
     fn toggle_background(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         if self.background_task.take().is_some() {
             self.background_status = "Foreground execution stopped.".into();
@@ -1077,6 +1116,15 @@ impl Counter {
                     .on_click(cx.listener(Self::request_microphone)),
             )
             .child(div().text_sm().child(self.permission_status.clone()))
+            .child(button("app-settings", "Open app settings").on_click(cx.listener(|this, _, _, cx| {
+                this.open_settings(AppSettings::Application, cx);
+            })))
+            .child(button("notification-settings", "Open notification settings").on_click(cx.listener(|this, _, _, cx| {
+                this.open_settings(AppSettings::Notifications, cx);
+            })))
+            .child(div().id("settings-status").role(Role::Status).aria_label(self.settings_status.clone()).text_sm().child(self.settings_status.clone()))
+            .child(button("network-monitor", "Start / stop network monitoring").on_click(cx.listener(|this, _, _, cx| this.toggle_network(cx))))
+            .child(div().id("network-status").role(Role::Status).aria_label(self.network_status.clone()).text_sm().whitespace_normal().child(self.network_status.clone()))
             .child(
                 button("background-execution", "Start / stop background execution")
                     .on_click(cx.listener(Self::toggle_background)),

@@ -41,7 +41,7 @@ pub enum ContextMenuAlignment {
 /// Menus and their gap remain in unscaled window pixels. Use a stable [`Self::id`]
 /// for repeated triggers created at the same call site.
 ///
-/// Use this for toolbar and overflow menus. Pointer-positioned right-click menus
+/// Use this for toolbar and overflow menus. Pointer-positioned context menus
 /// should continue to use [`ContextMenuExt::context_menu`] or [`show`].
 #[derive(IntoElement)]
 pub struct ContextMenuTrigger {
@@ -932,12 +932,23 @@ pub fn is_open(cx: &App) -> bool {
     layer(cx).read(cx).is_open()
 }
 
-/// Adds a right-click context-menu trigger without adding a layout wrapper.
+/// Opens a context menu on right-click or long press without adding a layout wrapper.
 pub trait ContextMenuExt: InteractiveElement + Sized {
     fn context_menu(self, build: impl Fn(&mut Window, &mut App) -> ContextMenu + 'static) -> Self {
+        let build = Rc::new(build);
+        let long_press_build = build.clone();
         self.on_mouse_down(MouseButton::Right, move |event, window, cx| {
             let result = show(build(window, cx), event.position, window, cx);
             debug_assert!(result.is_ok(), "{result:?}");
+            cx.stop_propagation();
+        })
+        .on_long_press(move |event, window, cx| {
+            if window.default_prevented() {
+                return;
+            }
+            let result = show(long_press_build(window, cx), event.position, window, cx);
+            debug_assert!(result.is_ok(), "{result:?}");
+            window.prevent_default();
             cx.stop_propagation();
         })
     }
@@ -948,6 +959,125 @@ impl<T: InteractiveElement> ContextMenuExt for T {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn long_press_respects_text_selection_and_right_click(cx: &mut gpui::TestAppContext) {
+        use crate::components::input::{Input, TextInput};
+        use gpui::{
+            InteractiveText, LongPressEvent, PlatformInput, StyledText, TextInputFocusEvent, px,
+        };
+
+        struct TouchMenu {
+            input: Entity<TextInput>,
+        }
+        impl Render for TouchMenu {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .size_full()
+                    .child(
+                        div()
+                            .w(px(400.))
+                            .h(px(240.))
+                            .flex()
+                            .flex_col()
+                            .context_menu(|_, _| ContextMenu::new().action("Open", |_, _| {}))
+                            .child(div().h(px(60.)).child(Input::new(&self.input)))
+                            .child(
+                                div()
+                                    .h(px(60.))
+                                    .text_size(px(16.))
+                                    .line_height(px(24.))
+                                    .child(
+                                        InteractiveText::new(
+                                            "text",
+                                            StyledText::new("quick brown"),
+                                        )
+                                        .selectable(gpui::rgba(0x4488ff55)),
+                                    ),
+                            )
+                            .child(div().h(px(60.)).on_long_press(|_, window, _| {
+                                window.prevent_default();
+                            })),
+                    )
+                    .child(layer(cx))
+            }
+        }
+
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|_, cx| TouchMenu {
+            input: cx.new(|cx| TextInput::new(cx).initial_value("editable text")),
+        });
+        cx.update(|window, cx| window.draw(cx).clear());
+
+        // Android must still run its native text-selection action after dispatch.
+        cx.update(|window, cx| {
+            let position = point(px(30.), px(20.));
+            let result =
+                window.dispatch_event(PlatformInput::LongPress(LongPressEvent { position }), cx);
+            assert!(!is_open(cx));
+            assert!(!result.default_prevented);
+            assert!(!result.propagate);
+            let focus = window.dispatch_event(
+                PlatformInput::TextInputFocus(TextInputFocusEvent { position }),
+                cx,
+            );
+            assert!(focus.default_prevented);
+            window.draw(cx).clear();
+        });
+
+        cx.update(|window, cx| {
+            let result = window.dispatch_event(
+                PlatformInput::LongPress(LongPressEvent {
+                    position: point(px(10.), px(72.)),
+                }),
+                cx,
+            );
+            assert!(result.default_prevented);
+            assert!(!is_open(cx));
+            window.draw(cx).clear();
+        });
+        cx.simulate_keystrokes("secondary-c");
+        cx.update(|_, cx| {
+            assert_eq!(
+                cx.read_from_clipboard()
+                    .and_then(|item| item.text())
+                    .as_deref(),
+                Some("quick")
+            );
+        });
+
+        // A child can claim a long press without stopping propagation.
+        cx.update(|window, cx| {
+            window.dispatch_event(
+                PlatformInput::LongPress(LongPressEvent {
+                    position: point(px(10.), px(140.)),
+                }),
+                cx,
+            );
+            assert!(!is_open(cx));
+        });
+
+        // Blank space on the same text row still belongs to the object menu.
+        cx.update(|window, cx| {
+            let result = window.dispatch_event(
+                PlatformInput::LongPress(LongPressEvent {
+                    position: point(px(350.), px(72.)),
+                }),
+                cx,
+            );
+            assert!(result.default_prevented);
+            assert!(!result.propagate);
+            assert!(is_open(cx));
+            dismiss(window, cx);
+            window.draw(cx).clear();
+        });
+        cx.simulate_mouse_down(
+            point(px(10.), px(72.)),
+            MouseButton::Right,
+            Default::default(),
+        );
+        cx.update(|_, cx| assert!(is_open(cx)));
+    }
 
     #[gpui::test]
     fn pointer_menu_waits_for_movement_and_keeps_keyboard_navigation(

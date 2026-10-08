@@ -27,7 +27,7 @@ div()
                             })
                     })
             })
-            .child("Right-click me"),
+            .child("Right-click or long-press me"),
     )
     .child(context_menu::layer(cx))
 ```
@@ -77,10 +77,15 @@ ContextMenu::new()
 Open menus and submenus follow layout, scrolling and affine transforms while retaining
 their normal size and logical-pixel gap. Give triggers created in a loop a stable `.id(...)`.
 `show_below` maps the supplied bounds once; use `ContextMenuTrigger` for continuous tracking.
-Right-click menus map the click to window coordinates and stay at that position.
+Pointer menus map the right-click or long-press position to window coordinates and stay there.
 
 ## Interaction
 
+- Right-click or long-press a context-menu target to open its menu. Long presses on
+  editable inputs retain Android's native text-selection menu; selectable text
+  selects a word. Blank space beside selectable text opens the context menu.
+- Child long-press handlers can call `window.prevent_default()` or
+  `cx.stop_propagation()` to keep the ancestor context menu closed.
 - Hovering a submenu entry opens it after a short delay.
 - `Up` and `Down` move through enabled items.
 - `Right` opens a submenu and `Left` returns to its parent.

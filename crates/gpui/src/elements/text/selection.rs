@@ -1,14 +1,15 @@
 use super::{InteractiveTextClickEvent, TextLayout};
 use crate::{
     App, Bounds, ClipboardItem, CursorStyle, DispatchPhase, FocusHandle, Hitbox, Hsla,
-    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels,
-    Point, SharedString, TextAlign, Window, fill, point, px, size,
+    KeyDownEvent, LongPressEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    PaintQuad, Pixels, Point, SharedString, TextAlign, Window, fill, point, px, size,
 };
 use std::{
     cell::{Cell, RefCell},
     ops::Range,
     rc::Rc,
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 pub(super) struct TextSelection {
     pub focus: FocusHandle,
@@ -200,6 +201,40 @@ pub(super) fn register_handlers(
         },
         &hitbox,
     );
+    window.on_mouse_event({
+        let state = selection.clone();
+        let rows = rows.clone();
+        let hitbox = hitbox.clone();
+        let down = mouse_down.clone();
+        move |event: &LongPressEvent, phase, window, cx| {
+            if !phase.bubble() || window.default_prevented() || !hitbox.is_hovered(window) {
+                return;
+            }
+            let Some(index) = character_at(&rows, event.position) else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            let Some((start, word)) = state
+                .text
+                .split_word_bound_indices()
+                .find(|(start, word)| (*start..*start + word.len()).contains(&index))
+            else {
+                return;
+            };
+            let end = start + word.len();
+            state.anchor = start;
+            state.head = end;
+            state.dragging = false;
+            state.dragged = false;
+            let focus = state.focus.clone();
+            drop(state);
+            down.set(None);
+            window.focus(&focus, cx);
+            window.refresh();
+            window.prevent_default();
+            cx.stop_propagation();
+        }
+    });
     window.on_mouse_event({
         let state = selection.clone();
         let rows = rows.clone();

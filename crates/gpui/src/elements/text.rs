@@ -1040,8 +1040,8 @@ impl InteractiveText {
     }
 
     /// Enable read-only selection within this text block using the given highlight color.
-    /// Drag to select, Shift-click to extend, and use Ctrl/Cmd+A or Ctrl/Cmd+C
-    /// while focused to select all or copy plain text. Styles are inherited from
+    /// Drag to select, long-press to select a word, or Shift-click to extend.
+    /// Use Ctrl/Cmd+A or Ctrl/Cmd+C while focused to select all or copy plain text. Styles are inherited from
     /// the parent and retained while selecting. Selection resets when the displayed
     /// text changes. Ellipsized text copies its displayed representation; links are
     /// only activated when layout preserves the original text offsets.

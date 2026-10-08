@@ -2,8 +2,8 @@ use std::ops::Range;
 
 use gpui::{
     App, Bounds, Element, ElementId, ElementInputHandler, Entity, GlobalElementId, Hitbox,
-    HitboxBehavior, LayoutId, PaintQuad, Pixels, Style, TextInputFocusEvent, TextRun,
-    UnderlineStyle, Window, fill, point, prelude::*, px, relative, size,
+    HitboxBehavior, LayoutId, LongPressEvent, PaintQuad, Pixels, Style, TextInputFocusEvent,
+    TextRun, UnderlineStyle, Window, fill, point, prelude::*, px, relative, size,
 };
 
 use super::{InputMode, TextInput, state::TextLayout};
@@ -279,6 +279,14 @@ impl Element for TextElement {
                 );
             }
             if let Some(hitbox) = prepaint.focus_hitbox.take() {
+                let long_press_hitbox = hitbox.clone();
+                window.on_mouse_event(move |_: &LongPressEvent, phase, window, cx| {
+                    if phase.bubble() && long_press_hitbox.is_hovered(window) {
+                        // Keep Android's default text-selection action while excluding
+                        // ancestor context menus.
+                        cx.stop_propagation();
+                    }
+                });
                 let input = self.input.clone();
                 window.on_mouse_event(move |event: &TextInputFocusEvent, phase, window, cx| {
                     if phase.bubble() && hitbox.is_hovered(window) {

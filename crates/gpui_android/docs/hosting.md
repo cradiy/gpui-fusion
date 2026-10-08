@@ -206,7 +206,7 @@ usable GPU backend is available. An embedded host can supply its own error UI.
 All public session and View operations run on the Android main Looper.
 Surface callbacks release the old WGPU surface before releasing the native
 window reference. Reattachment preserves the device, atlas, and logical GPUI
-window. Resizing an existing native window retains its WGPU surface.
+window. Surface resizing preserves application state and device resources.
 `GpuiView` completes `SurfaceHolder.Callback2` redraws before returning control
 to Android. Hiding the View or backgrounding the host stops frame callbacks.
 
@@ -342,7 +342,15 @@ or open the finger-selection handles.
 
 Configuration changes and Surface recreation preserve in-process state.
 Process death starts a new application; persistent document restoration is the
-application's responsibility. A lost GPU device requires recreating the session.
+application's responsibility.
+
+GPU device loss automatically rebuilds the renderer and its texture caches while
+retaining the Rust application, text input, and window state. Recovery requires a
+visible active window or picture-in-picture Surface. Failed attempts retry with
+delays from 100 ms up to 2 seconds; the host does not continuously draw or restart
+the application while waiting. Returning to the app resumes recovery. GPU driver
+initialization still runs on the main Looper and may take time. Decoder failures
+are reported separately through the media API.
 
 ## Text input
 

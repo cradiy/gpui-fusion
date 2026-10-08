@@ -1776,6 +1776,10 @@ impl WgpuRenderer {
             self.surface_config.height = clamped_height.max(1);
             let surface_config = self.surface_config.clone();
 
+            if self.device_lost() {
+                return;
+            }
+
             let Some(resources) = self.resources.as_mut() else {
                 return;
             };
@@ -5500,6 +5504,23 @@ impl WgpuRenderer {
         self.device_lost.load(std::sync::atomic::Ordering::SeqCst)
     }
 
+    /// Wakes an event-driven host when the current device is lost.
+    /// Replaces the device's callback; install again after successful recovery.
+    /// The callback can run off the UI thread and must only schedule work.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn set_device_lost_waker(&self, wake: impl Fn() + Send + 'static) {
+        let lost = self.device_lost.clone();
+        self.resources()
+            .device
+            .set_device_lost_callback(move |reason, message| {
+                if reason != wgpu::DeviceLostReason::Destroyed {
+                    log::error!("wgpu device lost: reason={reason:?}, message={message}");
+                    lost.store(true, std::sync::atomic::Ordering::SeqCst);
+                    wake();
+                }
+            });
+    }
+
     /// Returns true if a redraw is needed because GPU state was cleared.
     /// Calling this method clears the flag.
     pub fn needs_redraw(&mut self) -> bool {
@@ -5537,10 +5558,10 @@ impl WgpuRenderer {
             self.resources = None;
             *gpu_context.borrow_mut() = None;
 
-            // Wait briefly for the GPU driver to stabilize, then try to
-            // recreate the context without software renderers. If this fails
-            // the caller should request another frame and retry — the real GPU
-            // may need more time to come back (e.g. after suspend/resume).
+            // Android schedules delayed retries through its host Looper instead
+            // of sleeping on the UI thread. Other hosts retain a short driver
+            // settling delay. Failed recovery can be retried on a later frame.
+            #[cfg(not(target_os = "android"))]
             std::thread::sleep(std::time::Duration::from_millis(350));
 
             let (new_context, surface) = create_context(window, self.compositor_gpu, true)?;

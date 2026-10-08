@@ -10,6 +10,7 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 #[derive(Debug)]
@@ -67,6 +68,8 @@ pub(crate) struct AndroidWindow {
     pub active: Cell<bool>,
     pub appearance: Cell<WindowAppearance>,
     force_frame: Cell<bool>,
+    recovery_retry_at: Cell<Option<Instant>>,
+    recovery_failures: Cell<u32>,
     pub(crate) pointer: Cell<Point<Pixels>>,
     pub(crate) hovered: Cell<bool>,
     modifiers: Cell<Modifiers>,
@@ -90,6 +93,7 @@ impl AndroidWindow {
         density: f32,
         appearance: WindowAppearance,
     ) -> Self {
+        Self::watch_device(&renderer, &host);
         Self {
             host,
             back_enabled: Cell::new(false),
@@ -112,6 +116,8 @@ impl AndroidWindow {
             active: Cell::new(false),
             appearance: Cell::new(appearance),
             force_frame: Cell::new(true),
+            recovery_retry_at: Cell::new(None),
+            recovery_failures: Cell::new(0),
             pointer: Cell::default(),
             hovered: Cell::new(false),
             modifiers: Cell::default(),
@@ -175,7 +181,13 @@ impl AndroidWindow {
             && context.borrow().as_ref().is_some_and(|context| {
                 context.adapter.get_info().backend == gpui_wgpu::wgpu::Backend::Gl
             });
-        if same_window && !recreate_egl_surface {
+        if self.renderer.borrow().device_lost() {
+            self.renderer.borrow_mut().unconfigure_surface();
+            self.renderer
+                .borrow_mut()
+                .update_drawable_size(drawable_size);
+            *self.native.borrow_mut() = Some(native);
+        } else if same_window && !recreate_egl_surface {
             self.renderer
                 .borrow_mut()
                 .update_drawable_size(drawable_size);
@@ -321,14 +333,58 @@ impl AndroidWindow {
         self.render_frame(true)
     }
 
+    fn watch_device(renderer: &WgpuRenderer, host: &Arc<crate::bridge::Host>) {
+        let host = Arc::downgrade(host);
+        renderer.set_device_lost_waker(move || {
+            if let Some(host) = host.upgrade() {
+                host.request_frame();
+            }
+        });
+    }
+
+    fn recover_renderer(&self) -> bool {
+        if !self.renderer.borrow().device_lost() {
+            return true;
+        }
+        if !self.active.get() && !self.picture_in_picture.get() {
+            return false;
+        }
+        if let Some(remaining) = self
+            .recovery_retry_at
+            .get()
+            .and_then(|at| at.checked_duration_since(Instant::now()))
+        {
+            self.host.request_frame_after(remaining);
+            return false;
+        }
+        let Some(native) = self.native.borrow().clone() else {
+            return false;
+        };
+        let result = self.renderer.borrow_mut().recover(&native);
+        match result {
+            Ok(()) => {
+                Self::watch_device(&self.renderer.borrow(), &self.host);
+                self.recovery_retry_at.set(None);
+                self.recovery_failures.set(0);
+                self.force_frame.set(true);
+                true
+            }
+            Err(error) => {
+                let failures = self.recovery_failures.get();
+                let delay = Duration::from_millis((100 << failures.min(5)).min(2000));
+                self.recovery_failures.set(failures.saturating_add(1));
+                self.recovery_retry_at.set(Some(Instant::now() + delay));
+                log::warn!("Android GPU recovery failed; retrying in {delay:?}: {error:#}");
+                self.host.request_frame_after(delay);
+                false
+            }
+        }
+    }
+
     fn render_frame(&self, redraw: bool) -> Result<()> {
-        if self.native.borrow().is_none() {
+        if self.native.borrow().is_none() || !self.recover_renderer() {
             return Ok(());
         }
-        anyhow::ensure!(
-            !self.renderer.borrow().device_lost(),
-            "Android GPU device lost; close and recreate the GpuiSession"
-        );
         let callback = self.callbacks.borrow_mut().frame.take();
         if let Some(mut callback) = callback {
             callback(RequestFrameOptions {
@@ -639,6 +695,11 @@ impl PlatformWindow for AndroidWindowHandle {
     }
     fn draw(&self, scene: &Scene) {
         let mut renderer = self.renderer.borrow_mut();
+        if renderer.device_lost() {
+            self.force_frame.set(true);
+            self.host.request_frame();
+            return;
+        }
         let presented = renderer.draw(scene);
         let needs_redraw = renderer.needs_redraw();
         if !presented || needs_redraw {
@@ -658,7 +719,8 @@ impl PlatformWindow for AndroidWindowHandle {
         true
     }
     fn gpu_specs(&self) -> Option<GpuSpecs> {
-        Some(self.renderer.borrow().gpu_specs())
+        let renderer = self.renderer.borrow();
+        (!renderer.device_lost()).then(|| renderer.gpu_specs())
     }
     fn update_ime_position(&self, _: Bounds<Pixels>) {}
 

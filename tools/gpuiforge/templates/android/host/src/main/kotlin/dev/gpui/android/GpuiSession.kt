@@ -25,6 +25,7 @@ class GpuiSession : AutoCloseable {
     @Volatile private var closed = false
     private var id = 0L
     private val frameWakePosted = AtomicBoolean(false)
+    private val delayedFrameWake = Runnable { if (!closed) view.get()?.requestFrame() }
     private val pendingUrls = ArrayList<String>()
 // gpuiforge:if sharing
     private val pendingShares = ArrayList<IncomingShare>()
@@ -574,6 +575,13 @@ class GpuiSession : AutoCloseable {
             frameWakePosted.set(false)
             if (!closed) view.get()?.requestFrame()
         }, this, SystemClock.uptimeMillis())
+    }
+
+    private fun requestFrameAfter(delayMillis: Long) {
+        checkThread()
+        if (closed) return
+        handler.removeCallbacks(delayedFrameWake)
+        handler.postAtTime(delayedFrameWake, this, SystemClock.uptimeMillis() + delayMillis)
     }
 
     private fun scheduleTask(token: Long, delayMillis: Long) {

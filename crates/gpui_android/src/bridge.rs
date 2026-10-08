@@ -192,6 +192,22 @@ impl Host {
         }
     }
 
+    pub fn request_frame_after(&self, delay: Duration) {
+        if let Err(error) = self.with_env(|env| {
+            env.call_method(
+                self.object.as_obj(),
+                "requestFrameAfter",
+                "(J)V",
+                &[JValue::Long(
+                    delay.as_nanos().div_ceil(1_000_000).min(i64::MAX as u128) as i64,
+                )],
+            )?;
+            Ok(())
+        }) {
+            log::error!("Android delayed frame scheduling failed: {error}");
+        }
+    }
+
     pub fn set_cursor(&self, style: i32) -> Result<()> {
         self.with_env(|env| {
             env.call_method(

@@ -579,6 +579,39 @@ guaranteed before process termination: persist important state independently.
 See [Android memory callbacks](https://developer.android.com/reference/android/content/ComponentCallbacks2).
 Other backends may emit no events.
 
+### Thermal state
+
+Read `cx.thermal_state()` for the current system thermal state. Subscribe to
+changes with the same API used on desktop:
+
+```rust,ignore
+let current = cx.thermal_state();
+let subscription = cx.on_thermal_state_change(|cx| {
+    let state = cx.thermal_state();
+    // Update application-owned workload or quality settings as appropriate.
+});
+```
+
+Keep the subscription while updates are needed. Callbacks run on the GPUI
+thread and fire when the mapped `ThermalState` changes. State reads use a cache;
+they do not poll Android services during rendering. The session releases the
+system listener on close and retains it across View or Surface replacement.
+
+Android 10 (API 29) and later use `PowerManager` thermal status events:
+
+| Android status | GPUI state |
+| --- | --- |
+| None | `Nominal` |
+| Light | `Fair` |
+| Moderate or severe | `Serious` |
+| Critical, emergency, or shutdown | `Critical` |
+
+No manifest permission or additional GPUiForge feature is required. Android
+8–9, unavailable thermal services, and devices that report no throttling use
+`Nominal`; this is not a temperature measurement. Workload changes remain the
+application's decision; GPUI's existing thermal-aware animation scheduling also
+uses this state. See [Android thermal status](https://developer.android.com/reference/android/os/PowerManager#getCurrentThermalStatus()).
+
 ### Network state
 
 Add `"android.permission.ACCESS_NETWORK_STATE"` to

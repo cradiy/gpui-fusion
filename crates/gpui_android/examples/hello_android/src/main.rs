@@ -103,6 +103,9 @@ fn main() {
                 network_status: "Network monitoring is stopped.".into(),
                 network_subscription: None,
                 memory_subscription: None,
+                thermal_subscription: None,
+                thermal_changes: 0,
+                thermal_status: String::new(),
                 memory_trims: 0,
                 memory_status: "No memory trim event received.".into(),
                 settings_status: String::new(),
@@ -136,6 +139,7 @@ fn main() {
             view.update(cx, |this, cx| {
                 this.toggle_network(cx);
                 this.toggle_memory_trim(cx);
+                this.toggle_thermal(cx);
                 cx.observe(&uic::components::modal::layer(cx), |_, _, cx| cx.notify())
                     .detach();
                 cx.subscribe(&this.title, |this, _, event, cx| {
@@ -242,6 +246,9 @@ struct Counter {
     network_status: String,
     network_subscription: Option<Subscription>,
     memory_subscription: Option<Subscription>,
+    thermal_subscription: Option<Subscription>,
+    thermal_changes: usize,
+    thermal_status: String,
     memory_trims: usize,
     memory_status: String,
     settings_status: String,
@@ -289,6 +296,31 @@ fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
 }
 
 impl Counter {
+    fn toggle_thermal(&mut self, cx: &mut Context<Self>) {
+        if self.thermal_subscription.take().is_some() {
+            self.thermal_status = "Thermal monitoring is stopped.".into();
+        } else {
+            self.thermal_status = format!(
+                "Thermal: {:?} · changes {}",
+                cx.thermal_state(),
+                self.thermal_changes
+            );
+            let entity = cx.entity().downgrade();
+            self.thermal_subscription = Some(cx.on_thermal_state_change(move |cx| {
+                let _ = entity.update(cx, |this, cx| {
+                    this.thermal_changes += 1;
+                    this.thermal_status = format!(
+                        "Thermal: {:?} · changes {}",
+                        cx.thermal_state(),
+                        this.thermal_changes
+                    );
+                    cx.notify();
+                });
+            }));
+        }
+        cx.notify();
+    }
+
     fn toggle_memory_trim(&mut self, cx: &mut Context<Self>) {
         if self.memory_subscription.take().is_some() {
             self.memory_status = "Memory monitoring is stopped.".into();
@@ -1151,6 +1183,8 @@ impl Counter {
             .child(div().id("network-status").role(Role::Status).aria_label(self.network_status.clone()).text_sm().whitespace_normal().child(self.network_status.clone()))
             .child(button("memory-monitor", "Start / stop memory monitoring").on_click(cx.listener(|this, _, _, cx| this.toggle_memory_trim(cx))))
             .child(div().id("memory-status").role(Role::Status).aria_label(self.memory_status.clone()).text_sm().whitespace_normal().child(self.memory_status.clone()))
+            .child(button("thermal-monitor", "Start / stop thermal monitoring").on_click(cx.listener(|this, _, _, cx| this.toggle_thermal(cx))))
+            .child(div().id("thermal-status").role(Role::Status).aria_label(self.thermal_status.clone()).text_sm().whitespace_normal().child(self.thermal_status.clone()))
             .child(
                 button("background-execution", "Start / stop background execution")
                     .on_click(cx.listener(Self::toggle_background)),

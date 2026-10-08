@@ -18,6 +18,16 @@ use std::{
 
 type MemoryTrimCallback = Rc<RefCell<Box<dyn FnMut(MemoryTrimLevel)>>>;
 type MemoryWarningCallback = Rc<RefCell<Box<dyn FnMut()>>>;
+type ThermalCallback = Rc<RefCell<Box<dyn FnMut()>>>;
+
+fn decode_thermal_state(status: i32) -> ThermalState {
+    match status {
+        1 => ThermalState::Fair,
+        2 | 3 => ThermalState::Serious,
+        4.. => ThermalState::Critical,
+        _ => ThermalState::Nominal,
+    }
+}
 
 /// Platform owned by one Android `GpuiSession`. Its window survives View and
 /// Surface replacement until the session is explicitly closed.
@@ -37,6 +47,8 @@ pub struct AndroidPlatform {
     lifecycle: RefCell<Option<Box<dyn FnMut(AppLifecyclePhase)>>>,
     memory_trim: RefCell<Option<MemoryTrimCallback>>,
     memory_warning: RefCell<Option<MemoryWarningCallback>>,
+    thermal_state: Cell<ThermalState>,
+    thermal_changed: RefCell<Option<ThermalCallback>>,
     quit: RefCell<Option<Box<dyn FnMut()>>>,
     open_urls: RefCell<Option<Box<dyn FnMut(Vec<String>)>>>,
     pending_urls: RefCell<Vec<String>>,
@@ -68,6 +80,7 @@ impl AndroidPlatform {
         let dispatcher = AndroidDispatcher::new(host.clone());
         let foreground = ForegroundExecutor::new(dispatcher.clone());
         let appearance = host.window_appearance()?;
+        let thermal_state = decode_thermal_state(host.thermal_status()?);
         let text = Arc::new(CosmicTextSystem::new_without_system_fonts("IBM Plex Sans"));
         text.add_font_files(&host.system_font_paths()?);
         text.add_fonts(vec![Cow::Borrowed(include_bytes!(
@@ -113,6 +126,8 @@ impl AndroidPlatform {
             lifecycle: RefCell::default(),
             memory_trim: RefCell::default(),
             memory_warning: RefCell::default(),
+            thermal_state: Cell::new(thermal_state),
+            thermal_changed: RefCell::default(),
             quit: RefCell::default(),
             open_urls: RefCell::default(),
             pending_urls: RefCell::default(),
@@ -149,7 +164,19 @@ impl AndroidPlatform {
         }
     }
 
+    pub(crate) fn thermal_state_changed(&self, status: i32) {
+        let state = decode_thermal_state(status);
+        if self.thermal_state.replace(state) == state {
+            return;
+        }
+        let callback = self.thermal_changed.borrow().clone();
+        if let Some(callback) = callback {
+            callback.borrow_mut()();
+        }
+    }
+
     pub(crate) fn close(&self) {
+        self.thermal_changed.borrow_mut().take();
         self.memory_trim.borrow_mut().take();
         self.memory_warning.borrow_mut().take();
         self.open_urls.borrow_mut().take();
@@ -400,9 +427,11 @@ impl Platform for AndroidPlatform {
     fn on_will_open_app_menu(&self, _: Box<dyn FnMut()>) {}
     fn on_validate_app_menu_command(&self, _: Box<dyn FnMut(&dyn Action) -> bool>) {}
     fn thermal_state(&self) -> ThermalState {
-        ThermalState::Nominal
+        self.thermal_state.get()
     }
-    fn on_thermal_state_change(&self, _: Box<dyn FnMut()>) {}
+    fn on_thermal_state_change(&self, callback: Box<dyn FnMut()>) {
+        *self.thermal_changed.borrow_mut() = Some(Rc::new(RefCell::new(callback)));
+    }
     fn compositor_name(&self) -> &'static str {
         "Android"
     }

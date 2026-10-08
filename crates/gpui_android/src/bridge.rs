@@ -387,6 +387,14 @@ impl Host {
         })
     }
 
+    pub fn thermal_status(&self) -> Result<i32> {
+        self.with_env(|env| {
+            Ok(env
+                .call_method(self.object.as_obj(), "thermalStatus", "()I", &[])?
+                .i()?)
+        })
+    }
+
     pub fn observe_network(&self, token: u64, enable: bool) -> Result<()> {
         self.with_env(|env| {
             env.call_method(
@@ -702,6 +710,11 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         method("nativeScrollInput", "(JJFF)Z", scroll_input as *mut c_void),
         method("nativeLifecycle", "(JI)V", lifecycle as *mut c_void),
         method("nativeTrimMemory", "(JI)V", trim_memory as *mut c_void),
+        method(
+            "nativeThermalStateChanged",
+            "(JI)V",
+            thermal_state_changed as *mut c_void,
+        ),
         method(
             "nativePictureInPictureChanged",
             "(JZ)V",
@@ -1586,6 +1599,15 @@ extern "system" fn trim_memory(mut env: JNIEnv, _: JClass, id: jlong, level: jin
     call(&mut env, |_| {
         if let Ok(session) = session(id) {
             session.platform.trim_memory(level);
+        }
+        Ok(())
+    });
+}
+
+extern "system" fn thermal_state_changed(mut env: JNIEnv, _: JClass, id: jlong, status: jint) {
+    call(&mut env, |_| {
+        if let Ok(session) = session(id) {
+            session.platform.thermal_state_changed(status);
         }
         Ok(())
     });

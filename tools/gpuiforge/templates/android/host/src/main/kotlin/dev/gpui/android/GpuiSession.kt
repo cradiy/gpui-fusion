@@ -134,6 +134,24 @@ class GpuiSession : AutoCloseable {
     private var keyboardRequestVersion = 0L
     private var permissionHostVersion = 0L
     private var networkMonitor: NetworkMonitor? = null
+    private var thermalMonitor: AutoCloseable? = null
+    private var thermalStatus = 0
+
+    private fun thermalStatus(): Int { checkThread(); return thermalStatus }
+
+    private fun monitorThermalState(context: Context) {
+        if (Build.VERSION.SDK_INT < 29 || thermalMonitor != null) return
+        try {
+            val monitor = ThermalMonitor(context, handler) { status ->
+                thermalStatus = status
+                if (!closed && id != 0L) nativeThermalStateChanged(id, status)
+            }
+            thermalMonitor = monitor
+            thermalStatus = monitor.status
+        } catch (error: RuntimeException) {
+            android.util.Log.w("GPUI", "Thermal status monitoring unavailable", error)
+        }
+    }
     private var componentContext: Context? = null
     private val componentCallbacks = object : ComponentCallbacks2 {
         override fun onConfigurationChanged(configuration: Configuration) = Unit
@@ -343,6 +361,7 @@ class GpuiSession : AutoCloseable {
             context.registerComponentCallbacks(componentCallbacks)
             componentContext = context
         }
+        monitorThermalState(next.context.applicationContext)
     }
 
     internal fun unbind(previous: GpuiView) {
@@ -810,6 +829,12 @@ class GpuiSession : AutoCloseable {
         checkThread()
         if (closed) return
         closed = true
+        try {
+            thermalMonitor?.close()
+        } catch (error: Exception) {
+            android.util.Log.w("GPUI", "Could not unregister thermal status listener", error)
+        }
+        thermalMonitor = null
         componentContext?.unregisterComponentCallbacks(componentCallbacks)
         componentContext = null
         cancelBackGesture()
@@ -883,6 +908,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeInputAction(id: Long, epoch: Long, action: Int): Boolean
         @JvmStatic private external fun nativeLifecycle(id: Long, phase: Int)
         @JvmStatic private external fun nativeTrimMemory(id: Long, level: Int)
+        @JvmStatic private external fun nativeThermalStateChanged(id: Long, status: Int)
         @JvmStatic private external fun nativePictureInPictureChanged(id: Long, enabled: Boolean)
         @JvmStatic private external fun nativePictureInPictureResult(id: Long, error: String?)
         @JvmStatic private external fun nativeFocus(id: Long, active: Boolean)

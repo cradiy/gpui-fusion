@@ -929,10 +929,11 @@ impl App {
             let app = Rc::downgrade(&app);
             move || {
                 if let Some(app) = app.upgrade() {
-                    let cx = &mut app.borrow_mut();
-                    cx.thermal_state_observers
-                        .clone()
-                        .retain(&(), move |callback| (callback)(cx));
+                    app.borrow_mut().update(|cx| {
+                        cx.thermal_state_observers
+                            .clone()
+                            .retain(&(), move |callback| (callback)(cx));
+                    });
                 }
             }
         }));

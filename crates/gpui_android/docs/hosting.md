@@ -149,6 +149,8 @@ Custom embedded hosts keep using `GpuiView` and its normal attachment lifecycle.
 Do not replace its `AccessibilityNodeProvider`. InputConnection support and
 native text-selection handles are independent of the control's semantic tree;
 custom text editors must also supply their accessible text and selection data.
+Android services can navigate and select this text; replacing its value through
+the system's set-text accessibility action is not supported by the adapter.
 
 ## Picture-in-picture host
 

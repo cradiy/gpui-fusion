@@ -35,11 +35,15 @@ impl ActivationHandler for Activation<'_> {
     }
 }
 
-struct Actions<'a>(&'a A11yCallbacks);
+struct Actions<'a> {
+    callbacks: &'a A11yCallbacks,
+    handled: bool,
+}
 
 impl ActionHandler for Actions<'_> {
     fn do_action(&mut self, request: ActionRequest) {
-        (self.0.action)(request);
+        self.handled = true;
+        (self.callbacks.action)(request);
     }
 }
 
@@ -81,18 +85,23 @@ pub(crate) extern "system" fn action(
             return Ok(0);
         };
         let window = window(id)?;
-        let events = {
+        let (events, handled) = {
             let mut state = window.accessibility.borrow_mut();
             let Some(Accessibility { adapter, callbacks }) = state.as_mut() else {
                 return Ok(0);
             };
-            adapter.perform_action(&mut Actions(callbacks), node, &action)
+            let mut actions = Actions {
+                callbacks,
+                handled: false,
+            };
+            let events = adapter.perform_action(&mut actions, node, &action);
+            (events, actions.handled)
         };
         if let Some(events) = events {
             events.raise(env, &host);
             Ok(1)
         } else {
-            Ok(0)
+            Ok(handled.into())
         }
     })
 }

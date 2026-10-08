@@ -94,11 +94,16 @@ reqwest_client = { path = "crates/reqwest_client" }
 # External crates
 #
 
-accesskit = "0.24.0"
-accesskit_android = { path = "crates/gpui_android/vendor/accesskit_android", version = "0.7.4" }
-accesskit_macos = "0.26.0"
-accesskit_unix = "0.21.0"
-accesskit_windows = "0.33.1"
+# Temporarily use Git for the Android empty-text event overflow fix:
+# https://github.com/AccessKit/accesskit/pull/813
+# Keep the core and all adapters on the same source to share AccessKit types.
+# Switch these dependencies back to crates.io together once accesskit_android
+# publishes this fix (expected in 0.9.1), using compatible core/adapter versions.
+accesskit = { git = "https://github.com/AccessKit/accesskit", rev = "115887d84f0254cfcad1d9a79d93bba1fde79e75" }
+accesskit_android = { git = "https://github.com/AccessKit/accesskit", rev = "115887d84f0254cfcad1d9a79d93bba1fde79e75" }
+accesskit_macos = { git = "https://github.com/AccessKit/accesskit", rev = "115887d84f0254cfcad1d9a79d93bba1fde79e75" }
+accesskit_unix = { git = "https://github.com/AccessKit/accesskit", rev = "115887d84f0254cfcad1d9a79d93bba1fde79e75" }
+accesskit_windows = { git = "https://github.com/AccessKit/accesskit", rev = "115887d84f0254cfcad1d9a79d93bba1fde79e75" }
 anyhow = "1.0.86"
 ashpd = { version = "0.13", default-features = false, features = [
   "async-io",

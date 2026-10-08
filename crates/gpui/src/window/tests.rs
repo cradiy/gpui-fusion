@@ -243,6 +243,81 @@ fn run_pointer_mapping_probe(transform: crate::PointerTransform) {
     assert!(events.contains(&("raw", point(px(450.), px(30.)), point(px(450.), px(30.)))));
 }
 
+#[test]
+fn cancelled_mouse_press_releases_capture_without_clicking() {
+    use crate::{
+        InteractiveElement, MouseDownEvent, MouseUpEvent, PlatformInput,
+        StatefulInteractiveElement, point,
+    };
+    struct Button {
+        clicks: Rc<Cell<usize>>,
+        releases: Rc<Cell<usize>>,
+    }
+    impl Render for Button {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let clicks = self.clicks.clone();
+            let releases = self.releases.clone();
+            div()
+                .id("button")
+                .size(px(100.))
+                .on_click(move |_, _, _| {
+                    clicks.set(clicks.get() + 1);
+                })
+                .child(
+                    canvas(
+                        |bounds, window, _| {
+                            window.insert_hitbox(bounds, super::HitboxBehavior::Normal)
+                        },
+                        move |_, hitbox, window, _| {
+                            window.on_mouse_event(move |_: &MouseDownEvent, phase, window, _| {
+                                if phase.bubble() && hitbox.is_hovered(window) {
+                                    window.capture_pointer(hitbox.id);
+                                }
+                            });
+                            window.on_mouse_event(move |_: &MouseUpEvent, phase, _, _| {
+                                if phase.capture() {
+                                    releases.set(releases.get() + 1);
+                                }
+                            });
+                        },
+                    )
+                    .size_full(),
+                )
+        }
+    }
+    let mut cx = TestAppContext::single();
+    let clicks = Rc::new(Cell::new(0));
+    let releases = Rc::new(Cell::new(0));
+    let window = cx.add_window({
+        let clicks = clicks.clone();
+        let releases = releases.clone();
+        move |_, _| Button { clicks, releases }
+    });
+    cx.update_window(window.into(), |_, window, cx| {
+        window.draw(cx).clear();
+        let position = point(px(30.), px(30.));
+        let down = MouseDownEvent {
+            position,
+            ..Default::default()
+        };
+        let up = MouseUpEvent {
+            position,
+            ..Default::default()
+        };
+        window.dispatch_event(PlatformInput::MouseDown(down.clone()), cx);
+        assert!(window.captured_hitbox().is_some());
+        window.dispatch_event(PlatformInput::MouseCancelled(up.clone()), cx);
+        assert!(window.captured_hitbox().is_none());
+        assert_eq!(clicks.get(), 0);
+        assert_eq!(releases.get(), 1);
+        window.dispatch_event(PlatformInput::MouseDown(down), cx);
+        window.release_pointer();
+        window.dispatch_event(PlatformInput::MouseUp(up), cx);
+        assert_eq!(clicks.get(), 1);
+    })
+    .unwrap();
+}
+
 mod affine_a11y;
 mod affine_cache;
 mod affine_deferred;

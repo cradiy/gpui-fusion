@@ -21,6 +21,17 @@ impl AnyMouseListener {
 }
 
 impl Window {
+    /// Register a raw touch listener during paint, for the next rendered frame.
+    /// Track contacts by ID and perform hit testing when accepting a touch.
+    /// Preventing the default action suppresses Android's synthesized gestures
+    /// for the remainder of the contact sequence.
+    pub fn on_touch_event(
+        &mut self,
+        listener: impl FnMut(&crate::TouchEvent, DispatchPhase, &mut Window, &mut App) + 'static,
+    ) {
+        self.on_mouse_event(listener);
+    }
+
     /// Register a mouse event listener on the window for the next frame. The type of event
     /// is determined by the first parameter of the given listener. When the next frame is rendered
     /// the listener will be cleared.
@@ -60,9 +71,14 @@ impl Window {
         &mut self,
         event: &dyn Any,
         preserve_drag_on_mouse_up: bool,
+        cancelled: bool,
         cx: &mut App,
     ) {
-        let hit_test = self.rendered_frame.hit_test(self.raw_mouse_position());
+        let hit_test = if cancelled {
+            Default::default()
+        } else {
+            self.rendered_frame.hit_test(self.raw_mouse_position())
+        };
         if hit_test != self.mouse_hit_test {
             self.mouse_hit_test = hit_test;
             self.reset_cursor_style(cx);
@@ -79,7 +95,8 @@ impl Window {
         }
 
         #[cfg(any(feature = "inspector", debug_assertions))]
-        if self.is_inspector_picking(cx)
+        if !cancelled
+            && self.is_inspector_picking(cx)
             && self.raw_mouse_position().x < self.viewport_size.width - self.inspector_width()
         {
             self.handle_inspector_mouse_event(event, cx);

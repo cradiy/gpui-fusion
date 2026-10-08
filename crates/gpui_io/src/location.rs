@@ -1,0 +1,354 @@
+use crate::{FileBookmark, FileHandle, IoExecutor, unsupported};
+use anyhow::{Result, ensure};
+use futures::future::LocalBoxFuture;
+use std::{
+    ffi::OsString,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
+/// Serializable directory reference. Native paths retain no additional OS permissions.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct LocationBookmark(LocationReference);
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+enum LocationReference {
+    Path(std::path::PathBuf),
+    Provider(FileBookmark),
+}
+
+impl LocationBookmark {
+    pub fn from_path(path: impl Into<std::path::PathBuf>) -> Self {
+        Self(LocationReference::Path(path.into()))
+    }
+    pub fn new(provider: impl Into<String>, data: Vec<u8>) -> Self {
+        Self(LocationReference::Provider(FileBookmark::new(
+            provider, data,
+        )))
+    }
+    pub fn path(&self) -> Option<&Path> {
+        match &self.0 {
+            LocationReference::Path(path) => Some(path),
+            _ => None,
+        }
+    }
+    pub fn provider(&self) -> Option<&FileBookmark> {
+        match &self.0 {
+            LocationReference::Provider(bookmark) => Some(bookmark),
+            _ => None,
+        }
+    }
+}
+
+/// Storage purpose. Availability and authorization are platform-dependent.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SystemLocation {
+    AppData,
+    AppConfig,
+    Cache,
+    Downloads,
+    Documents,
+    Pictures,
+    Music,
+    Videos,
+}
+
+/// Metadata used when creating a file. Providers may require a concrete MIME type.
+#[derive(Clone, Debug, Default)]
+pub struct CreateOptions {
+    pub mime_type: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DirectoryEntryKind {
+    File,
+    Directory,
+    Symlink,
+    Other,
+}
+
+/// One immediate child. Native names retain their original OS encoding.
+#[derive(Clone, Debug)]
+pub struct DirectoryEntry {
+    pub name: OsString,
+    pub kind: DirectoryEntryKind,
+}
+
+/// A location can be a filesystem directory or a platform collection.
+pub trait PlatformLocation: Send + Sync {
+    fn open_file(&self, _relative_path: PathBuf) -> LocalBoxFuture<'static, Result<FileHandle>> {
+        Box::pin(async { Err(unsupported("location cannot look up existing files")) })
+    }
+    fn read_dir(
+        &self,
+        _relative_path: PathBuf,
+    ) -> LocalBoxFuture<'static, Result<Vec<DirectoryEntry>>> {
+        Box::pin(async { Err(unsupported("location cannot list directories")) })
+    }
+    fn persist(&self) -> LocalBoxFuture<'static, Result<LocationBookmark>> {
+        Box::pin(async { Err(unsupported("location does not support persistent access")) })
+    }
+    fn path(&self) -> Option<&Path> {
+        None
+    }
+    /// Resolve a validated relative file path without creating it; not all providers support lookup.
+    fn file(&self, _relative_path: &str) -> Result<FileHandle> {
+        Err(unsupported("location cannot resolve files by name"))
+    }
+    /// Create at a validated slash-separated relative path, including parent directories.
+    /// Do not overwrite existing files. Providers may choose a different display name.
+    fn create_file(
+        &self,
+        relative_path: String,
+        options: CreateOptions,
+    ) -> LocalBoxFuture<'static, Result<FileHandle>>;
+}
+
+#[derive(Clone)]
+pub struct LocationHandle(Arc<dyn PlatformLocation>);
+impl LocationHandle {
+    /// Look up an existing file without creating it. Access is checked again when reading/writing.
+    pub async fn open_file(&self, relative_path: impl Into<PathBuf>) -> Result<FileHandle> {
+        let relative_path = relative_path.into();
+        validate_lookup_path(&relative_path, false)?;
+        self.0.open_file(relative_path).await
+    }
+    /// List immediate children, without sorting or recursion. An empty path selects this location.
+    /// Returns an in-memory listing, not an atomic snapshot or a directory watcher.
+    pub async fn read_dir(&self, relative_path: impl Into<PathBuf>) -> Result<Vec<DirectoryEntry>> {
+        let relative_path = relative_path.into();
+        validate_lookup_path(&relative_path, true)?;
+        self.0.read_dir(relative_path).await
+    }
+    /// Retain access explicitly; store the returned bookmark in application settings.
+    pub fn persist(&self) -> LocalBoxFuture<'static, Result<LocationBookmark>> {
+        self.0.persist()
+    }
+    pub fn new(location: impl PlatformLocation + 'static) -> Self {
+        Self(Arc::new(location))
+    }
+    pub fn path(&self) -> Option<&Path> {
+        self.0.path()
+    }
+    /// Resolve a slash-separated relative file path without accessing storage.
+    pub fn file(&self, relative_path: &str) -> Result<FileHandle> {
+        validate_relative_path(relative_path)?;
+        self.0.file(relative_path)
+    }
+    /// Create a file and missing parent directories relative to this location.
+    /// Use `/` separators on every platform; absolute paths, empty components,
+    /// `.` and `..` are rejected. Native filesystem symlinks are followed normally.
+    pub async fn create_file(
+        &self,
+        relative_path: impl Into<String>,
+        options: CreateOptions,
+    ) -> Result<FileHandle> {
+        let relative_path = relative_path.into();
+        validate_relative_path(&relative_path)?;
+        self.0.create_file(relative_path, options).await
+    }
+    pub fn from_path(path: impl Into<std::path::PathBuf>, executor: impl Into<IoExecutor>) -> Self {
+        crate::native::location(path.into(), executor.into())
+    }
+}
+
+/// Location discovery performs no permission prompts or fallback to a different destination.
+pub trait PlatformLocations: Send + Sync {
+    fn restore_location(
+        &self,
+        _bookmark: LocationBookmark,
+    ) -> LocalBoxFuture<'static, Result<LocationHandle>> {
+        Box::pin(async { Err(unsupported("location bookmark provider is unavailable")) })
+    }
+    fn release_location(&self, _bookmark: LocationBookmark) -> LocalBoxFuture<'static, Result<()>> {
+        Box::pin(async { Err(unsupported("location bookmark provider is unavailable")) })
+    }
+    fn restore_file(&self, _bookmark: FileBookmark) -> LocalBoxFuture<'static, Result<FileHandle>> {
+        Box::pin(async { Err(unsupported("file bookmark provider is unavailable")) })
+    }
+    fn release_file(&self, _bookmark: FileBookmark) -> LocalBoxFuture<'static, Result<()>> {
+        Box::pin(async { Err(unsupported("file bookmark provider is unavailable")) })
+    }
+    fn location(&self, kind: SystemLocation) -> LocalBoxFuture<'static, Result<LocationHandle>>;
+}
+
+#[derive(Clone)]
+pub struct FileSystem(Arc<dyn PlatformLocations>);
+impl FileSystem {
+    /// Restore a chosen directory. Revoked grants and missing directories return errors.
+    pub fn restore_location(
+        &self,
+        bookmark: &LocationBookmark,
+    ) -> LocalBoxFuture<'static, Result<LocationHandle>> {
+        self.0.restore_location(bookmark.clone())
+    }
+    /// Release persistent access without deleting any contents. Other handles may share the grant.
+    pub fn release_location(
+        &self,
+        bookmark: &LocationBookmark,
+    ) -> LocalBoxFuture<'static, Result<()>> {
+        self.0.release_location(bookmark.clone())
+    }
+    /// Restore a file without opening a picker. Missing files or lost grants return errors.
+    pub fn restore_file(
+        &self,
+        bookmark: &FileBookmark,
+    ) -> LocalBoxFuture<'static, Result<FileHandle>> {
+        self.0.restore_file(bookmark.clone())
+    }
+    /// Release the bookmark's persistent permissions without deleting the file.
+    /// Grants can be shared by other handles or bookmarks within the application.
+    pub fn release_file(&self, bookmark: &FileBookmark) -> LocalBoxFuture<'static, Result<()>> {
+        self.0.release_file(bookmark.clone())
+    }
+    pub fn new(locations: impl PlatformLocations + 'static) -> Self {
+        Self(Arc::new(locations))
+    }
+    pub async fn location(&self, kind: SystemLocation) -> Result<LocationHandle> {
+        self.0.location(kind).await
+    }
+
+    /// Desktop directory discovery through `dirs`; `app_id` is a stable directory component.
+    pub fn desktop(app_id: &str, executor: impl Into<IoExecutor>) -> Result<Self> {
+        validate_app_id(app_id)?;
+        #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+        {
+            Ok(Self::new(DesktopLocations {
+                app_id: app_id.into(),
+                executor: executor.into(),
+            }))
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+        {
+            let _ = executor;
+            Err(unsupported(
+                "desktop locations unavailable on this platform",
+            ))
+        }
+    }
+}
+
+/// Validate an app-specific directory component, independently of a display name.
+pub fn validate_app_id(app_id: &str) -> Result<()> {
+    validate_name(app_id)?;
+    ensure!(
+        app_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_')),
+        "invalid application identifier"
+    );
+    Ok(())
+}
+
+pub(crate) fn validate_name(name: &str) -> Result<()> {
+    ensure!(
+        !name.is_empty()
+            && name != "."
+            && name != ".."
+            && !name.ends_with(['.', ' '])
+            && !name.contains(['/', '\\', '\0', ':']),
+        "expected a filename, not a path"
+    );
+    Ok(())
+}
+
+pub(crate) fn validate_relative_path(path: &str) -> Result<()> {
+    for component in path.split('/') {
+        validate_name(component)?;
+    }
+    Ok(())
+}
+
+fn validate_lookup_path(path: &Path, allow_empty: bool) -> Result<()> {
+    let bytes = path.as_os_str().as_encoded_bytes();
+    if allow_empty && bytes.is_empty() {
+        return Ok(());
+    }
+    for part in bytes.split(|byte| *byte == b'/' || (cfg!(windows) && *byte == b'\\')) {
+        ensure!(
+            !part.is_empty()
+                && part != b"."
+                && part != b".."
+                && !part.ends_with(b".")
+                && !part.ends_with(b" ")
+                && !part.iter().any(|b| matches!(b, b'\\' | b':' | 0)),
+            "expected a relative path without empty, dot or parent components"
+        );
+    }
+    Ok(())
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+struct DesktopLocations {
+    app_id: String,
+    executor: IoExecutor,
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+impl PlatformLocations for DesktopLocations {
+    fn restore_location(
+        &self,
+        bookmark: LocationBookmark,
+    ) -> LocalBoxFuture<'static, Result<LocationHandle>> {
+        let executor = self.executor.clone();
+        self.executor.run(move || {
+            let path = bookmark
+                .path()
+                .ok_or_else(|| unsupported("unsupported location bookmark provider"))?;
+            ensure!(
+                path.is_absolute() && path.is_dir(),
+                "directory is missing or invalid"
+            );
+            Ok(LocationHandle::from_path(path, executor))
+        })
+    }
+    fn release_location(&self, bookmark: LocationBookmark) -> LocalBoxFuture<'static, Result<()>> {
+        Box::pin(async move {
+            ensure!(
+                bookmark.path().is_some(),
+                "unsupported location bookmark provider"
+            );
+            Ok(())
+        })
+    }
+    fn location(&self, kind: SystemLocation) -> LocalBoxFuture<'static, Result<LocationHandle>> {
+        let app_id = self.app_id.clone();
+        let executor = self.executor.clone();
+        self.executor.run(move || {
+            let root = match kind {
+                SystemLocation::AppData => dirs::data_local_dir(),
+                SystemLocation::AppConfig => dirs::config_local_dir(),
+                SystemLocation::Cache => dirs::cache_dir(),
+                SystemLocation::Downloads => dirs::download_dir(),
+                SystemLocation::Documents => dirs::document_dir(),
+                SystemLocation::Pictures => dirs::picture_dir(),
+                SystemLocation::Music => dirs::audio_dir(),
+                SystemLocation::Videos => dirs::video_dir(),
+            }
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotFound, "system location unavailable")
+            })?;
+            let path = match kind {
+                SystemLocation::AppData | SystemLocation::AppConfig | SystemLocation::Cache => {
+                    let path = root.join(&app_id);
+                    // These platforms share one root for multiple storage purposes.
+                    #[cfg(target_os = "windows")]
+                    let path = path.join(match kind {
+                        SystemLocation::AppData => "Data",
+                        SystemLocation::AppConfig => "Config",
+                        _ => "Cache",
+                    });
+                    #[cfg(target_os = "macos")]
+                    let path = match kind {
+                        SystemLocation::AppData => path.join("Data"),
+                        SystemLocation::AppConfig => path.join("Config"),
+                        _ => path,
+                    };
+                    path
+                }
+                _ => root,
+            };
+            Ok(LocationHandle::from_path(path, executor))
+        })
+    }
+}

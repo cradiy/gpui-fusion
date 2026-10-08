@@ -21,6 +21,7 @@ pub enum SubtitleFormat {
 pub struct SubtitleCue {
     pub id: Option<Arc<str>>,
     pub start: Duration,
+    /// Exclusive end time. `Duration::MAX` denotes a live cue valid until reset.
     pub end: Duration,
     pub text: Arc<str>,
     pub raw: Arc<str>,
@@ -41,7 +42,7 @@ pub struct ParsedSubtitles {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum SubtitleEvent {
-    /// A seek, stream switch, reload or stop invalidated previously emitted cues.
+    /// Previously emitted cues are invalid, including a replaced live snapshot.
     Reset,
     /// A newly extracted cue from the selected embedded subtitle stream.
     Cue {

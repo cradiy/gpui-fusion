@@ -15,6 +15,7 @@ pub enum FrameTransport {
     Cpu,
     CoreVideo,
     DmaBuf,
+    HardwareBuffer,
 }
 
 /// A decoded video frame together with its media timestamp.
@@ -93,6 +94,8 @@ impl VideoFrame {
     pub fn transport(&self) -> FrameTransport {
         match self.buffer.backing() {
             FrameBacking::Cpu(_) => FrameTransport::Cpu,
+            #[cfg(target_os = "android")]
+            FrameBacking::HardwareBuffer(_) => FrameTransport::HardwareBuffer,
             #[cfg(target_family = "wasm")]
             FrameBacking::Browser(_) => FrameTransport::Browser,
             #[cfg(target_os = "macos")]

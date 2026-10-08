@@ -21,9 +21,9 @@ use gpui_media_core::{
     AudioStreamInfo, FrameExtractionSession, FrameExtractorBackendRequest,
     FrameTransportPreference, MediaBackend, MediaBackendEvent, MediaCapabilities, MediaError,
     MediaErrorKind, MediaInfo, MediaOutputSink, MediaPlaybackRequest, MediaPlaybackSession,
-    MediaRecovery, MediaResult, MediaSource, MediaStreamId, PlaybackTimeline, SeekMode,
-    SubtitleCue, SubtitleEvent, SubtitleFormat, SubtitleStreamInfo, TransportChange, VideoFrame,
-    VideoStreamInfo,
+    MediaRecovery, MediaResult, MediaSource, MediaStreamId, PlaybackBuffer, PlaybackTimeline,
+    SeekMode, SubtitleCue, SubtitleEvent, SubtitleFormat, SubtitleStreamInfo, TransportChange,
+    VideoFrame, VideoStreamInfo,
 };
 use network::{configure_playbin_network, configure_playbin_progressive_download};
 
@@ -832,6 +832,35 @@ impl MediaPlaybackSession for GstreamerPlayback {
 
     fn timeline(&self) -> PlaybackTimeline {
         GstreamerPlayback::timeline(self)
+    }
+
+    fn buffered(&self) -> PlaybackBuffer {
+        let mut query = gst::query::Buffering::new(gst::Format::Time);
+        if !self.playbin.query(&mut query) || query.format() != gst::Format::Time {
+            return PlaybackBuffer::Unknown;
+        }
+        let mut ranges = Vec::new();
+        let mut reported: Vec<_> = query.ranges().collect();
+        if reported.is_empty() {
+            let (start, end, _) = query.range();
+            reported.push((start, end));
+        }
+        for (start, end) in reported {
+            let (
+                gst::GenericFormattedValue::Time(Some(start)),
+                gst::GenericFormattedValue::Time(Some(end)),
+            ) = (start, end)
+            else {
+                return PlaybackBuffer::Unknown;
+            };
+            if start > end {
+                return PlaybackBuffer::Unknown;
+            }
+            if start < end {
+                ranges.push(Duration::from(start)..Duration::from(end));
+            }
+        }
+        PlaybackBuffer::Ranges(ranges.into())
     }
 
     fn seek_to(&mut self, position: Duration, mode: SeekMode) -> MediaResult<()> {

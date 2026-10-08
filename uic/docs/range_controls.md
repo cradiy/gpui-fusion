@@ -90,7 +90,10 @@ match event {
 
 The arrow keys adjust by one step. Page Up and Page Down adjust by ten steps,
 and Home and End select the range boundaries. A zero step keeps pointer input
-continuous and uses one percent of the range for keyboard adjustments.
+continuous and uses one percent of the range for keyboard and accessibility
+adjustments. Accessibility increment and decrement actions follow the same
+step and range limits. Disabled sliders remain identifiable as disabled controls
+and reject adjustments.
 
 ## Custom surfaces
 

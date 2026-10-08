@@ -14,6 +14,10 @@ pub enum ModalPlacement {
     Top {
         offset: Pixels,
     },
+    Bottom {
+        avoid_safe_area: bool,
+        drag_to_dismiss: bool,
+    },
 }
 
 pub(crate) type ModalCallback = Rc<dyn Fn(&mut Window, &mut App) -> bool>;

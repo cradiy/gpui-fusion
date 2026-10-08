@@ -84,7 +84,9 @@ impl Window {
         self.last_input_modality = match &event {
             PlatformInput::KeyDown(_) => InputModality::Keyboard,
             PlatformInput::MouseMove(_) | PlatformInput::MouseDown(_) => InputModality::Mouse,
-            PlatformInput::Touch(_) => InputModality::Touch,
+            PlatformInput::Touch(_)
+            | PlatformInput::TextInputFocus(_)
+            | PlatformInput::LongPress(_) => InputModality::Touch,
             _ => self.last_input_modality,
         };
         if self.last_input_modality != old_modality {
@@ -125,6 +127,14 @@ impl Window {
 
         let mut preserve_drag_on_mouse_up = false;
         let mut is_drop = false;
+        let cancelled = matches!(&event, PlatformInput::MouseCancelled(_));
+        if cancelled {
+            self.release_pointer();
+            self.default_prevented = true;
+            if cx.has_active_drag() {
+                cx.finish_active_drag(DragEnd::Cancelled, self);
+            }
+        }
 
         let event = match event {
             // Track the mouse position with our own state, since accessing the platform
@@ -139,7 +149,7 @@ impl Window {
                 self.modifiers = mouse_down.modifiers;
                 PlatformInput::MouseDown(mouse_down)
             }
-            PlatformInput::MouseUp(mouse_up) => {
+            PlatformInput::MouseUp(mouse_up) | PlatformInput::MouseCancelled(mouse_up) => {
                 self.mouse_position = mouse_up.position;
                 self.modifiers = mouse_up.modifiers;
                 PlatformInput::MouseUp(mouse_up)
@@ -342,12 +352,23 @@ impl Window {
                     PlatformInput::InternalDrag(InternalDragEvent::SourceCancelled { session_id })
                 }
             },
-            PlatformInput::Touch(touch) => PlatformInput::Touch(touch),
+            PlatformInput::Touch(touch) => {
+                self.mouse_position = touch.position;
+                PlatformInput::Touch(touch)
+            }
+            PlatformInput::TextInputFocus(request) => {
+                self.mouse_position = request.position;
+                PlatformInput::TextInputFocus(request)
+            }
+            PlatformInput::LongPress(event) => {
+                self.mouse_position = event.position;
+                PlatformInput::LongPress(event)
+            }
             PlatformInput::KeyDown(_) | PlatformInput::KeyUp(_) => event,
         };
 
         if let Some(any_mouse_event) = event.mouse_event() {
-            self.dispatch_mouse_event(any_mouse_event, preserve_drag_on_mouse_up, cx);
+            self.dispatch_mouse_event(any_mouse_event, preserve_drag_on_mouse_up, cancelled, cx);
         } else if let Some(any_key_event) = event.keyboard_event() {
             self.dispatch_key_event(any_key_event, cx);
         }

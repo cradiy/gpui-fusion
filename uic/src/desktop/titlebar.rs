@@ -4,7 +4,9 @@ use std::str::FromStr;
 use gpui::{WindowDecorations, WindowOptions, px};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, strum::Display)]
+#[cfg_attr(not(target_os = "linux"), derive(Default))]
 pub enum TitleBarMode {
+    #[cfg_attr(not(target_os = "linux"), default)]
     Compact,
     Hide,
     System,
@@ -81,12 +83,5 @@ impl Default for TitleBarMode {
             LinuxDesktop::GNOME => Self::Compact,
             _ => Self::System,
         }
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-impl Default for TitleBarMode {
-    fn default() -> Self {
-        TitleBarMode::Compact
     }
 }

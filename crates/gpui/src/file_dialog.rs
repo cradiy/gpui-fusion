@@ -1,96 +1,77 @@
-use crate::BackgroundExecutor;
-use anyhow::Result;
-use futures::future::LocalBoxFuture;
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::path::PathBuf;
 
-/// Options shared by desktop and browser file pickers.
+/// Options shared by platform file pickers.
 #[derive(Clone, Debug, Default)]
 pub struct FilePromptOptions {
     /// Allow more than one file to be selected.
     pub multiple: bool,
+    /// Request handles that allow replacing file contents. Unsupported platforms return an error.
+    pub writable: bool,
+    /// Accepted MIME types, combined as alternatives. Empty or `*/*` allows all files.
+    /// Examples: `image/*`, `application/pdf`. Filters guide selection, not content validation.
+    pub mime_types: Vec<String>,
 }
 
-/// Platform storage for a selected file. Reads may require the platform UI thread.
-pub trait PlatformFile: std::fmt::Debug + Send + Sync {
-    /// Display name, including the extension.
-    fn name(&self) -> &str;
-    /// Native filesystem path, when available.
-    fn path(&self) -> Option<&Path> {
-        None
+impl FilePromptOptions {
+    /// Validates and normalizes the MIME filters for a platform picker.
+    pub fn normalized_mime_types(&self) -> anyhow::Result<Vec<String>> {
+        let token = |s: &str| {
+            !s.is_empty()
+                && s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'+-.^_`|~".contains(&b))
+        };
+        let mut result = Vec::new();
+        for mime in &self.mime_types {
+            let (kind, subtype) = mime
+                .split_once('/')
+                .ok_or_else(|| anyhow::anyhow!("invalid MIME filter: {mime}"))?;
+            anyhow::ensure!(
+                (token(kind) && (token(subtype) || subtype == "*")) || mime == "*/*",
+                "invalid MIME filter: {mime}"
+            );
+            result.push(mime.to_ascii_lowercase());
+        }
+        if result.iter().any(|mime| mime == "*/*") {
+            return Ok(Vec::new());
+        }
+        result.sort();
+        result.dedup();
+        Ok(result)
     }
-    /// Browser URL, valid while the file handle is retained.
-    fn url(&self) -> Option<&str> {
-        None
+
+    /// Maps MIME filters to known extensions for extension-based native pickers.
+    /// Unknown MIME types return an error instead of silently disabling filtering.
+    pub fn filter_extensions(mime_types: &[String]) -> anyhow::Result<Vec<&'static str>> {
+        let mut extensions = Vec::new();
+        for mime in mime_types {
+            let known = mime_guess::get_mime_extensions_str(mime).ok_or_else(|| {
+                anyhow::anyhow!("no file extensions are known for MIME type {mime}")
+            })?;
+            extensions.extend_from_slice(known);
+        }
+        extensions.sort_unstable();
+        extensions.dedup();
+        Ok(extensions)
     }
-    /// Read the file on demand without blocking the UI thread.
-    fn read(&self) -> LocalBoxFuture<'static, Result<Vec<u8>>>;
 }
 
-/// A selected file with lazy contents and shared ownership of its platform resource.
-///
-/// Browser files have a URL rather than a native path. Keep this handle alive
-/// while a media player, image loader, or extractor uses that URL.
+/// Options for choosing a writable destination through a system save dialog.
 #[derive(Clone, Debug)]
-pub struct SelectedFile(Arc<dyn PlatformFile>);
-
-impl SelectedFile {
-    /// Wrap a platform file resource.
-    pub fn new(file: Arc<dyn PlatformFile>) -> Self {
-        Self(file)
-    }
-    /// Display name, including the extension.
-    pub fn name(&self) -> &str {
-        self.0.name()
-    }
-    /// Native path, absent for browser files.
-    pub fn path(&self) -> Option<&Path> {
-        self.0.path()
-    }
-    /// Browser URL, valid while this handle or a clone is retained.
-    pub fn url(&self) -> Option<&str> {
-        self.0.url()
-    }
-    /// Read the contents asynchronously on the platform thread.
-    pub fn read(&self) -> LocalBoxFuture<'static, Result<Vec<u8>>> {
-        self.0.read()
-    }
-
-    pub(crate) fn from_path(path: PathBuf, executor: BackgroundExecutor) -> Self {
-        let name = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
-        Self::new(Arc::new(NativeFile {
-            path,
-            name,
-            executor,
-        }))
-    }
+pub struct FileSaveOptions {
+    /// Suggested filename, including its extension.
+    pub suggested_name: String,
+    /// Content MIME type. Used by Android document providers.
+    pub mime_type: String,
+    /// Initial directory on desktop. Ignored by URI-based document pickers.
+    pub directory: Option<PathBuf>,
 }
 
-struct NativeFile {
-    path: PathBuf,
-    name: String,
-    executor: BackgroundExecutor,
-}
-impl std::fmt::Debug for NativeFile {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("NativeFile").field(&self.path).finish()
-    }
-}
-impl PlatformFile for NativeFile {
-    fn name(&self) -> &str {
-        &self.name
-    }
-    fn path(&self) -> Option<&Path> {
-        Some(&self.path)
-    }
-    fn read(&self) -> LocalBoxFuture<'static, Result<Vec<u8>>> {
-        let path = self.path.clone();
-        Box::pin(self.executor.spawn(async move { Ok(std::fs::read(path)?) }))
+impl Default for FileSaveOptions {
+    fn default() -> Self {
+        Self {
+            suggested_name: "untitled".into(),
+            mime_type: "application/octet-stream".into(),
+            directory: None,
+        }
     }
 }

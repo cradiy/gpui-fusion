@@ -146,7 +146,7 @@ impl Drop for AppRefMut<'_> {
 /// You won't interact with this type much outside of initial configuration and startup.
 pub struct Application(Rc<AppCell>);
 
-/// A strong handle to an [`Application`] started with [`Application::run_embedded`].
+/// A strong handle that keeps an [`Application`] alive for an external event loop.
 ///
 /// Dropping this handle releases the app, so an embedder must hold it for as long as the
 /// app should run. While held, it is the embedder's entry point back into GPUI each time
@@ -231,10 +231,15 @@ impl Application {
     {
         let this = self.0.clone();
         let platform = self.0.borrow().platform.clone();
-        platform.run(Box::new(move || {
-            let cx = &mut *this.borrow_mut();
-            on_finish_launching(cx);
-        }));
+        platform.run_app(
+            ApplicationHandle {
+                app: self.0.clone(),
+            },
+            Box::new(move || {
+                let cx = &mut *this.borrow_mut();
+                on_finish_launching(cx);
+            }),
+        );
         // The browser owns the event loop. Retain the app and its callbacks for
         // the page lifetime; embedders with explicit teardown use run_embedded.
         #[cfg(target_family = "wasm")]
@@ -270,6 +275,26 @@ impl Application {
         F: 'static + FnMut(Vec<String>),
     {
         self.0.borrow().platform.on_open_urls(Box::new(callback));
+        self
+    }
+
+    /// Receives text and files shared by other applications, or an error if a
+    /// request cannot be prepared. Register before running the application.
+    /// Android requires matching share intent filters in the host manifest.
+    /// Platforms without incoming share support do not invoke this callback.
+    pub fn on_receive_share<F>(&self, mut callback: F) -> &Self
+    where
+        F: 'static + FnMut(Result<crate::ReceivedShare>, &mut App),
+    {
+        let app = Rc::downgrade(&self.0);
+        self.0
+            .borrow()
+            .platform
+            .on_receive_share(Box::new(move |share| {
+                if let Some(app) = app.upgrade() {
+                    callback(share, &mut app.borrow_mut());
+                }
+            }));
         self
     }
 
@@ -327,6 +352,7 @@ impl Application {
 }
 
 type Handler = Box<dyn FnMut(&mut App) -> bool + 'static>;
+type MemoryTrimHandler = Box<dyn FnMut(crate::MemoryTrimLevel, &mut App)>;
 type Listener = Box<dyn FnMut(&dyn Any, &mut App) -> bool + 'static>;
 pub(crate) type KeystrokeObserver =
     Box<dyn FnMut(&KeystrokeEvent, &mut Window, &mut App) -> bool + 'static>;
@@ -711,6 +737,7 @@ pub struct App {
     pub(crate) keystroke_interceptors: SubscriberSet<(), KeystrokeObserver>,
     pub(crate) keyboard_layout_observers: SubscriberSet<(), Handler>,
     pub(crate) thermal_state_observers: SubscriberSet<(), Handler>,
+    memory_trim_observers: SubscriberSet<(), MemoryTrimHandler>,
     pub(crate) release_listeners: SubscriberSet<EntityId, ReleaseListener>,
     pub(crate) global_observers: SubscriberSet<TypeId, Handler>,
     pub(crate) quit_observers: SubscriberSet<(), QuitHandler>,
@@ -837,6 +864,7 @@ impl App {
                 keystroke_interceptors: SubscriberSet::new(),
                 keyboard_layout_observers: SubscriberSet::new(),
                 thermal_state_observers: SubscriberSet::new(),
+                memory_trim_observers: SubscriberSet::new(),
                 global_observers: SubscriberSet::new(),
                 quit_observers: SubscriberSet::new(),
                 restart_observers: SubscriberSet::new(),
@@ -901,10 +929,25 @@ impl App {
             let app = Rc::downgrade(&app);
             move || {
                 if let Some(app) = app.upgrade() {
-                    let cx = &mut app.borrow_mut();
-                    cx.thermal_state_observers
-                        .clone()
-                        .retain(&(), move |callback| (callback)(cx));
+                    app.borrow_mut().update(|cx| {
+                        cx.thermal_state_observers
+                            .clone()
+                            .retain(&(), move |callback| (callback)(cx));
+                    });
+                }
+            }
+        }));
+
+        platform.on_memory_trim(Box::new({
+            let app = Rc::downgrade(&app);
+            move |level| {
+                if let Some(app) = app.upgrade() {
+                    app.borrow_mut().update(|cx| {
+                        cx.memory_trim_observers.clone().retain(&(), |callback| {
+                            callback(level, cx);
+                            true
+                        });
+                    });
                 }
             }
         }));
@@ -1348,6 +1391,19 @@ impl App {
         subscription
     }
 
+    /// Invokes a foreground-thread callback when the OS recommends releasing memory.
+    /// Keep the subscription to receive events. No cache is cleared automatically.
+    /// Unsupported backends do not emit events. Events are not guaranteed before
+    /// termination; persist application data independently of this callback.
+    pub fn on_memory_trim(
+        &self,
+        callback: impl FnMut(crate::MemoryTrimLevel, &mut App) + 'static,
+    ) -> Subscription {
+        let (subscription, activate) = self.memory_trim_observers.insert((), Box::new(callback));
+        activate();
+        subscription
+    }
+
     /// Returns the appearance of the application's windows.
     pub fn window_appearance(&self) -> WindowAppearance {
         self.platform.window_appearance()
@@ -1447,6 +1503,33 @@ impl App {
         self.platform.open_url(url);
     }
 
+    /// Queries the application's default network. Unsupported platforms return an error.
+    /// Android requires the manifest permission `android.permission.ACCESS_NETWORK_STATE`.
+    pub fn network_status(&self) -> Result<crate::NetworkStatus> {
+        self.platform.network_status()
+    }
+
+    /// Observes an initial network snapshot and subsequent changes on the app thread.
+    /// Retain the subscription for as long as updates are needed. Callbacks are never
+    /// invoked inline. Android requires `android.permission.ACCESS_NETWORK_STATE`.
+    pub fn observe_network(
+        &self,
+        mut callback: impl FnMut(crate::NetworkStatus, &mut App) + 'static,
+    ) -> Result<Subscription> {
+        let app = self.this.clone();
+        self.platform.observe_network(Box::new(move |status| {
+            if let Some(app) = app.upgrade() {
+                app.borrow_mut().update(|cx| callback(status, cx));
+            }
+        }))
+    }
+
+    /// Opens settings for this application. Success reports launch only; recheck
+    /// permissions when the application becomes active again. Currently supported on Android.
+    pub fn open_app_settings(&self, page: crate::AppSettings) -> Task<Result<()>> {
+        self.platform.open_app_settings(page)
+    }
+
     /// Registers the given URL scheme (e.g. `zed` for `zed://` urls) to be
     /// opened by the current app.
     ///
@@ -1497,6 +1580,52 @@ impl App {
         self.platform.prompt_for_files(options)
     }
 
+    /// Select a directory for file creation. Cancellation returns `None`.
+    /// Call `LocationHandle::persist` to retain access across restarts.
+    pub fn prompt_for_directory(
+        &self,
+    ) -> oneshot::Receiver<Result<Option<gpui_io::LocationHandle>>> {
+        self.platform.prompt_for_directory()
+    }
+
+    /// Obtain file I/O with app-specific locations identified by a stable application ID.
+    pub fn file_system(&self, app_id: &str) -> Result<gpui_io::FileSystem> {
+        self.platform.file_system(app_id)
+    }
+
+    /// Creates system transport controls without owning a player or background service.
+    pub fn system_media_session(
+        &self,
+        options: crate::gpui_notifications::MediaSessionOptions,
+    ) -> futures::future::LocalBoxFuture<
+        'static,
+        Result<crate::gpui_notifications::SystemMediaSession>,
+    > {
+        self.platform.system_media_session(options)
+    }
+
+    /// Creates a system notification center for this application's identity.
+    pub fn notifications(
+        &self,
+        options: crate::gpui_notifications::NotificationOptions,
+    ) -> futures::future::LocalBoxFuture<
+        'static,
+        Result<crate::gpui_notifications::NotificationCenter>,
+    > {
+        self.platform.notifications(options)
+    }
+
+    /// Choose a writable file through the platform save dialog. Cancellation returns `None`.
+    ///
+    /// Android creates a document during selection; desktop creation happens on the first write.
+    /// Call `SelectedFile::write` to store contents and retain the handle for subsequent saves.
+    pub fn prompt_for_file_save(
+        &self,
+        options: crate::FileSaveOptions,
+    ) -> oneshot::Receiver<Result<Option<crate::SelectedFile>>> {
+        self.platform.prompt_for_file_save(options)
+    }
+
     /// Displays a platform modal for selecting a new path where a file can be saved.
     ///
     /// The provided directory will be used to set the initial location.
@@ -1519,6 +1648,28 @@ impl App {
     /// Opens the specified path with the system's default application.
     pub fn open_with_system(&self, path: &Path) {
         self.platform.open_with_system(path)
+    }
+
+    /// Requests that the system open a file in an external application.
+    /// Success reports dispatch, not completion in the receiving application.
+    /// Desktop paths use the existing launcher; its later failures are not returned.
+    /// Android files receive a temporary read grant. Unsupported providers return an error.
+    pub fn open_file_with_system(&self, file: &crate::SelectedFile) -> Task<Result<()>> {
+        self.platform.open_file_with_system(file)
+    }
+
+    /// Shows the system share interface. Currently supported on Android.
+    /// Requires nonempty text or at least one file. Success reports dispatch only;
+    /// it does not indicate target selection, delivery, or cancellation.
+    pub fn share(&self, options: crate::ShareOptions) -> Task<Result<()>> {
+        if options.files.is_empty() && options.text.as_ref().is_none_or(String::is_empty) {
+            return Task::ready(Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "sharing requires text or files",
+            )
+            .into()));
+        }
+        self.platform.share(options)
     }
 
     /// Returns whether the user has configured scrollbars to auto-hide at the platform level.

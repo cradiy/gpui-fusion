@@ -34,10 +34,12 @@ mod platform_scheduler;
 mod scene3d;
 mod texture_sampling3d;
 pub(crate) use platform_scheduler::PlatformScheduler;
+mod autofill;
 mod geometry;
 mod gestures;
 mod global;
 mod input;
+pub use autofill::*;
 mod inspector;
 mod interactive;
 mod key_dispatch;
@@ -54,6 +56,7 @@ pub mod profiler;
     test,
     target_os = "windows",
     target_os = "linux",
+    target_os = "android",
     target_family = "wasm",
     feature = "bench"
 ))]
@@ -122,9 +125,12 @@ pub use fluid::*;
 pub use geometry::*;
 pub use gestures::*;
 pub use global::*;
+pub use gpui_io;
+pub use gpui_io::{FileHandle, FileHandle as SelectedFile, FileWriteStream, PlatformFile};
 pub use gpui_macros::{
     AppContext, IntoElement, Render, VisualContext, bench, property_test, register_action, test,
 };
+pub use gpui_notifications;
 pub use image_loading::{ImageAnimation, ImageAnimationOptions, ImageLoadLimits};
 pub use particle_transition::*;
 pub use particles::*;
@@ -365,6 +371,10 @@ where
 /// Information about the GPU GPUI is running on.
 #[derive(Default, Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct GpuSpecs {
+    /// Whether the renderer accepts Android RGBA hardware buffers with acquire fences.
+    #[cfg(target_os = "android")]
+    #[serde(default)]
+    pub supports_hardware_buffer_import: bool,
     /// Whether the GPU is really a fake (like `llvmpipe`) running on the CPU.
     pub is_software_emulated: bool,
     /// The name of the device, as reported by Vulkan.

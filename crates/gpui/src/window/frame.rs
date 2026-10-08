@@ -20,7 +20,6 @@ use itertools::Itertools;
 use scheduler::Instant;
 use smallvec::SmallVec;
 use std::any::TypeId;
-use std::cell::RefCell;
 use std::ops::DerefMut;
 use std::ops::Range;
 #[cfg(any(feature = "inspector", debug_assertions))]
@@ -56,6 +55,7 @@ pub(crate) struct Frame {
     pub(crate) window_control_hitboxes: Vec<(WindowControlArea, Hitbox)>,
     pub(crate) deferred_draws: Vec<DeferredDraw>,
     pub(crate) input_handlers: Vec<Option<PlatformInputHandler>>,
+    pub(super) autofill: Vec<super::autofill::AutofillEntry>,
     pub(crate) tooltip_requests: Vec<Option<TooltipRequest>>,
     prepaint_transaction_depth: usize,
     prepaint_reuses: Vec<PrepaintReuse>,
@@ -103,6 +103,7 @@ pub(crate) struct PaintIndex {
     pub(super) scene_index: usize,
     pub(super) mouse_listeners_index: usize,
     pub(super) input_handlers_index: usize,
+    autofill_index: usize,
     pub(super) cursor_styles_index: usize,
     pub(super) accessed_element_states_index: usize,
     pub(super) tab_handle_index: usize,
@@ -124,6 +125,7 @@ impl Frame {
             window_control_hitboxes: Vec::new(),
             deferred_draws: Vec::new(),
             input_handlers: Vec::new(),
+            autofill: Vec::new(),
             tooltip_requests: Vec::new(),
             prepaint_transaction_depth: 0,
             prepaint_reuses: Vec::new(),
@@ -153,6 +155,7 @@ impl Frame {
         self.dispatch_tree.clear();
         self.scene.clear();
         self.input_handlers.clear();
+        self.autofill.clear();
         self.tooltip_requests.clear();
         self.prepaint_transaction_depth = 0;
         self.prepaint_reuses.clear();
@@ -307,6 +310,14 @@ impl Window {
         }
         self.dirty_views.clear();
         self.next_frame.window_active = self.active.get();
+        if !self.platform_window.is_picture_in_picture() {
+            let bounds = self
+                .picture_in_picture_source
+                .as_ref()
+                .and_then(|source| source.visible_bounds(self));
+            self.platform_window
+                .set_picture_in_picture_source_bounds(bounds);
+        }
 
         // Register requested input handler with the platform window.
         // Use .take() instead of .pop() to preserve Vec length, so that cached
@@ -337,6 +348,7 @@ impl Window {
         let previous_window_active = self.rendered_frame.window_active;
         mem::swap(&mut self.rendered_frame, &mut self.next_frame);
         self.next_frame.clear();
+        self.publish_autofill();
         self.sprite_atlas.collect_unused_images();
         let current_focus_path = self.rendered_frame.focus_path();
         let current_window_active = self.rendered_frame.window_active;
@@ -373,6 +385,7 @@ impl Window {
         self.refreshing = false;
         self.invalidator.set_phase(DrawPhase::None);
         self.needs_present.set(true);
+        self.invalidator.request_frame();
 
         if let Some(draw_start) = draw_started_at {
             profiler::record_frame_timing(profiler::FrameTiming {
@@ -970,6 +983,9 @@ impl Window {
                 .iter()
                 .flatten()
                 .all(|handler| handler.pointer_mapping() == mapping)
+            && self.rendered_frame.autofill[paint.start.autofill_index..paint.end.autofill_index]
+                .iter()
+                .all(|entry| entry.mapping == *mapping)
     }
 
     pub(crate) fn remap_reused_prepaint(&mut self, range: &Range<PrepaintStateIndex>) {
@@ -994,6 +1010,11 @@ impl Window {
     }
 
     pub(crate) fn remap_reused_paint(&mut self, range: &Range<PaintIndex>) {
+        for entry in
+            &mut self.next_frame.autofill[range.start.autofill_index..range.end.autofill_index]
+        {
+            entry.mapping = self.pointer_mapping.clone();
+        }
         for listener in self.next_frame.mouse_listeners
             [range.start.mouse_listeners_index..range.end.mouse_listeners_index]
             .iter_mut()
@@ -1016,6 +1037,7 @@ impl Window {
             scene_index: self.next_frame.scene.len(),
             mouse_listeners_index: self.next_frame.mouse_listeners.len(),
             input_handlers_index: self.next_frame.input_handlers.len(),
+            autofill_index: self.next_frame.autofill.len(),
             cursor_styles_index: self.next_frame.cursor_styles.len(),
             accessed_element_states_index: self.next_frame.accessed_element_states.len(),
             tab_handle_index: self.next_frame.tab_stops.paint_index(),
@@ -1024,6 +1046,9 @@ impl Window {
     }
 
     pub(crate) fn reuse_paint(&mut self, range: Range<PaintIndex>) {
+        self.next_frame.autofill.extend_from_slice(
+            &self.rendered_frame.autofill[range.start.autofill_index..range.end.autofill_index],
+        );
         self.a11y
             .reuse_paint(range.start.a11y_index..range.end.a11y_index);
         self.next_frame.cursor_styles.extend(
@@ -1065,7 +1090,13 @@ impl Window {
 
     /// Schedule the given closure to be run directly after the current frame is rendered.
     pub fn on_next_frame(&self, callback: impl FnOnce(&mut Window, &mut App) + 'static) {
-        RefCell::borrow_mut(&self.next_frame_callbacks).push(Box::new(callback));
+        let mut callbacks = self.next_frame_callbacks.borrow_mut();
+        let needs_frame = callbacks.is_empty();
+        callbacks.push(Box::new(callback));
+        drop(callbacks);
+        if needs_frame {
+            self.invalidator.request_frame();
+        }
     }
 
     /// Schedule a frame to be drawn on the next animation frame.

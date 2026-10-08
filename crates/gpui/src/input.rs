@@ -6,6 +6,57 @@ use std::ops::Range;
 mod surrounding;
 pub use surrounding::SurroundingText;
 
+/// Text entry semantics exposed to platform input methods.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TextInputMode {
+    /// A single line, with a completion action instead of a newline key.
+    SingleLine,
+    /// Multiple lines, with a newline key. This is the default for editors.
+    #[default]
+    Multiline,
+    /// A single secret value, requesting password entry without surrounding context.
+    Password,
+}
+
+/// A keyboard layout hint for text entry, without restricting inserted or pasted text.
+/// Backends may ignore hints unsupported by the editor's mode or the system keyboard.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TextInputPurpose {
+    /// General text entry.
+    #[default]
+    Text,
+    /// An email address.
+    Email,
+    /// A web address.
+    Url,
+    /// A telephone number.
+    Phone,
+    /// Numeric entry with optional decimal and sign keys.
+    Number {
+        /// Requests a decimal separator.
+        decimal: bool,
+        /// Requests a positive or negative sign.
+        signed: bool,
+    },
+}
+
+/// An action requested by a software keyboard, independent of physical Enter keys.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TextInputAction {
+    /// Completes editing the current field.
+    Done,
+    /// Opens the destination described by the input.
+    Go,
+    /// Searches for the entered text.
+    Search,
+    /// Sends the entered content.
+    Send,
+    /// Moves to the next field as determined by the application.
+    Next,
+    /// Moves to the previous field as determined by the application.
+    Previous,
+}
+
 /// Implement this trait to allow views to handle textual input when implementing an editor, field, etc.
 ///
 /// Once your view implements this trait, you can use it to construct an [`ElementInputHandler<V>`].
@@ -13,6 +64,39 @@ pub use surrounding::SurroundingText;
 ///
 /// See [`InputHandler`] for details on how to implement each method.
 pub trait EntityInputHandler: 'static + Sized {
+    /// See [`InputHandler::text_input_action`].
+    fn text_input_action(
+        &self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<TextInputAction> {
+        None
+    }
+
+    /// See [`InputHandler::perform_text_input_action`].
+    fn perform_text_input_action(
+        &mut self,
+        _action: TextInputAction,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> bool {
+        false
+    }
+
+    /// See [`InputHandler::text_input_mode`].
+    fn text_input_mode(&self, _window: &mut Window, _cx: &mut Context<Self>) -> TextInputMode {
+        TextInputMode::default()
+    }
+
+    /// See [`InputHandler::text_input_purpose`].
+    fn text_input_purpose(
+        &self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> TextInputPurpose {
+        TextInputPurpose::default()
+    }
+
     /// See [`InputHandler::text_for_range`] for details
     fn text_for_range(
         &mut self,
@@ -118,6 +202,26 @@ pub trait EntityInputHandler: 'static + Sized {
     ) {
     }
 
+    /// Returns the visible editor viewport in window-relative source coordinates.
+    fn element_bounds(
+        &mut self,
+        element_bounds: Bounds<Pixels>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
+        Some(element_bounds)
+    }
+
+    /// See [`InputHandler::scroll_text_input`] for details.
+    fn scroll_text_input(
+        &mut self,
+        _delta: crate::Point<Pixels>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> bool {
+        false
+    }
+
     /// See [`InputHandler::text_length_utf16`] for details
     fn text_length_utf16(
         &mut self,
@@ -153,6 +257,32 @@ impl<V: 'static> ElementInputHandler<V> {
 }
 
 impl<V: EntityInputHandler> InputHandler for ElementInputHandler<V> {
+    fn text_input_action(&mut self, window: &mut Window, cx: &mut App) -> Option<TextInputAction> {
+        self.view
+            .update(cx, |view, cx| view.text_input_action(window, cx))
+    }
+
+    fn perform_text_input_action(
+        &mut self,
+        action: TextInputAction,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> bool {
+        self.view.update(cx, |view, cx| {
+            view.perform_text_input_action(action, window, cx)
+        })
+    }
+
+    fn text_input_mode(&mut self, window: &mut Window, cx: &mut App) -> TextInputMode {
+        self.view
+            .update(cx, |view, cx| view.text_input_mode(window, cx))
+    }
+
+    fn text_input_purpose(&mut self, window: &mut Window, cx: &mut App) -> TextInputPurpose {
+        self.view
+            .update(cx, |view, cx| view.text_input_purpose(window, cx))
+    }
+
     fn selected_text_range(
         &mut self,
         ignore_disabled_input: bool,
@@ -285,8 +415,20 @@ impl<V: EntityInputHandler> InputHandler for ElementInputHandler<V> {
         })
     }
 
-    fn element_bounds(&mut self, _window: &mut Window, _cx: &mut App) -> Option<Bounds<Pixels>> {
-        Some(self.element_bounds)
+    fn element_bounds(&mut self, window: &mut Window, cx: &mut App) -> Option<Bounds<Pixels>> {
+        self.view.update(cx, |view, cx| {
+            view.element_bounds(self.element_bounds, window, cx)
+        })
+    }
+
+    fn scroll_text_input(
+        &mut self,
+        delta: crate::Point<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> bool {
+        self.view
+            .update(cx, |view, cx| view.scroll_text_input(delta, window, cx))
     }
 
     fn text_length_utf16(&mut self, window: &mut Window, cx: &mut App) -> Option<usize> {

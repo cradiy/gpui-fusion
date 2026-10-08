@@ -440,6 +440,24 @@ impl<'a, T: 'static> Context<'a, T> {
         subscription
     }
 
+    /// Observe changes to system occlusion or host avoidance, including keyboard animation.
+    pub fn observe_window_insets(
+        &self,
+        window: &mut Window,
+        mut callback: impl FnMut(&mut T, &mut Window, &mut Context<T>) + 'static,
+    ) -> Subscription {
+        let view = self.weak_entity();
+        let (subscription, activate) = window.insets_observers.insert(
+            (),
+            Box::new(move |window, cx| {
+                view.update(cx, |view, cx| callback(view, window, cx))
+                    .is_ok()
+            }),
+        );
+        activate();
+        subscription
+    }
+
     /// Register a callback to be invoked when the window is activated or deactivated.
     pub fn observe_window_activation(
         &self,

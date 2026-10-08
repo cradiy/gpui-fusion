@@ -8,7 +8,9 @@ use gpui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::{InputAppearance, InputEvent, InputMode, actions::*, element::TextElement};
+use super::{
+    InputActionEvent, InputAppearance, InputEvent, InputMode, actions::*, element::TextElement,
+};
 use crate::components::scrollbar::ScrollbarState;
 
 pub(super) struct TextLayout {
@@ -363,6 +365,7 @@ pub struct TextInput {
     pub(super) content: SharedString,
     pub(super) committed_content: SharedString,
     pub(super) placeholder: SharedString,
+    pub(super) accessible_label: Option<SharedString>,
     pub(super) selected_range: Range<usize>,
     pub(super) selection_reversed: bool,
     pub(super) caret_affinity: CaretAffinity,
@@ -378,6 +381,9 @@ pub struct TextInput {
     selection_scroll_task: Option<Task<()>>,
     pub(super) disabled: bool,
     pub(super) mode: InputMode,
+    input_purpose: gpui::TextInputPurpose,
+    pub(super) autofill: Option<gpui::AutofillOptions>,
+    input_action: Option<gpui::TextInputAction>,
     pub(super) appearance: InputAppearance,
     pub(super) preferred_x: Option<Pixels>,
     pub(super) scroll_handle: ScrollHandle,
@@ -387,14 +393,30 @@ pub struct TextInput {
 }
 
 impl gpui::EventEmitter<InputEvent> for TextInput {}
+impl gpui::EventEmitter<InputActionEvent> for TextInput {}
 
 impl TextInput {
+    /// Offers this field to the system autofill service. Disabled by default.
+    /// The name must be nonempty, stable, and unique within the window.
+    /// Password hints expose the value only to the user's chosen autofill service.
+    pub fn autofill(mut self, name: impl Into<SharedString>, hint: gpui::AutofillHint) -> Self {
+        self.autofill = Some(gpui::AutofillOptions::new(name, hint));
+        self
+    }
+
+    /// Changes or disables system autofill for this field.
+    pub fn set_autofill(&mut self, options: Option<gpui::AutofillOptions>, cx: &mut Context<Self>) {
+        self.autofill = options;
+        cx.notify();
+    }
+
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
             content: "".into(),
             committed_content: "".into(),
             placeholder: "".into(),
+            accessible_label: None,
             selected_range: 0..0,
             selection_reversed: false,
             caret_affinity: CaretAffinity::Downstream,
@@ -410,6 +432,9 @@ impl TextInput {
             selection_scroll_task: None,
             disabled: false,
             mode: InputMode::Text,
+            input_purpose: gpui::TextInputPurpose::default(),
+            autofill: None,
+            input_action: None,
             appearance: InputAppearance::default(),
             preferred_x: None,
             scroll_handle: ScrollHandle::new(),
@@ -438,6 +463,39 @@ impl TextInput {
     pub fn mode(mut self, mode: InputMode) -> Self {
         self.mode = mode;
         self
+    }
+
+    /// Requests a software keyboard layout without validating or filtering text.
+    pub fn input_purpose(mut self, purpose: gpui::TextInputPurpose) -> Self {
+        self.input_purpose = purpose;
+        self
+    }
+
+    /// Configures the software keyboard action, emitted as [`InputActionEvent`].
+    /// Physical Enter still submits single-line fields or inserts multiline newlines.
+    pub fn input_action(mut self, action: gpui::TextInputAction) -> Self {
+        self.input_action = Some(action);
+        self
+    }
+
+    /// Changes the software keyboard action; `None` restores the mode's default.
+    pub fn set_input_action(
+        &mut self,
+        action: Option<gpui::TextInputAction>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.input_action != action {
+            self.input_action = action;
+            cx.notify();
+        }
+    }
+
+    /// Updates the keyboard hint while retaining the field's value and selection.
+    pub fn set_input_purpose(&mut self, purpose: gpui::TextInputPurpose, cx: &mut Context<Self>) {
+        if self.input_purpose != purpose {
+            self.input_purpose = purpose;
+            cx.notify();
+        }
     }
 
     pub fn disabled(mut self, disabled: bool) -> Self {
@@ -471,6 +529,18 @@ impl TextInput {
     pub fn placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.placeholder = placeholder.into();
         self
+    }
+
+    /// Sets the accessible name. The placeholder is used when no name is supplied.
+    pub fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.accessible_label = Some(label.into());
+        self
+    }
+
+    /// Updates the accessible name without changing the field's content.
+    pub fn set_aria_label(&mut self, label: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.accessible_label = Some(label.into());
+        cx.notify();
     }
 
     pub fn initial_value(mut self, value: impl Into<SharedString>) -> Self {
@@ -658,6 +728,23 @@ impl TextInput {
         }
         self.replace_text_in_range(None, "\n", window, cx);
         cx.stop_propagation();
+    }
+
+    pub(super) fn focus_at(
+        &mut self,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.disabled {
+            return;
+        }
+        window.focus(&self.focus_handle, cx);
+        self.stop_selection();
+        let caret = self.caret_for_mouse_position(position);
+        self.move_to(caret.index, cx);
+        self.caret_affinity = caret.affinity;
+        self.scroll_cursor_pending = false;
     }
 
     fn on_mouse_down(
@@ -1105,6 +1192,118 @@ impl TextInput {
 }
 
 impl EntityInputHandler for TextInput {
+    fn text_input_action(
+        &self,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<gpui::TextInputAction> {
+        self.input_action
+    }
+
+    fn perform_text_input_action(
+        &mut self,
+        action: gpui::TextInputAction,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.disabled || self.input_action != Some(action) {
+            return false;
+        }
+        cx.emit(InputActionEvent {
+            action,
+            text: self.content.clone(),
+        });
+        true
+    }
+
+    fn text_input_purpose(&self, _: &mut Window, _: &mut Context<Self>) -> gpui::TextInputPurpose {
+        self.input_purpose
+    }
+
+    fn text_input_mode(&self, _: &mut Window, _: &mut Context<Self>) -> gpui::TextInputMode {
+        match self.mode {
+            InputMode::Text => gpui::TextInputMode::SingleLine,
+            InputMode::Multiline => gpui::TextInputMode::Multiline,
+            InputMode::Password => gpui::TextInputMode::Password,
+        }
+    }
+
+    fn accepts_text_input(&self, _: &mut Window, _: &mut Context<Self>) -> bool {
+        !self.disabled
+    }
+
+    fn text_length_utf16(&mut self, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
+        Some(self.content.encode_utf16().count())
+    }
+
+    fn set_selected_text_range(
+        &mut self,
+        range: Range<usize>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.disabled {
+            return;
+        }
+        self.stop_selection();
+        let anchor = self.offset_from_utf16(range.start);
+        let head = self.offset_from_utf16(range.end);
+        self.selected_range = anchor.min(head)..anchor.max(head);
+        self.selection_reversed = head < anchor;
+        self.caret_affinity = CaretAffinity::Downstream;
+        self.horizontal_selection_anchor = None;
+        self.preferred_x = None;
+        self.scroll_cursor_pending = true;
+        cx.notify();
+    }
+
+    fn element_bounds(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
+        Some(if self.mode == InputMode::Multiline {
+            self.scroll_handle.bounds()
+        } else {
+            self.last_viewport_bounds.unwrap_or(bounds)
+        })
+    }
+
+    fn scroll_text_input(
+        &mut self,
+        delta: Point<Pixels>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.disabled || !f32::from(delta.x).is_finite() || !f32::from(delta.y).is_finite() {
+            return false;
+        }
+        self.scroll_cursor_pending = false;
+        if self.mode == InputMode::Multiline {
+            let mut offset = self.scroll_handle.offset();
+            let next = (offset.y + delta.y).clamp(-self.scroll_handle.max_offset().y, px(0.));
+            if next == offset.y {
+                return false;
+            }
+            offset.y = next;
+            self.scroll_handle.set_offset(offset);
+        } else {
+            let (Some(bounds), Some(viewport)) = (self.last_bounds, self.last_viewport_bounds)
+            else {
+                return false;
+            };
+            let max_scroll = (bounds.size.width - viewport.size.width).max(px(0.));
+            let next = (self.single_line_scroll_offset + delta.x).clamp(-max_scroll, px(0.));
+            if next == self.single_line_scroll_offset {
+                return false;
+            }
+            self.single_line_scroll_offset = next;
+        }
+        cx.notify();
+        true
+    }
+
     fn surrounding_text(
         &mut self,
         max_bytes: usize,
@@ -1372,11 +1571,15 @@ impl EntityInputHandler for TextInput {
 }
 
 impl Render for TextInput {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let multiline = self.mode == InputMode::Multiline;
         let scroll_handle = self.scroll_handle.clone();
         let input = cx.weak_entity();
-        div()
+        let accessibility = window
+            .is_a11y_active()
+            .then(|| super::accessibility::InputAccessibility::new(self));
+        let geometry = accessibility.as_ref().map(|state| state.geometry.clone());
+        let element = div()
             .on_paint_before_children(move |_, _, window, _| {
                 let moving_input = input.clone();
                 window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
@@ -1446,8 +1649,15 @@ impl Render for TextInput {
                     .w_full()
                     .min_w_0()
                     .when(multiline, |this| this.flex_none())
-                    .child(TextElement { input: cx.entity() }),
-            )
+                    .child(TextElement {
+                        input: cx.entity(),
+                        accessibility: geometry,
+                    }),
+            );
+        match accessibility {
+            Some(accessibility) => accessibility.decorate(element, cx),
+            None => element,
+        }
     }
 }
 
@@ -2674,6 +2884,31 @@ mod tests {
     }
 
     #[gpui::test]
+    fn system_selection_uses_utf16_and_preserves_direction(cx: &mut TestAppContext) {
+        let window = open_input(cx, |cx| TextInput::new(cx).initial_value("前😀后"));
+        let mut visual = draw_and_focus(&window, cx);
+        window
+            .update(&mut visual.cx, |view, window, cx| {
+                view.state.update(cx, |input, cx| {
+                    input.set_selected_text_range(std::ops::Range { start: 3, end: 1 }, window, cx);
+                    let selection = input.selected_text_range(false, window, cx).unwrap();
+                    assert_eq!(selection.range, 1..3);
+                    assert!(selection.reversed);
+                    input.replace_text_in_range(None, "X", window, cx);
+                    assert_eq!(input.value().as_ref(), "前X后");
+                    input.disabled = true;
+                    input.set_selected_text_range(0..usize::MAX, window, cx);
+                    assert_eq!(
+                        input.selected_text_range(false, window, cx).unwrap().range,
+                        2..2
+                    );
+                    assert!(!input.accepts_text_input(window, cx));
+                });
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
     fn surrounding_deletion_preserves_selected_text_and_direction(cx: &mut TestAppContext) {
         let window = open_input(cx, |cx| TextInput::new(cx).initial_value("前😀选中🌍后"));
         let mut visual = draw_and_focus(&window, cx);
@@ -2919,6 +3154,43 @@ mod tests {
                     view.changes.borrow().as_slice(),
                     &[SharedString::from("prefix かな")]
                 );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn ime_remarking_and_surrounding_edits_do_not_commit_candidates(cx: &mut TestAppContext) {
+        let window = open_input(cx, |cx| TextInput::new(cx).initial_value("A😀Z"));
+        let mut visual = draw_and_focus(&window, cx);
+
+        window
+            .update(&mut visual.cx, |view, window, cx| {
+                view.state.update(cx, |input, cx| {
+                    input.replace_and_mark_text_in_range(Some(1..1), "ni", None, window, cx);
+                    // Moving the composing span must not finish the previous one.
+                    input.replace_and_mark_text_in_range(Some(1..2), "n", None, window, cx);
+                    input.replace_and_mark_text_in_range(Some(1..3), "ni", None, window, cx);
+                    // Delete A and the emoji while retaining the candidate between them.
+                    input.replace_and_mark_text_in_range(Some(0..5), "ni", None, window, cx);
+                    input.replace_and_mark_text_in_range(Some(0..2), "ni", None, window, cx);
+                });
+            })
+            .unwrap();
+        visual.run_until_parked();
+        window
+            .update(&mut visual.cx, |view, window, cx| {
+                assert!(view.changes.borrow().is_empty());
+                assert_eq!(view.state.read(cx).value().as_ref(), "niZ");
+                view.state.update(cx, |input, cx| {
+                    input.replace_text_in_range(None, "", window, cx);
+                });
+            })
+            .unwrap();
+        visual.run_until_parked();
+        window
+            .update(&mut visual.cx, |view, _, cx| {
+                assert_eq!(view.state.read(cx).value().as_ref(), "Z");
+                assert_eq!(view.changes.borrow().as_slice(), &[SharedString::from("Z")]);
             })
             .unwrap();
     }

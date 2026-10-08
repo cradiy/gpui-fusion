@@ -24,10 +24,9 @@ macro_rules! impl_mouse_event {
     ($event:ty) => {
         impl MouseEvent for $event {
             fn map_position(&self, map: impl Fn(Point<Pixels>) -> Point<Pixels>) -> Self {
-                Self {
-                    position: map(self.position),
-                    ..self.clone()
-                }
+                let mut event = self.clone();
+                event.position = map(self.position);
+                event
             }
         }
     };
@@ -126,11 +125,10 @@ pub struct TouchId(pub u64);
 
 /// A raw touch event from the platform.
 ///
-///
-/// Dispatch contract (core implementation pending): a touch is hit-tested
-/// once, at [`TouchPhase::Started`], occlusion-aware; all subsequent events
-/// for the same [`TouchId`] are delivered to the elements under the starting
-/// position, even after the touch moves outside them.
+/// Register through [`Window::on_touch_event`] during paint. Listeners receive
+/// each contact's phases and track ownership by [`TouchId`]; there is no
+/// automatic per-contact element capture. Positions follow the listener's
+/// current pointer mapping.
 #[derive(Clone, Debug, Default)]
 pub struct TouchEvent {
     /// Which touch this event belongs to.
@@ -149,6 +147,33 @@ impl InputEvent for TouchEvent {
         PlatformInput::Touch(self)
     }
 }
+impl_mouse_event!(TouchEvent);
+
+/// Requests focus at a text editor without synthesizing a click.
+/// Editors handle this through [`Window::on_mouse_event`], using their visible hitbox,
+/// and call [`Window::prevent_default`] when they accept the request.
+#[derive(Clone, Debug, Default)]
+pub struct TextInputFocusEvent {
+    /// Position in window coordinates.
+    pub position: Point<Pixels>,
+}
+
+impl Sealed for TextInputFocusEvent {}
+impl InputEvent for TextInputFocusEvent {
+    fn to_platform_input(self) -> PlatformInput {
+        PlatformInput::TextInputFocus(self)
+    }
+}
+impl_mouse_event!(TextInputFocusEvent);
+
+impl Sealed for crate::LongPressEvent {}
+impl InputEvent for crate::LongPressEvent {
+    fn to_platform_input(self) -> PlatformInput {
+        PlatformInput::LongPress(self)
+    }
+}
+impl GestureEvent for crate::LongPressEvent {}
+impl_mouse_event!(crate::LongPressEvent);
 
 /// A mouse down event from the platform
 #[derive(Clone, Debug, Default)]
@@ -830,6 +855,9 @@ pub enum PlatformInput {
     MouseDown(MouseDownEvent),
     /// The mouse was released.
     MouseUp(MouseUpEvent),
+    /// A mouse press was cancelled. Release listeners run with default prevented,
+    /// without hit testing, pointer capture, or a drop.
+    MouseCancelled(MouseUpEvent),
     /// Mouse pressure.
     MousePressure(MousePressureEvent),
     /// The mouse was moved.
@@ -840,12 +868,16 @@ pub enum PlatformInput {
     ScrollWheel(ScrollWheelEvent),
     /// A pinch gesture was performed.
     Pinch(PinchEvent),
+    /// A stationary touch was held past the long-press timeout.
+    LongPress(crate::LongPressEvent),
     /// Files were dragged and dropped onto the window.
     FileDrop(FileDropEvent),
     /// A process-local drag promoted to the platform drag-and-drop protocol.
     InternalDrag(InternalDragEvent),
     /// A raw touch event on a touch screen.
     Touch(TouchEvent),
+    /// Requests focus at a text editor, without activating other controls.
+    TextInputFocus(TextInputFocusEvent),
 }
 
 impl PlatformInput {
@@ -856,14 +888,17 @@ impl PlatformInput {
             PlatformInput::ModifiersChanged { .. } => None,
             PlatformInput::MouseDown(event) => Some(event),
             PlatformInput::MouseUp(event) => Some(event),
+            PlatformInput::MouseCancelled(event) => Some(event),
             PlatformInput::MouseMove(event) => Some(event),
             PlatformInput::MousePressure(event) => Some(event),
             PlatformInput::MouseExited(event) => Some(event),
             PlatformInput::ScrollWheel(event) => Some(event),
             PlatformInput::Pinch(event) => Some(event),
+            PlatformInput::LongPress(event) => Some(event),
             PlatformInput::FileDrop(event) => Some(event),
             PlatformInput::InternalDrag(_) => None,
-            PlatformInput::Touch(_) => None,
+            PlatformInput::Touch(event) => Some(event),
+            PlatformInput::TextInputFocus(event) => Some(event),
         }
     }
 
@@ -874,14 +909,17 @@ impl PlatformInput {
             PlatformInput::ModifiersChanged(event) => Some(event),
             PlatformInput::MouseDown(_) => None,
             PlatformInput::MouseUp(_) => None,
+            PlatformInput::MouseCancelled(_) => None,
             PlatformInput::MouseMove(_) => None,
             PlatformInput::MousePressure(_) => None,
             PlatformInput::MouseExited(_) => None,
             PlatformInput::ScrollWheel(_) => None,
             PlatformInput::Pinch(_) => None,
+            PlatformInput::LongPress(_) => None,
             PlatformInput::FileDrop(_) => None,
             PlatformInput::InternalDrag(_) => None,
             PlatformInput::Touch(_) => None,
+            PlatformInput::TextInputFocus(_) => None,
         }
     }
 
@@ -965,5 +1003,90 @@ mod test {
                 assert!(test_view.saw_action);
             })
             .unwrap();
+    }
+
+    #[gpui::test]
+    fn long_press_routes_without_clicking(cx: &mut TestAppContext) {
+        use crate::{LongPressEvent, PlatformInput, StatefulInteractiveElement, Styled, point, px};
+        use std::{cell::RefCell, rc::Rc};
+        struct PressView(Rc<RefCell<Vec<&'static str>>>);
+        impl Render for PressView {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let capture = self.0.clone();
+                let parent = self.0.clone();
+                let child = self.0.clone();
+                let click = self.0.clone();
+                let touch = self.0.clone();
+                div()
+                    .size(px(200.))
+                    .capture_long_press(move |_, _, _| capture.borrow_mut().push("capture"))
+                    .on_long_press(move |_, _, _| parent.borrow_mut().push("parent"))
+                    .child(
+                        crate::canvas(
+                            |_, _, _| (),
+                            move |_, _, window, _| {
+                                window.on_touch_event(move |_, phase, window, _| {
+                                    if phase.capture() {
+                                        touch.borrow_mut().push("touch");
+                                        window.prevent_default();
+                                    }
+                                });
+                            },
+                        )
+                        .size(px(0.)),
+                    )
+                    .child(
+                        div()
+                            .id("child")
+                            .size(px(100.))
+                            .on_click(move |_, _, _| click.borrow_mut().push("click"))
+                            .on_long_press(move |event, window, cx| {
+                                assert_eq!(event.position, point(px(30.), px(30.)));
+                                child.borrow_mut().push("child");
+                                window.prevent_default();
+                                cx.stop_propagation();
+                            }),
+                    )
+            }
+        }
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let window = cx.add_window({
+            let calls = calls.clone();
+            move |_, _| PressView(calls)
+        });
+        cx.update_window(window.into(), |_, window, cx| {
+            window.draw(cx).clear();
+            let result = window.dispatch_event(
+                PlatformInput::Touch(crate::TouchEvent {
+                    id: crate::TouchId(17),
+                    phase: crate::TouchPhase::Started,
+                    position: point(px(30.), px(30.)),
+                    force: None,
+                }),
+                cx,
+            );
+            assert!(result.default_prevented);
+            assert_eq!(*calls.borrow(), ["touch"]);
+            calls.borrow_mut().clear();
+            let result = window.dispatch_event(
+                PlatformInput::LongPress(LongPressEvent {
+                    position: point(px(30.), px(30.)),
+                }),
+                cx,
+            );
+            assert!(result.default_prevented);
+            assert!(!result.propagate);
+            assert_eq!(*calls.borrow(), ["capture", "child"]);
+            calls.borrow_mut().clear();
+            let result = window.dispatch_event(
+                PlatformInput::LongPress(LongPressEvent {
+                    position: point(px(150.), px(150.)),
+                }),
+                cx,
+            );
+            assert!(!result.default_prevented);
+            assert_eq!(*calls.borrow(), ["capture", "parent"]);
+        })
+        .unwrap();
     }
 }

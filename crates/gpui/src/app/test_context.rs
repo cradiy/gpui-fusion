@@ -1135,8 +1135,12 @@ mod tests {
             std::env::temp_dir().join(format!("gpui-selected-file-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&directory).unwrap();
         let path = directory.join("selected file.txt");
-        let selection =
-            cx.update(|cx| cx.prompt_for_files(crate::FilePromptOptions { multiple: true }));
+        let selection = cx.update(|cx| {
+            cx.prompt_for_files(crate::FilePromptOptions {
+                multiple: true,
+                ..Default::default()
+            })
+        });
         cx.simulate_path_prompt_response(|options| {
             assert!(options.files && options.multiple && !options.directories);
             Some(vec![path.clone()])
@@ -1148,6 +1152,9 @@ mod tests {
         // Selection succeeds without reading; contents can become available later.
         std::fs::write(&path, b"selected contents").unwrap();
         assert_eq!(files[0].read().await.unwrap(), b"selected contents");
+        assert!(!files[0].can_write());
+        assert!(files[0].write(b"unexpected".to_vec()).await.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"selected contents");
         std::fs::remove_file(&path).unwrap();
         assert!(files[0].read().await.is_err());
         std::fs::remove_dir(directory).unwrap();
@@ -1155,6 +1162,93 @@ mod tests {
         let selection = cx.update(|cx| cx.prompt_for_files(Default::default()));
         cx.simulate_path_prompt_response(|_| None);
         assert!(selection.await.unwrap().unwrap().is_none());
+    }
+
+    #[gpui::test]
+    async fn saved_file_handles_replace_contents_and_preserve_cancellation(
+        cx: &mut TestAppContext,
+    ) {
+        let directory =
+            std::env::temp_dir().join(format!("gpui-save-file-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("note.txt");
+        let selection = cx.update(|cx| {
+            cx.prompt_for_file_save(crate::FileSaveOptions {
+                directory: Some(directory.clone()),
+                ..Default::default()
+            })
+        });
+        cx.simulate_new_path_selection(|_| Some(path.clone()));
+        let file = selection.await.unwrap().unwrap().unwrap();
+        assert!(file.can_write());
+        file.write(b"long original contents".to_vec())
+            .await
+            .unwrap();
+        file.clone().write(b"short".to_vec()).await.unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"short");
+        let selection = cx.update(|cx| {
+            cx.prompt_for_files(crate::FilePromptOptions {
+                writable: true,
+                ..Default::default()
+            })
+        });
+        cx.simulate_path_prompt_response(|_| Some(vec![path.clone()]));
+        let files = selection.await.unwrap().unwrap().unwrap();
+        files[0].write(Vec::new()).await.unwrap();
+        assert!(file.read().await.unwrap().is_empty());
+        let selection = cx.update(|cx| cx.prompt_for_file_save(Default::default()));
+        cx.simulate_new_path_selection(|_| None);
+        assert!(selection.await.unwrap().unwrap().is_none());
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
+        assert!(file.write(b"no parent".to_vec()).await.is_err());
+    }
+
+    #[gpui::test]
+    async fn file_stream_writes_in_order_and_releases_after_failure_or_cancellation(
+        cx: &mut TestAppContext,
+    ) {
+        use futures::StreamExt;
+        let path = std::env::temp_dir().join(format!("gpui-stream-{}", uuid::Uuid::new_v4()));
+        let file =
+            crate::SelectedFile::from_path(path.clone(), cx.background_executor.clone(), true);
+        std::fs::write(&path, b"previous longer contents").unwrap();
+        let check_path = path.clone();
+        file.write_stream(futures::stream::iter(0..3).map(move |index| {
+            // Polling input must not run ahead of writes, and the old file must be truncated.
+            assert_eq!(std::fs::read(&check_path).unwrap(), vec![b'x'; index]);
+            Ok(vec![b'x'])
+        }))
+        .await
+        .unwrap();
+        assert_eq!(file.read().await.unwrap(), b"xxx");
+
+        let chunks = futures::stream::iter([
+            Ok(b"partial".to_vec()),
+            Err(anyhow::anyhow!("input failed")),
+        ])
+        .chain(futures::stream::poll_fn(|_| {
+            panic!("polled after input failure")
+        }));
+        assert_eq!(
+            file.write_stream(chunks).await.unwrap_err().to_string(),
+            "input failed"
+        );
+        assert_eq!(file.read().await.unwrap(), b"partial");
+
+        let write = file.write_stream(
+            futures::stream::once(async { Ok(b"cancelled".to_vec()) })
+                .chain(futures::stream::pending()),
+        );
+        let write = cx.foreground_executor.spawn(write);
+        cx.run_until_parked();
+        assert_eq!(std::fs::read(&path).unwrap(), b"cancelled");
+        drop(write);
+        file.write(b"recovered".to_vec()).await.unwrap();
+        assert_eq!(file.read().await.unwrap(), b"recovered");
+        file.write_stream(futures::stream::empty()).await.unwrap();
+        assert!(file.read().await.unwrap().is_empty());
+        std::fs::remove_file(path).unwrap();
     }
 
     #[gpui::test]

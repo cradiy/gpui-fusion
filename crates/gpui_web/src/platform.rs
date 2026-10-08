@@ -246,6 +246,17 @@ impl Platform for WebPlatform {
         receiver
     }
 
+    fn prompt_for_file_save(
+        &self,
+        _options: gpui::FileSaveOptions,
+    ) -> oneshot::Receiver<Result<Option<gpui::SelectedFile>>> {
+        let (tx, rx) = oneshot::channel();
+        let _ = tx.send(Err(anyhow::anyhow!(
+            "writable file handles are not supported on the web"
+        )));
+        rx
+    }
+
     fn can_select_mixed_files_and_dirs(&self) -> bool {
         false
     }

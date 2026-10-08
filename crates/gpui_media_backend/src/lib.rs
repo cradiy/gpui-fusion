@@ -7,6 +7,11 @@ mod browser;
 #[cfg(target_family = "wasm")]
 use browser as platform;
 
+#[cfg(target_os = "android")]
+mod android;
+#[cfg(target_os = "android")]
+use android as platform;
+
 #[cfg(all(any(target_os = "linux", target_os = "macos"), not(feature = "v1_24")))]
 compile_error!("enable a GStreamer version feature: v1_24, v1_26, or v1_28");
 
@@ -17,6 +22,7 @@ mod gstreamer_platform;
 #[cfg(not(any(
     all(any(target_os = "linux", target_os = "macos"), feature = "v1_24"),
     target_os = "windows",
+    target_os = "android",
     target_family = "wasm"
 )))]
 mod unsupported;
@@ -28,6 +34,7 @@ use gstreamer_platform as platform;
 #[cfg(not(any(
     all(any(target_os = "linux", target_os = "macos"), feature = "v1_24"),
     target_os = "windows",
+    target_os = "android",
     target_family = "wasm"
 )))]
 use unsupported as platform;
@@ -38,7 +45,7 @@ use windows as platform;
 /// operating system.
 ///
 /// Linux and macOS use the system GStreamer registry, while Windows uses Media
-/// Foundation. Web uses browser media playback.
+/// Foundation. Android uses Media3 and Web uses browser media playback.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemBackend;
 

@@ -359,6 +359,34 @@ impl MediaPlaybackSession for BrowserSession {
     fn timeline(&self) -> PlaybackTimeline {
         self.with(|state| Ok(state.timeline())).unwrap_or_default()
     }
+
+    fn buffered(&self) -> PlaybackBuffer {
+        self.with(|state| {
+            if state.failed.get() || state.element.seeking() {
+                return Ok(PlaybackBuffer::Unknown);
+            }
+            let ranges = state.element.buffered();
+            let mut result = Vec::with_capacity(ranges.length() as usize);
+            for index in 0..ranges.length() {
+                let start = ranges.start(index).map_err(js_error)?;
+                let end = ranges.end(index).map_err(js_error)?;
+                let (Ok(start), Ok(end)) = (
+                    Duration::try_from_secs_f64(start),
+                    Duration::try_from_secs_f64(end),
+                ) else {
+                    return Ok(PlaybackBuffer::Unknown);
+                };
+                if start > end {
+                    return Ok(PlaybackBuffer::Unknown);
+                }
+                if start < end {
+                    result.push(start..end);
+                }
+            }
+            Ok(PlaybackBuffer::Ranges(result.into()))
+        })
+        .unwrap_or_default()
+    }
     fn reload(&mut self, autoplay: bool) -> MediaResult<()> {
         self.with(|state| {
             state.revision.set(state.revision.get().wrapping_add(1));

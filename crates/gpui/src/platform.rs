@@ -4,7 +4,10 @@ mod atlas_memory;
 pub use atlas_memory::AtlasImageLifetimes;
 mod keyboard;
 mod keystroke;
+mod share;
+mod system_services;
 mod tray;
+pub use system_services::{AppSettings, MemoryTrimLevel, NetworkStatus};
 
 #[cfg(all(target_os = "linux", feature = "wayland"))]
 #[expect(missing_docs)]
@@ -83,6 +86,7 @@ use uuid::Uuid;
 pub use app_menu::*;
 pub use keyboard::*;
 pub use keystroke::*;
+pub use share::*;
 pub use tray::*;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -131,11 +135,58 @@ pub fn guess_compositor() -> &'static str {
 
 #[expect(missing_docs)]
 pub trait Platform: 'static {
+    /// Queries the app's default network. Unsupported platforms return an error.
+    fn network_status(&self) -> Result<NetworkStatus> {
+        Err(std::io::Error::from(std::io::ErrorKind::Unsupported).into())
+    }
+    /// Delivers an initial snapshot and changes on the foreground thread, never inline.
+    /// Dropping the subscription stops delivery and releases its platform observer.
+    fn observe_network(
+        &self,
+        _callback: Box<dyn FnMut(NetworkStatus)>,
+    ) -> Result<crate::Subscription> {
+        Err(std::io::Error::from(std::io::ErrorKind::Unsupported).into())
+    }
+    /// Opens system settings. Success means the page was launched, not that a
+    /// permission or preference changed. Unsupported platforms return an error.
+    fn open_app_settings(&self, _page: AppSettings) -> Task<Result<()>> {
+        Task::ready(Err(
+            std::io::Error::from(std::io::ErrorKind::Unsupported).into()
+        ))
+    }
+    fn system_media_session(
+        &self,
+        options: gpui_notifications::MediaSessionOptions,
+    ) -> futures::future::LocalBoxFuture<'static, Result<gpui_notifications::SystemMediaSession>>
+    {
+        Box::pin(gpui_notifications::SystemMediaSession::new(options))
+    }
+    fn notifications(
+        &self,
+        options: gpui_notifications::NotificationOptions,
+    ) -> futures::future::LocalBoxFuture<'static, Result<gpui_notifications::NotificationCenter>>
+    {
+        Box::pin(gpui_notifications::NotificationCenter::new(options))
+    }
     fn background_executor(&self) -> BackgroundExecutor;
+    /// Platform file I/O and location discovery, independently of file dialogs.
+    fn file_system(&self, app_id: &str) -> Result<gpui_io::FileSystem> {
+        gpui_io::FileSystem::desktop(app_id, self.background_executor())
+    }
     fn foreground_executor(&self) -> ForegroundExecutor;
     fn text_system(&self) -> Arc<dyn PlatformTextSystem>;
 
     fn run(&self, on_finish_launching: Box<dyn 'static + FnOnce()>);
+    /// Starts an application and keeps its state alive for the platform run loop.
+    /// Hosts with an external event loop retain the handle until their session closes.
+    fn run_app(
+        &self,
+        application: crate::ApplicationHandle,
+        on_finish_launching: Box<dyn 'static + FnOnce()>,
+    ) {
+        self.run(on_finish_launching);
+        drop(application);
+    }
     fn quit(&self);
     fn restart(&self, binary_path: Option<PathBuf>);
     fn activate(&self, ignoring_other_apps: bool);
@@ -192,23 +243,66 @@ pub trait Platform: 'static {
 
     fn open_url(&self, url: &str);
     fn on_open_urls(&self, callback: Box<dyn FnMut(Vec<String>)>);
+
+    fn on_receive_share(&self, _callback: Box<dyn FnMut(Result<ReceivedShare>)>) {}
     fn register_url_scheme(&self, url: &str) -> Task<Result<()>>;
 
     fn prompt_for_paths(
         &self,
         options: PathPromptOptions,
     ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>>;
-    /// Select files with readable handles on both desktop and web platforms.
+    /// Choose a directory for file creation. Cancellation returns `None`.
+    fn prompt_for_directory(&self) -> oneshot::Receiver<Result<Option<gpui_io::LocationHandle>>> {
+        let paths = self.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: None,
+        });
+        let executor = self.background_executor();
+        let (tx, rx) = oneshot::channel();
+        self.foreground_executor()
+            .spawn(async move {
+                let result = async {
+                    let Some(mut paths) = paths.await?? else {
+                        return Ok(None);
+                    };
+                    anyhow::ensure!(
+                        paths.len() == 1,
+                        "directory picker must return one directory"
+                    );
+                    Ok(paths
+                        .pop()
+                        .map(|path| gpui_io::LocationHandle::from_path(path, executor)))
+                }
+                .await;
+                let _ = tx.send(result);
+            })
+            .detach();
+        rx
+    }
+    /// Select files with readable handles and optional write access.
     fn prompt_for_files(
         &self,
         options: crate::FilePromptOptions,
     ) -> oneshot::Receiver<Result<Option<Vec<crate::SelectedFile>>>> {
-        let paths = self.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: options.multiple,
-            prompt: None,
-        });
+        let mime_types = match options.normalized_mime_types() {
+            Ok(types) => types,
+            Err(error) => {
+                let (tx, rx) = oneshot::channel();
+                let _ = tx.send(Err(error));
+                return rx;
+            }
+        };
+        let paths = self.prompt_for_paths_with_mime_types(
+            PathPromptOptions {
+                files: true,
+                directories: false,
+                multiple: options.multiple,
+                prompt: None,
+            },
+            mime_types,
+        );
         let executor = self.background_executor();
         let (tx, rx) = oneshot::channel();
         self.foreground_executor()
@@ -217,9 +311,62 @@ pub trait Platform: 'static {
                     Ok(paths.await??.map(|paths| {
                         paths
                             .into_iter()
-                            .map(|path| crate::SelectedFile::from_path(path, executor.clone()))
+                            .map(|path| {
+                                crate::SelectedFile::from_path(
+                                    path,
+                                    executor.clone(),
+                                    options.writable,
+                                )
+                            })
                             .collect()
                     }))
+                }
+                .await;
+                let _ = tx.send(result);
+            })
+            .detach();
+        rx
+    }
+    /// Selects paths using normalized MIME filters. An empty list allows all types.
+    fn prompt_for_paths_with_mime_types(
+        &self,
+        options: PathPromptOptions,
+        mime_types: Vec<String>,
+    ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>> {
+        if mime_types.is_empty() {
+            return self.prompt_for_paths(options);
+        }
+        let (tx, rx) = oneshot::channel();
+        let _ = tx.send(Err(anyhow::anyhow!(
+            "file type filtering is not supported by this platform"
+        )));
+        rx
+    }
+    /// Choose a writable destination. Cancellation returns `None`.
+    fn prompt_for_file_save(
+        &self,
+        options: crate::FileSaveOptions,
+    ) -> oneshot::Receiver<Result<Option<crate::SelectedFile>>> {
+        let (tx, rx) = oneshot::channel();
+        let directory = match options
+            .directory
+            .map(Ok)
+            .unwrap_or_else(std::env::current_dir)
+        {
+            Ok(directory) => directory,
+            Err(error) => {
+                let _ = tx.send(Err(error.into()));
+                return rx;
+            }
+        };
+        let path = self.prompt_for_new_path(&directory, Some(&options.suggested_name));
+        let executor = self.background_executor();
+        self.foreground_executor()
+            .spawn(async move {
+                let result = async {
+                    Ok(path
+                        .await??
+                        .map(|path| crate::SelectedFile::from_path(path, executor, true)))
                 }
                 .await;
                 let _ = tx.send(result);
@@ -235,6 +382,25 @@ pub trait Platform: 'static {
     fn can_select_mixed_files_and_dirs(&self) -> bool;
     fn reveal_path(&self, path: &Path);
     fn open_with_system(&self, path: &Path);
+    fn share(&self, _options: ShareOptions) -> Task<Result<()>> {
+        Task::ready(Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "system sharing is unavailable on this platform",
+        )
+        .into()))
+    }
+    fn open_file_with_system(&self, file: &crate::SelectedFile) -> Task<Result<()>> {
+        if let Some(path) = file.path() {
+            self.open_with_system(path);
+            Task::ready(Ok(()))
+        } else {
+            Task::ready(Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "file provider cannot be opened by the system",
+            )
+            .into()))
+        }
+    }
 
     fn on_quit(&self, callback: Box<dyn FnMut()>);
     fn on_reopen(&self, callback: Box<dyn FnMut()>);
@@ -251,11 +417,16 @@ pub trait Platform: 'static {
     /// Desktop platforms never invoke this.
     fn on_app_lifecycle(&self, _callback: Box<dyn FnMut(AppLifecyclePhase)>) {}
 
-    /// Registers a callback invoked when the OS signals memory pressure
-    /// (iOS `didReceiveMemoryWarning`, Android `onTrimMemory`).
-    ///
-    /// Desktop platforms never invoke this.
+    /// Registers a callback invoked when the OS signals memory pressure.
+    /// Background transitions are not memory warnings.
     fn on_memory_warning(&self, _callback: Box<dyn FnMut()>) {}
+
+    /// Registers a foreground-thread callback for OS memory reclamation advice.
+    /// Never invoke inline during registration or from inside a GPUI platform call.
+    /// The default adapter maps an ungraded memory warning to critical pressure.
+    fn on_memory_trim(&self, mut callback: Box<dyn FnMut(MemoryTrimLevel)>) {
+        self.on_memory_warning(Box::new(move || callback(MemoryTrimLevel::Critical)));
+    }
 
     /// The platform's gesture recognition services, if it provides any
     /// beyond gpui's portable recognizers. See
@@ -743,12 +914,47 @@ pub enum AppLifecyclePhase {
     Foreground,
 }
 
-/// Regions of a window that are obscured or reserved by the system.
-///
-/// Mobile applications often share space in their window with system-specific
-/// geometry, from keyboards to camera notches. In GPUI, all this is abstracted
-/// into a single "inset" which should be overlaid on the window's bounds.
-/// It is up to the application develop to determine how to handle these cases.
+/// Semantic touch feedback requested from the operating system.
+/// The platform chooses the waveform and respects the user's feedback settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum HapticFeedback {
+    /// Moving between discrete choices, such as picker values.
+    Selection,
+    /// Successfully completing an interaction.
+    Confirm,
+    /// Rejecting an interaction.
+    Reject,
+    /// Recognizing a long press.
+    LongPress,
+    /// Beginning a continuous interaction, such as dragging.
+    GestureStart,
+    /// Finishing a continuous interaction.
+    GestureEnd,
+}
+
+/// Foreground color of system-bar icons and text, independently of their background.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SystemBarStyle {
+    /// Follow the system light/dark appearance.
+    #[default]
+    Automatic,
+    /// Light icons and text for a dark background.
+    Light,
+    /// Dark icons and text for a light background.
+    Dark,
+}
+
+/// Foreground appearance of the status and navigation bars.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SystemBarAppearance {
+    /// Foreground of the status bar, including the clock and status icons.
+    pub status: SystemBarStyle,
+    /// Foreground of the navigation bar, including buttons or the gesture indicator.
+    pub navigation: SystemBarStyle,
+}
+
+/// System occlusion and host avoidance, in logical pixels from the host window edges.
+/// Use [`Self::effective`] for additional padding inside GPUI's current viewport.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WindowInsets {
     /// Regions covered by system UI or hardware: status bar, display
@@ -760,16 +966,19 @@ pub struct WindowInsets {
     /// (iOS: derived from `keyboardWillShow`/frame-change notifications.
     /// Android: `WindowInsets.Type.ime()`.)
     pub ime: Edges<Pixels>,
+    /// Space already excluded from the GPUI viewport by the host's placement,
+    /// padding, or keyboard resizing, measured from the same edges as the insets.
+    pub consumed: Edges<Pixels>,
 }
 
 impl WindowInsets {
-    /// The combined inset content should avoid.
+    /// Additional space content should avoid, after host avoidance.
     pub fn effective(&self) -> Edges<Pixels> {
         Edges {
-            top: self.safe_area.top.max(self.ime.top),
-            right: self.safe_area.right.max(self.ime.right),
-            bottom: self.safe_area.bottom.max(self.ime.bottom),
-            left: self.safe_area.left.max(self.ime.left),
+            top: (self.safe_area.top.max(self.ime.top) - self.consumed.top).max(px(0.)),
+            right: (self.safe_area.right.max(self.ime.right) - self.consumed.right).max(px(0.)),
+            bottom: (self.safe_area.bottom.max(self.ime.bottom) - self.consumed.bottom).max(px(0.)),
+            left: (self.safe_area.left.max(self.ime.left) - self.consumed.left).max(px(0.)),
         }
     }
 }
@@ -789,6 +998,15 @@ pub enum TextInputStateChange {
 
 #[expect(missing_docs)]
 pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
+    fn supports_autofill(&self) -> bool {
+        false
+    }
+    fn set_autofill_fields(&self, _fields: Vec<crate::AutofillField>) {}
+    fn on_autofill(&self, _callback: Box<dyn Fn(u64, String)>) {}
+    fn on_autofill_focus(&self, _callback: Box<dyn Fn(u64)>) {}
+    fn finish_autofill(&self, _commit: bool) -> Result<()> {
+        anyhow::bail!("system autofill is not supported on this platform")
+    }
     fn bounds(&self) -> Bounds<Pixels>;
     fn is_maximized(&self) -> bool;
     fn window_bounds(&self) -> WindowBounds;
@@ -796,6 +1014,20 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn resize(&mut self, size: Size<Pixels>);
     fn scale_factor(&self) -> f32;
     fn appearance(&self) -> WindowAppearance;
+    /// Applies the system text-size preference to a base size in logical pixels.
+    /// Platforms without a text-size adapter return the base size unchanged.
+    fn scaled_font_size(&self, base_size: Pixels) -> Pixels {
+        base_size
+    }
+    /// Notifies the window when system font-size conversion changes.
+    fn on_font_size_changed(&self, _callback: Box<dyn FnMut()>) {}
+    /// Whether the system asks applications to reduce nonessential motion.
+    /// Platforms without an adapter return false.
+    fn prefers_reduced_motion(&self) -> bool {
+        false
+    }
+    /// Notifies the window when its reduced-motion preference changes.
+    fn on_reduced_motion_changed(&self, _callback: Box<dyn FnMut()>) {}
     fn display(&self) -> Option<Rc<dyn PlatformDisplay>>;
     fn mouse_position(&self) -> Point<Pixels>;
     fn modifiers(&self) -> Modifiers;
@@ -819,7 +1051,25 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn zoom(&self);
     fn toggle_fullscreen(&self);
     fn is_fullscreen(&self) -> bool;
+    fn supports_picture_in_picture(&self) -> bool {
+        false
+    }
+    fn is_picture_in_picture(&self) -> bool {
+        false
+    }
+    fn enter_picture_in_picture(&self, _aspect_ratio: Size<u32>) -> oneshot::Receiver<Result<()>> {
+        let (sender, receiver) = oneshot::channel();
+        let _ = sender.send(Err(anyhow::anyhow!("picture-in-picture is not supported")));
+        receiver
+    }
+    fn on_picture_in_picture_changed(&self, _callback: Box<dyn FnMut(bool)>) {}
+    fn set_picture_in_picture_source_bounds(&self, _bounds: Option<Bounds<Pixels>>) {}
     fn on_request_frame(&self, callback: Box<dyn FnMut(RequestFrameOptions)>);
+    /// Returns a non-reentrant wakeup for platforms that schedule frames on demand.
+    /// Multiple requests may be coalesced; the callback must not render synchronously.
+    fn frame_requester(&self) -> Option<Rc<dyn Fn()>> {
+        None
+    }
     fn on_input(&self, callback: Box<dyn FnMut(PlatformInput) -> DispatchEventResult>);
     fn on_active_status_change(&self, callback: Box<dyn FnMut(bool)>);
     fn on_hover_status_change(&self, callback: Box<dyn FnMut(bool)>);
@@ -993,6 +1243,11 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
 
     // Mobile platform methods.
 
+    /// Requests system-bar foreground styles. Returns false when unsupported.
+    fn set_system_bar_appearance(&self, _appearance: SystemBarAppearance) -> bool {
+        false
+    }
+
     /// The regions of this window currently obscured or reserved by the
     /// system. Zero on platforms without such regions.
     fn insets(&self) -> WindowInsets {
@@ -1010,6 +1265,9 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     /// button/gesture; no source on iOS or desktop).
     fn set_back_handler(&self, _callback: Box<dyn FnMut()>) {}
 
+    /// Observes predictive Back previews without enabling or committing navigation.
+    fn set_back_gesture_handler(&self, _callback: Box<dyn FnMut(crate::BackGestureEvent)>) {}
+
     /// Declares whether the application would currently handle the system
     /// back action (e.g. navigation depth > 0).
     fn set_back_enabled(&self, _enabled: bool) {}
@@ -1024,6 +1282,12 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn text_input_state_changed(&self, _change: TextInputStateChange) {}
 
     fn play_system_bell(&self) {}
+
+    /// Requests semantic haptic feedback. Returns false when unsupported or declined.
+    /// A true result is not proof that the device physically vibrated.
+    fn perform_haptic_feedback(&self, _feedback: HapticFeedback) -> bool {
+        false
+    }
 
     /// Initialize the accessibility adapter with callbacks.
     fn a11y_init(&self, _callbacks: A11yCallbacks) {}
@@ -1755,6 +2019,17 @@ impl PlatformInputHandler {
             .map(|bounds| self.display_bounds(bounds))
     }
 
+    /// Scrolls the focused editor's content by a delta in displayed logical pixels.
+    pub fn scroll_text_input(&mut self, delta: Point<Pixels>) -> bool {
+        let origin = self
+            .element_bounds()
+            .map_or_default(|bounds| bounds.center());
+        let delta = self.pointer_mapping.map(origin + delta) - self.pointer_mapping.map(origin);
+        self.cx
+            .update(|window, cx| self.handler.scroll_text_input(delta, window, cx))
+            .unwrap_or(false)
+    }
+
     /// See [`InputHandler::text_length_utf16`].
     pub fn text_length_utf16(&mut self) -> Option<usize> {
         self.cx
@@ -1773,6 +2048,35 @@ impl PlatformInputHandler {
         self.cx
             .update(|window, cx| self.handler.accepts_text_input(window, cx))
             .unwrap_or(true)
+    }
+
+    /// Returns the focused editor's text entry mode.
+    pub fn text_input_mode(&mut self) -> crate::TextInputMode {
+        self.cx
+            .update(|window, cx| self.handler.text_input_mode(window, cx))
+            .unwrap_or_default()
+    }
+
+    /// Returns the focused editor's keyboard layout hint.
+    pub fn text_input_purpose(&mut self) -> crate::TextInputPurpose {
+        self.cx
+            .update(|window, cx| self.handler.text_input_purpose(window, cx))
+            .unwrap_or_default()
+    }
+
+    /// Returns the focused editor's software keyboard action override.
+    pub fn text_input_action(&mut self) -> Option<crate::TextInputAction> {
+        self.cx
+            .update(|window, cx| self.handler.text_input_action(window, cx))
+            .ok()
+            .flatten()
+    }
+
+    /// Dispatches an action requested by the software keyboard.
+    pub fn perform_text_input_action(&mut self, action: crate::TextInputAction) -> bool {
+        self.cx
+            .update(|window, cx| self.handler.perform_text_input_action(action, window, cx))
+            .unwrap_or(false)
     }
 
     #[allow(dead_code)]
@@ -1824,6 +2128,28 @@ impl PreeditSelection {
 ///
 /// <https://developer.apple.com/documentation/appkit/nstextinputclient>
 pub trait InputHandler: 'static {
+    /// Overrides the software keyboard action. `None` uses the editor mode's default.
+    /// Physical Enter key behavior is unaffected.
+    fn text_input_action(
+        &mut self,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> Option<crate::TextInputAction> {
+        None
+    }
+
+    /// Handles a software keyboard action after composition has completed.
+    /// Return true when handled. Backends may dispatch Enter for an unhandled Done.
+    /// Navigation and other actions require an explicit handler.
+    fn perform_text_input_action(
+        &mut self,
+        _action: crate::TextInputAction,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> bool {
+        false
+    }
+
     /// Get the range of the user's currently selected text, if any
     /// Corresponds to [selectedRange()](https://developer.apple.com/documentation/appkit/nstextinputclient/1438242-selectedrange)
     ///
@@ -1979,6 +2305,20 @@ pub trait InputHandler: 'static {
         None
     }
 
+    /// Scrolls only this editor's content, without changing the selection or scrolling ancestors.
+    /// The delta is content motion in source logical pixels: positive values move content right/down.
+    /// Returns whether the viewport moved. Layout and hit testing must reflect the new offset
+    /// after the next frame. Editors without scrolling support return false.
+    /// An explicit scroll, including a zero delta, cancels pending automatic selection reveal.
+    fn scroll_text_input(
+        &mut self,
+        _delta: Point<Pixels>,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> bool {
+        false
+    }
+
     /// Get the length of the document in UTF-16 characters, if known.
     fn text_length_utf16(&mut self, _window: &mut Window, _cx: &mut App) -> Option<usize> {
         None
@@ -1996,6 +2336,22 @@ pub trait InputHandler: 'static {
     /// Returns whether this handler is accepting text input to be inserted.
     fn accepts_text_input(&mut self, _window: &mut Window, _cx: &mut App) -> bool {
         true
+    }
+
+    /// Describes the editor to platform input methods. This does not validate inserted text.
+    /// Backends may use it to select keyboard layout, action keys, and privacy settings.
+    fn text_input_mode(&mut self, _window: &mut Window, _cx: &mut App) -> crate::TextInputMode {
+        crate::TextInputMode::default()
+    }
+
+    /// Hints which characters should be readily available on the software keyboard.
+    /// This does not validate text or change the editor's newline and password behavior.
+    fn text_input_purpose(
+        &mut self,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> crate::TextInputPurpose {
+        crate::TextInputPurpose::default()
     }
 
     /// Returns whether printable keys should be routed to the IME before keybinding
@@ -2896,6 +3252,35 @@ mod image_tests {
         for pixel in bytes.chunks_exact(4) {
             assert_eq!(pixel, &[0xF8, 0xBD, 0x38, 0xFF]);
         }
+    }
+}
+
+#[cfg(test)]
+mod inset_tests {
+    #[test]
+    fn insets_account_for_overlapping_occlusion_and_host_avoidance() {
+        let mut insets = super::WindowInsets {
+            safe_area: crate::Edges {
+                top: crate::px(24.),
+                bottom: crate::px(20.),
+                ..Default::default()
+            },
+            ime: crate::Edges {
+                bottom: crate::px(300.),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(insets.effective().bottom, crate::px(300.));
+        insets.consumed = crate::Edges {
+            top: crate::px(40.),
+            bottom: crate::px(20.),
+            ..Default::default()
+        };
+        assert_eq!(insets.effective().top, crate::px(0.));
+        assert_eq!(insets.effective().bottom, crate::px(280.));
+        insets.consumed.bottom = crate::px(300.);
+        assert_eq!(insets.effective(), crate::Edges::default());
     }
 }
 

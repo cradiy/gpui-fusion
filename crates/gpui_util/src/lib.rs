@@ -14,6 +14,9 @@ use std::{
 
 pub mod arc_cow;
 
+#[cfg(target_os = "android")]
+pub mod android;
+
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000_u32;
 

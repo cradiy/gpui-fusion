@@ -20,8 +20,8 @@ use crate::{
     Style, SubscriberSet, Subscription, SystemDragOptions, SystemWindowTab,
     SystemWindowTabController, TaffyLayoutEngine, Task, TextRenderingMode, TextStyle,
     TextStyleRefinement, ThermalState, WindowAppearance, WindowBackgroundAppearance, WindowBounds,
-    WindowControls, WindowDecorations, WindowOptions, WindowParams, WindowTextSystem, point,
-    prelude::*, profiler, px, size,
+    WindowControls, WindowDecorations, WindowInsets, WindowOptions, WindowParams, WindowTextSystem,
+    point, prelude::*, profiler, px, size,
 };
 #[cfg(not(target_family = "wasm"))]
 use crate::{MouseButton, MouseUpEvent};
@@ -50,6 +50,7 @@ use std::{
 };
 
 pub(crate) mod a11y;
+mod autofill;
 mod color_svg;
 mod diagnostics;
 mod effects;
@@ -132,11 +133,13 @@ struct FrameDirtyAccumulator {
 #[derive(Clone)]
 pub(crate) struct WindowInvalidator {
     inner: Rc<RefCell<WindowInvalidatorInner>>,
+    request_frame: Option<Rc<dyn Fn()>>,
 }
 
 impl WindowInvalidator {
-    pub fn new() -> Self {
+    pub fn new(request_frame: Option<Rc<dyn Fn()>>) -> Self {
         WindowInvalidator {
+            request_frame,
             inner: Rc::new(RefCell::new(WindowInvalidatorInner {
                 dirty: true,
                 draw_phase: DrawPhase::None,
@@ -152,9 +155,14 @@ impl WindowInvalidator {
         inner.update_count += 1;
         inner.dirty_views.insert(entity);
         if inner.draw_phase == DrawPhase::None {
+            let needs_frame = !inner.dirty;
             Self::record_frame_dirty(&mut inner);
             inner.dirty = true;
             cx.push_effect(Effect::Notify { emitter: entity });
+            drop(inner);
+            if needs_frame {
+                self.request_frame();
+            }
             true
         } else {
             false
@@ -167,10 +175,21 @@ impl WindowInvalidator {
 
     pub fn set_dirty(&self, dirty: bool) {
         let mut inner = self.inner.borrow_mut();
+        let needs_frame = dirty && !inner.dirty;
         inner.dirty = dirty;
         if dirty {
             inner.update_count += 1;
             Self::record_frame_dirty(&mut inner);
+        }
+        drop(inner);
+        if needs_frame {
+            self.request_frame();
+        }
+    }
+
+    pub fn request_frame(&self) {
+        if let Some(request) = &self.request_frame {
+            request();
         }
     }
 
@@ -243,6 +262,13 @@ thread_local! {
     /// Points to the current App's element arena during draw operations.
     /// This allows multiple test Apps to have isolated arenas, preventing
     /// cross-session corruption when the scheduler interleaves their tasks.
+    #[cfg_attr(
+        target_os = "android",
+        expect(
+            clippy::missing_const_for_thread_local,
+            reason = "Android's std TLS macro flags this already-const initializer"
+        )
+    )]
     static CURRENT_ELEMENT_ARENA: Cell<Option<*const RefCell<Arena>>> = const { Cell::new(None) };
 }
 
@@ -569,6 +595,7 @@ pub struct Window {
     pub(crate) invalidator: WindowInvalidator,
     pub(crate) removed: bool,
     pub(crate) platform_window: Box<dyn PlatformWindow>,
+    picture_in_picture_source: Option<ElementBounds>,
     display_id: Option<DisplayId>,
     sprite_atlas: Arc<dyn PlatformAtlas>,
     color_svg_renders: color_svg::ColorSvgRenders,
@@ -614,6 +641,7 @@ pub struct Window {
     raster_full_viewport_regions: FxHashSet<[u32; 4]>,
     raster_budget_retrying: bool,
     pub(crate) bounds_observers: SubscriberSet<(), AnyObserver>,
+    pub(crate) insets_observers: SubscriberSet<(), AnyObserver>,
     appearance: WindowAppearance,
     pub(crate) appearance_observers: SubscriberSet<(), AnyObserver>,
     pub(crate) button_layout_observers: SubscriberSet<(), AnyObserver>,
@@ -832,7 +860,7 @@ impl Window {
         let scale_factor = platform_window.scale_factor();
         let appearance = platform_window.appearance();
         let text_system = Arc::new(WindowTextSystem::new(cx.text_system().clone()));
-        let invalidator = WindowInvalidator::new();
+        let invalidator = WindowInvalidator::new(platform_window.frame_requester());
         let active = Rc::new(Cell::new(platform_window.is_active()));
         let hovered = Rc::new(Cell::new(platform_window.is_hovered()));
         let needs_present = Rc::new(Cell::new(false));
@@ -851,6 +879,30 @@ impl Window {
         }
 
         let accessibility_force_disabled = cx.accessibility_force_disabled;
+        if platform_window.supports_autofill() {
+            let (sender, receiver) = async_channel::unbounded();
+            let focus_sender = sender.clone();
+            platform_window.on_autofill_focus(Box::new(move |id| {
+                let _ = focus_sender.try_send((id, None));
+            }));
+            platform_window.on_autofill(Box::new(move |id, value| {
+                let _ = sender.try_send((id, Some(value)));
+            }));
+            let mut async_cx = cx.to_async();
+            cx.foreground_executor()
+                .spawn(async move {
+                    while let Ok((id, value)) = receiver.recv().await {
+                        let _ = handle.update(&mut async_cx, |_, window, cx| {
+                            if let Some(value) = value {
+                                window.apply_autofill(id, value, cx);
+                            } else {
+                                window.focus_autofill(id, cx);
+                            }
+                        });
+                    }
+                })
+                .detach();
+        }
         let a11y_active_flag = Arc::new(AtomicBool::new(false));
 
         #[cfg(not(target_family = "wasm"))]
@@ -861,7 +913,7 @@ impl Window {
             }
             let initial_tree = accesskit::TreeUpdate {
                 nodes: vec![(ROOT_NODE_ID, initial_root_node)],
-                tree: Some(accesskit::Tree::new(ROOT_NODE_ID)),
+                tree: Some(accesskit::TreeInfo::new(ROOT_NODE_ID)),
                 tree_id: accesskit::TreeId::ROOT,
                 focus: ROOT_NODE_ID,
             };
@@ -976,6 +1028,7 @@ impl Window {
                         handle
                             .update(&mut cx, |_, window, _| window.complete_frame())
                             .log_err();
+                        invalidator.request_frame();
                         return;
                     }
                 }
@@ -1043,11 +1096,41 @@ impl Window {
                     .log_err();
             }
         }));
+        platform_window.on_insets_changed(Box::new({
+            let mut cx = cx.to_async();
+            move |_| {
+                handle
+                    .update(&mut cx, |_, window, cx| {
+                        window.refresh();
+                        window
+                            .insets_observers
+                            .clone()
+                            .retain(&(), |callback| callback(window, cx));
+                    })
+                    .log_err();
+            }
+        }));
         platform_window.on_appearance_changed(Box::new({
             let mut cx = cx.to_async();
             move || {
                 handle
                     .update(&mut cx, |_, window, cx| window.appearance_changed(cx))
+                    .log_err();
+            }
+        }));
+        platform_window.on_font_size_changed(Box::new({
+            let mut cx = cx.to_async();
+            move || {
+                handle
+                    .update(&mut cx, |_, window, _| window.refresh())
+                    .log_err();
+            }
+        }));
+        platform_window.on_reduced_motion_changed(Box::new({
+            let mut cx = cx.to_async();
+            move || {
+                handle
+                    .update(&mut cx, |_, window, _| window.refresh())
                     .log_err();
             }
         }));
@@ -1179,6 +1262,7 @@ impl Window {
             invalidator,
             removed: false,
             platform_window,
+            picture_in_picture_source: None,
             display_id,
             sprite_atlas,
             color_svg_renders: Default::default(),
@@ -1217,6 +1301,7 @@ impl Window {
             raster_full_viewport_regions: FxHashSet::default(),
             raster_budget_retrying: false,
             bounds_observers: SubscriberSet::new(),
+            insets_observers: SubscriberSet::new(),
             appearance,
             appearance_observers: SubscriberSet::new(),
             button_layout_observers: SubscriberSet::new(),
@@ -1596,6 +1681,19 @@ impl Window {
     /// Returns the bounds of the current window in the global coordinate space, which could span across multiple displays.
     pub fn bounds(&self) -> Bounds<Pixels> {
         self.platform_window.bounds()
+    }
+
+    /// System occlusion and host avoidance in logical pixels.
+    /// `effective()` returns the additional padding needed inside the current viewport.
+    pub fn insets(&self) -> WindowInsets {
+        self.platform_window.insets()
+    }
+
+    /// Sets system-bar icon and text colors without changing visibility or layout.
+    /// Supported by the Android host; other platforms return false without changes.
+    /// Automatic styles follow the system theme, not the application's background.
+    pub fn set_system_bar_appearance(&mut self, appearance: crate::SystemBarAppearance) -> bool {
+        self.platform_window.set_system_bar_appearance(appearance)
     }
 
     /// Promotes the active process-local drag to the platform drag-and-drop protocol.
@@ -1988,6 +2086,26 @@ impl Window {
     /// be rendered as two pixels on screen.
     pub fn scale_factor(&self) -> f32 {
         self.scale_factor
+    }
+
+    /// Applies the system text-size preference to a base font size in logical pixels.
+    ///
+    /// Call during rendering and pass the result to `text_size`. System preference
+    /// changes refresh the window. Scaling may be nonlinear, so convert each base
+    /// size independently; do not scale an already converted size. This does not
+    /// change `px`, `rem`, window density, or other layout dimensions.
+    /// Platforms without a text-size adapter return the base size unchanged.
+    pub fn scaled_font_size(&self, base_size: Pixels) -> Pixels {
+        self.platform_window.scaled_font_size(base_size)
+    }
+
+    /// Whether the system asks applications to reduce nonessential motion.
+    ///
+    /// Read during rendering to choose static content or disable an animation.
+    /// Preference changes refresh the window; GPUI does not automatically disable
+    /// animations. Platforms without an adapter return false.
+    pub fn prefers_reduced_motion(&self) -> bool {
+        self.platform_window.prefers_reduced_motion()
     }
 
     /// Device pixels per logical pixel for paint output, including the current capture density.
@@ -2686,6 +2804,57 @@ impl Window {
         self.platform_window.toggle_fullscreen();
     }
 
+    /// Whether the current host supports system picture-in-picture windows.
+    pub fn supports_picture_in_picture(&self) -> bool {
+        self.platform_window.supports_picture_in_picture()
+    }
+
+    /// Whether the system currently presents this window in picture-in-picture.
+    pub fn is_picture_in_picture(&self) -> bool {
+        self.platform_window.is_picture_in_picture()
+    }
+
+    /// Tracks the visible content area used by picture-in-picture transitions.
+    /// Register the handle with [`Self::track_element_bounds`] in the full-window
+    /// layout. Scrolling, transforms and cached views update its displayed bounds.
+    /// A missing or clipped source uses the whole host window. The compact layout
+    /// does not replace the return target. Unsupported platforms ignore this hint.
+    pub fn set_picture_in_picture_source(&mut self, source: Option<ElementBounds>) {
+        self.picture_in_picture_source = source;
+    }
+
+    /// Requests picture-in-picture using the content's width-to-height ratio.
+    /// The system may reject the request or restrict the supported ratio. Success
+    /// means the request was accepted; observe mode changes for the actual state.
+    /// The application supplies the compact UI and the system controls returning
+    /// to the full window. Unsupported platforms return an error.
+    pub fn enter_picture_in_picture(
+        &self,
+        aspect_ratio: Size<u32>,
+        cx: &App,
+    ) -> Task<anyhow::Result<()>> {
+        if aspect_ratio.width == 0 || aspect_ratio.height == 0 {
+            return Task::ready(Err(anyhow::anyhow!(
+                "picture-in-picture aspect ratio must be positive"
+            )));
+        }
+        let result = self.platform_window.enter_picture_in_picture(aspect_ratio);
+        cx.foreground_executor().spawn(async move { result.await? })
+    }
+
+    /// Replaces the listener for system picture-in-picture mode changes.
+    pub fn on_picture_in_picture_changed(
+        &self,
+        cx: &App,
+        mut callback: impl FnMut(bool, &mut Window, &mut App) + 'static,
+    ) {
+        let mut cx = self.to_async(cx);
+        self.platform_window
+            .on_picture_in_picture_changed(Box::new(move |enabled| {
+                let _ = cx.update(|window, cx| callback(enabled, window, cx));
+            }));
+    }
+
     /// Updates the IME panel position suggestions for languages like japanese, chinese.
     pub fn invalidate_character_coordinates(&self) {
         self.on_next_frame(|window, cx| {
@@ -2792,6 +2961,53 @@ impl Window {
         }))
     }
 
+    /// Sets the system Back callback. Android invokes it only while Back is enabled.
+    /// The callback replaces the previous handler; desktop platforms do not invoke it.
+    pub fn on_system_back(
+        &self,
+        cx: &App,
+        mut callback: impl FnMut(&mut Window, &mut App) + 'static,
+    ) {
+        let mut cx = self.to_async(cx);
+        self.platform_window.set_back_handler(Box::new(move || {
+            let _ = cx.update(|window, cx| callback(window, cx));
+        }));
+    }
+
+    /// Enables application handling of system Back, for example while a detail page is open.
+    ///
+    /// Predictive preview listeners do not enable Back handling on their own.
+    /// Keep this disabled at the navigation root to preserve the platform's default behavior.
+    pub fn set_back_enabled(&self, enabled: bool) {
+        self.platform_window.set_back_enabled(enabled);
+    }
+
+    /// Observes system Back gesture progress on supported platforms. Update preview
+    /// state here and navigate only in [`Self::on_system_back`]. Cancellation must
+    /// restore the preview. Replaces the previous listener without enabling Back.
+    pub fn on_system_back_gesture(
+        &self,
+        cx: &App,
+        mut callback: impl FnMut(crate::BackGestureEvent, &mut Window, &mut App) + 'static,
+    ) {
+        let mut cx = self.to_async(cx);
+        self.platform_window
+            .set_back_gesture_handler(Box::new(move |event| {
+                let _ = cx.update(|window, cx| callback(event, window, cx));
+            }));
+    }
+
+    /// Requests the soft keyboard for the focused text input on supported platforms.
+    /// Focus the input first. The platform may decline the request while the window is inactive.
+    pub fn show_soft_keyboard(&self) {
+        self.platform_window.show_soft_keyboard();
+    }
+
+    /// Requests that the soft keyboard be hidden without clearing text input focus.
+    pub fn hide_soft_keyboard(&self) {
+        self.platform_window.hide_soft_keyboard();
+    }
+
     /// Read information about the GPU backing this window.
     /// Currently returns None on Mac and Windows.
     pub fn gpu_specs(&self) -> Option<GpuSpecs> {
@@ -2858,6 +3074,13 @@ impl Window {
     /// with the window, for others it's just a simple global function call.
     pub fn play_system_bell(&self) {
         self.platform_window.play_system_bell()
+    }
+
+    /// Requests system touch feedback for a user interaction. Call from an event
+    /// handler, not while rendering. Unsupported platforms and declined requests
+    /// return false; true only means the platform accepted the request.
+    pub fn perform_haptic_feedback(&self, feedback: crate::HapticFeedback) -> bool {
+        self.platform_window.perform_haptic_feedback(feedback)
     }
 
     /// Returns whether accessibility features are active for this frame,

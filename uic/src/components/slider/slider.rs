@@ -294,6 +294,7 @@ impl RenderOnce for Slider {
             .track_focus(&focus)
             .tab_stop(!disabled)
             .role(Role::Slider)
+            .aria_disabled(disabled)
             .when_some(self.label, |this, label| this.aria_label(label))
             .aria_numeric_value(value)
             .aria_numeric_value_step(step)

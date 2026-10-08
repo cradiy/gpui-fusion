@@ -123,9 +123,8 @@ impl WebWindowInner {
         handler: impl FnMut(JsValue) + 'static,
     ) -> Closure<dyn FnMut(JsValue)> {
         let closure = Closure::<dyn FnMut(JsValue)>::new(handler);
-        self.input_element
-            .add_event_listener_with_callback(event_name, closure.as_ref().unchecked_ref())
-            .ok();
+        self.autofill
+            .listen(event_name, closure.as_ref().unchecked_ref());
         closure
     }
 
@@ -162,9 +161,7 @@ impl WebWindowInner {
             let event: web_sys::PointerEvent = event.unchecked_into();
             event.prevent_default();
             this.refresh_ime_position();
-            let focus_options = web_sys::FocusOptions::new();
-            focus_options.set_prevent_scroll(true);
-            this.input_element.focus_with_options(&focus_options).ok();
+            this.autofill.focus();
 
             let button = dom_mouse_button_to_gpui(event.button());
             let position = pointer_position_in_element(&event);
@@ -359,7 +356,11 @@ impl WebWindowInner {
     fn register_key_down(self: &Rc<Self>) -> Closure<dyn FnMut(JsValue)> {
         let this = Rc::clone(self);
         self.listen_input("keydown", move |event: JsValue| {
-            let event: web_sys::KeyboardEvent = event.unchecked_into();
+            // Autofill can dispatch plain Events named keydown/keyup. They do
+            // not carry keyboard data and must not enter the editing path.
+            let Ok(event) = event.dyn_into::<web_sys::KeyboardEvent>() else {
+                return;
+            };
 
             let modifiers = modifiers_from_keyboard_event(&event, this.is_mac);
             let capslock = capslock_from_keyboard_event(&event);
@@ -391,8 +392,6 @@ impl WebWindowInner {
                 return;
             }
 
-            event.prevent_default();
-
             let is_held = event.repeat();
             let key_char = compute_key_char(&event, &key, &modifiers);
 
@@ -410,9 +409,16 @@ impl WebWindowInner {
 
             if let Some(result) = result {
                 if !result.propagate {
+                    event.prevent_default();
                     return;
                 }
             }
+
+            // Preserve native form tab navigation when GPUI has not consumed it.
+            if event.key() == "Tab" {
+                return;
+            }
+            event.prevent_default();
 
             if this.is_composing.get() || event.is_composing() {
                 return;
@@ -431,7 +437,9 @@ impl WebWindowInner {
     fn register_key_up(self: &Rc<Self>) -> Closure<dyn FnMut(JsValue)> {
         let this = Rc::clone(self);
         self.listen_input("keyup", move |event: JsValue| {
-            let event: web_sys::KeyboardEvent = event.unchecked_into();
+            let Ok(event) = event.dyn_into::<web_sys::KeyboardEvent>() else {
+                return;
+            };
 
             let modifiers = modifiers_from_keyboard_event(&event, this.is_mac);
             let capslock = capslock_from_keyboard_event(&event);

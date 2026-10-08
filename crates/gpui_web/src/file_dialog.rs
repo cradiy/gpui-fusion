@@ -1,60 +1,14 @@
+use crate::file::selected_file;
 use futures::{
     channel::oneshot,
-    future::{Either, LocalBoxFuture, select},
+    future::{Either, select},
 };
-use gpui::{FilePromptOptions, PlatformFile, SelectedFile};
-use gpui_util::browser::BrowserResource;
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use gpui::{FilePromptOptions, SelectedFile};
+use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::prelude::*;
 
 fn error(value: impl std::fmt::Debug) -> anyhow::Error {
     anyhow::anyhow!("browser file picker: {value:?}")
-}
-
-#[derive(Debug)]
-struct FileResource {
-    file: web_sys::File,
-    url: String,
-}
-impl Drop for FileResource {
-    fn drop(&mut self) {
-        let _ = web_sys::Url::revoke_object_url(&self.url);
-    }
-}
-#[derive(Debug)]
-struct BrowserFile {
-    name: String,
-    url: String,
-    resource: BrowserResource<FileResource>,
-}
-impl PlatformFile for BrowserFile {
-    fn name(&self) -> &str {
-        &self.name
-    }
-    fn url(&self) -> Option<&str> {
-        Some(&self.url)
-    }
-    fn read(&self) -> LocalBoxFuture<'static, anyhow::Result<Vec<u8>>> {
-        let resource = self.resource.clone();
-        Box::pin(async move {
-            let promise = resource.with(|r| r.file.array_buffer()).ok_or_else(|| {
-                anyhow::anyhow!("browser files must be read on their owning thread")
-            })?;
-            let buffer = wasm_bindgen_futures::JsFuture::from(promise)
-                .await
-                .map_err(error)?;
-            Ok(js_sys::Uint8Array::new(&buffer).to_vec())
-        })
-    }
-}
-fn selected_file(file: web_sys::File) -> anyhow::Result<SelectedFile> {
-    let name = file.name();
-    let url = web_sys::Url::create_object_url_with_blob(&file).map_err(error)?;
-    Ok(SelectedFile::new(Arc::new(BrowserFile {
-        name,
-        url: url.clone(),
-        resource: BrowserResource::new(FileResource { file, url }),
-    })))
 }
 
 struct Picker {
@@ -76,7 +30,14 @@ pub(crate) fn prompt(
     options: FilePromptOptions,
 ) -> oneshot::Receiver<anyhow::Result<Option<Vec<SelectedFile>>>> {
     let (mut tx, rx) = oneshot::channel();
+    if options.writable {
+        let _ = tx.send(Err(anyhow::anyhow!(
+            "browser file picker does not provide writable handles"
+        )));
+        return rx;
+    }
     let setup = || -> anyhow::Result<_> {
+        let mime_types = options.normalized_mime_types()?;
         let document = web_sys::window()
             .and_then(|w| w.document())
             .ok_or_else(|| anyhow::anyhow!("no browser document"))?;
@@ -87,6 +48,7 @@ pub(crate) fn prompt(
             .map_err(error)?;
         input.set_type("file");
         input.set_multiple(options.multiple);
+        input.set_accept(&mime_types.join(","));
         input.set_hidden(true);
         document
             .body()

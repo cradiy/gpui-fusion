@@ -12,12 +12,27 @@ use gpui::{DmaBufImportStatus, SurfaceFrameBacking};
 use crate::{
     FrameTransport, FrameTransportPreference, MediaBackend, MediaBackendEvent, MediaCapabilities,
     MediaInfo, MediaOutputSink, MediaPlaybackRequest, MediaPlaybackSession, MediaResult,
-    MediaSource, MediaStreamId, PlaybackState, PlaybackTimeline, SeekMode, SubtitleEvent,
-    TransportChange, VideoFrame, VideoFrameExtractor, VideoPlaybackStats,
+    MediaSource, MediaStreamId, PlaybackBuffer, PlaybackState, PlaybackTimeline, PlaybackWakeMode,
+    SeekMode, SubtitleEvent, SystemMediaCommand, SystemMediaMetadata, TransportChange, VideoFrame,
+    VideoFrameExtractor, VideoPlaybackStats,
 };
 
 use super::surface::VideoSurface;
+use gpui::gpui_notifications::{
+    MediaArtwork, MediaCommand, MediaMetadata, MediaPlayback, MediaSessionState, NotificationIcon,
+    SystemMediaSession,
+};
 use gpui_media_core::PlaybackCounters;
+
+/// Presentation and queue actions for a player's system media surface.
+#[derive(Clone, Debug, Default)]
+pub struct VideoSystemMediaOptions {
+    pub metadata: MediaMetadata,
+    pub artwork: Option<MediaArtwork>,
+    pub icon: Option<NotificationIcon>,
+    pub can_next: bool,
+    pub can_previous: bool,
+}
 
 /// Initial behavior for a [`VideoPlayer`].
 #[derive(Clone, Copy, Debug)]
@@ -79,16 +94,23 @@ impl Default for VideoPlayerOptions {
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum VideoPlayerEvent {
+    /// Queue actions are handled by the application's playlist.
+    SystemMediaAction(MediaCommand),
+    SystemMediaError(SharedString),
     StateChanged(PlaybackState),
     TimelineChanged(PlaybackTimeline),
     BufferingChanged(u8),
+    BufferedChanged(PlaybackBuffer),
     MediaInfoChanged(Arc<MediaInfo>),
     Subtitle(SubtitleEvent),
     FrameReady(Arc<VideoFrame>),
     FrameTransportChanged(FrameTransport),
     DmaBufImportFailed(SharedString),
     PlaybackRateChanged(f64),
-    VolumeChanged { volume: f64, muted: bool },
+    VolumeChanged {
+        volume: f64,
+        muted: bool,
+    },
 }
 
 /// A reusable GPUI video playback component.
@@ -99,6 +121,10 @@ pub enum VideoPlayerEvent {
 /// implementation is intentionally limited to the current video frame and has
 /// no built-in interaction or player chrome.
 pub struct VideoPlayer {
+    system_session: Option<SystemMediaSession>,
+    system_options: VideoSystemMediaOptions,
+    system_commands: Option<gpui::Task<()>>,
+    last_system_update: Option<web_time::Instant>,
     source: MediaSource,
     backend: Arc<dyn MediaBackend>,
     playback: Box<dyn MediaPlaybackSession>,
@@ -111,6 +137,7 @@ pub struct VideoPlayer {
     timeline: PlaybackTimeline,
     media_info: Option<Arc<MediaInfo>>,
     buffering_percent: Option<u8>,
+    buffered: PlaybackBuffer,
     play_when_ready: bool,
     playback_rate: f64,
     delivered_frames: u64,
@@ -138,9 +165,8 @@ impl VideoPlayer {
 
     /// Creates a player configured for the renderer backing `window`.
     ///
-    /// Use this constructor to enable capability-gated native NV12 DMA-BUF
-    /// negotiation. [`Self::new`] retains the portable CPU and linear DMA-BUF
-    /// paths when no window is available during construction.
+    /// Use this constructor to negotiate native frame formats supported by the
+    /// window's renderer, including Android hardware buffers and Linux NV12 DMA-BUF.
     pub fn new_in_window(
         source: MediaSource,
         options: VideoPlayerOptions,
@@ -223,6 +249,22 @@ impl VideoPlayer {
                     break;
                 };
                 this.update(cx, |player, cx| match event {
+                    MediaBackendEvent::SystemCommand(command) => {
+                        let result = match command {
+                            SystemMediaCommand::Play => player.play(cx),
+                            SystemMediaCommand::Pause => player.pause(cx),
+                            SystemMediaCommand::Stop if player.timeline.is_seekable() => {
+                                player.stop(cx)
+                            }
+                            SystemMediaCommand::Stop => player.pause(cx),
+                            SystemMediaCommand::SeekTo(position) => {
+                                player.seek_to(position, SeekMode::Accurate, cx)
+                            }
+                        };
+                        if let Err(error) = result {
+                            player.set_state(PlaybackState::Error(Arc::new(error)), cx);
+                        }
+                    }
                     MediaBackendEvent::Ready => {
                         player.finish_pending_transition(cx);
                         player.refresh_timeline(cx);
@@ -235,6 +277,9 @@ impl VideoPlayer {
                             cx.notify();
                         }
                         let is_buffering = player.is_buffering();
+                        if player.playback.manages_playback_state() {
+                            return;
+                        }
                         if is_buffering && !was_buffering && player.play_when_ready {
                             if let Err(error) = player.playback.pause() {
                                 player.set_state(PlaybackState::Error(Arc::new(error)), cx);
@@ -253,6 +298,16 @@ impl VideoPlayer {
                                 player.set_state(state, cx);
                             }
                         }
+                    }
+                    MediaBackendEvent::PlaybackStateChanged(state) => {
+                        player.play_when_ready =
+                            matches!(state, PlaybackState::Playing | PlaybackState::Loading);
+                        if player.state_after_seek.is_some() && player.is_buffering() {
+                            return;
+                        }
+                        player.state_after_seek = None;
+                        player.set_state(state, cx);
+                        player.refresh_timeline(cx);
                     }
                     MediaBackendEvent::MediaInfoChanged(info) => {
                         player.media_info = Some(info.clone());
@@ -307,6 +362,10 @@ impl VideoPlayer {
         .detach();
 
         let mut player = Self {
+            system_session: None,
+            system_options: VideoSystemMediaOptions::default(),
+            system_commands: None,
+            last_system_update: None,
             source,
             backend,
             playback,
@@ -323,6 +382,7 @@ impl VideoPlayer {
             timeline: PlaybackTimeline::default(),
             media_info,
             buffering_percent: None,
+            buffered: PlaybackBuffer::Unknown,
             play_when_ready: options.autoplay,
             playback_rate: 1.0,
             delivered_frames: 0,
@@ -386,6 +446,12 @@ impl VideoPlayer {
         self.buffering_percent
     }
 
+    /// Latest buffered media snapshot. Refreshed at the timeline update interval,
+    /// including while paused. This does not indicate whether playback is stalled.
+    pub fn buffered(&self) -> &PlaybackBuffer {
+        &self.buffered
+    }
+
     pub fn is_buffering(&self) -> bool {
         self.buffering_percent.is_some_and(|percent| percent < 100)
     }
@@ -440,7 +506,7 @@ impl VideoPlayer {
             self.set_state(PlaybackState::Seeking, cx);
             cx.emit(VideoPlayerEvent::TimelineChanged(self.timeline));
             return Ok(());
-        } else if self.is_buffering() {
+        } else if self.is_buffering() && !self.playback.manages_playback_state() {
             self.playback.pause()?;
         } else {
             self.playback.play()?;
@@ -502,6 +568,7 @@ impl VideoPlayer {
         self.timeline = PlaybackTimeline::default();
         self.media_info = self.playback.media_info();
         self.buffering_percent = None;
+        self.set_buffered(PlaybackBuffer::Unknown, cx);
         self.play_when_ready = autoplay;
         self.delivered_frames = 0;
         self.playback_rate = 1.0;
@@ -535,6 +602,7 @@ impl VideoPlayer {
             PlaybackState::Paused
         };
         self.playback.seek_to(target, mode)?;
+        self.set_buffered(PlaybackBuffer::Unknown, cx);
         cx.emit(VideoPlayerEvent::Subtitle(SubtitleEvent::Reset));
         self.state_after_seek = Some(resume_state);
         self.timeline = PlaybackTimeline::new(
@@ -613,6 +681,7 @@ impl VideoPlayer {
     pub fn set_playback_rate(&mut self, rate: f64, cx: &mut Context<Self>) -> MediaResult<()> {
         self.playback.set_playback_rate(rate)?;
         self.playback_rate = rate;
+        self.publish_system_media(true, cx);
         cx.emit(VideoPlayerEvent::PlaybackRateChanged(rate));
         cx.notify();
         Ok(())
@@ -628,35 +697,190 @@ impl VideoPlayer {
     pub fn set_volume(&mut self, volume: f64, cx: &mut Context<Self>) {
         self.volume = normalize_volume(volume);
         self.playback.set_volume(self.volume);
+        self.publish_system_media(true, cx);
         self.emit_volume(cx);
     }
 
     pub fn set_muted(&mut self, muted: bool, cx: &mut Context<Self>) {
         self.muted = muted;
         self.playback.set_muted(muted);
+        self.publish_system_media(true, cx);
         self.emit_volume(cx);
+    }
+
+    /// Enables or disables the backend's system audio-focus management.
+    /// Create with autoplay disabled to configure this before first playback.
+    pub fn set_audio_focus_enabled(&mut self, enabled: bool) -> MediaResult<()> {
+        self.playback.set_audio_focus_enabled(enabled)
+    }
+
+    /// Selects playback power management; disabled by default.
+    /// Android requires `WAKE_LOCK` for Local/Network and a separate foreground
+    /// execution lease for background playback. Other backends return unsupported.
+    pub fn set_wake_mode(&mut self, mode: PlaybackWakeMode) -> MediaResult<()> {
+        self.playback.set_wake_mode(mode)
+    }
+
+    /// Enables or updates system media controls. Pass `None` to release them.
+    /// Commands follow the same playback and seek paths as application controls.
+    pub fn set_system_media_controls(
+        &mut self,
+        metadata: Option<SystemMediaMetadata>,
+    ) -> MediaResult<()> {
+        self.playback.set_system_media_controls(metadata)
+    }
+
+    /// Connects native system controls to the player's existing command path.
+    /// `None` withdraws the media surface. Next/Previous are emitted for the host playlist.
+    pub fn set_system_media_session(
+        &mut self,
+        mut session: Option<SystemMediaSession>,
+        options: VideoSystemMediaOptions,
+        cx: &mut Context<Self>,
+    ) {
+        let _ = self.playback.set_system_media_controls(None);
+        if let Some(session) = &session {
+            if let Err(error) = session.set_artwork(options.artwork.clone()) {
+                cx.emit(VideoPlayerEvent::SystemMediaError(error.to_string().into()));
+            }
+        }
+        self.system_commands = None;
+        if let Some(commands) = session.as_mut().and_then(SystemMediaSession::take_commands) {
+            self.system_commands = Some(cx.spawn(async move |this, cx| {
+                while let Ok(command) = commands.recv().await {
+                    let Some(this) = this.upgrade() else { break };
+                    this.update(cx, |player, cx| {
+                        let result = match command {
+                            MediaCommand::Play => player.play(cx),
+                            MediaCommand::Pause => player.pause(cx),
+                            MediaCommand::SetVolume(volume) => {
+                                player.set_volume(volume, cx);
+                                Ok(())
+                            }
+                            MediaCommand::Toggle => {
+                                if player.play_when_ready {
+                                    player.pause(cx)
+                                } else {
+                                    player.play(cx)
+                                }
+                            }
+                            MediaCommand::Stop => {
+                                if player.timeline.is_seekable() {
+                                    player.stop(cx)
+                                } else {
+                                    player.pause(cx)
+                                }
+                            }
+                            MediaCommand::SeekTo(position) if player.timeline.is_seekable() => {
+                                player.seek_to(position, SeekMode::Accurate, cx)
+                            }
+                            MediaCommand::SeekBy(seconds)
+                                if player.timeline.is_seekable() && seconds.is_finite() =>
+                            {
+                                let position =
+                                    (player.timeline.position().as_secs_f64() + seconds).max(0.);
+                                match Duration::try_from_secs_f64(position) {
+                                    Ok(position) => {
+                                        player.seek_to(position, SeekMode::Accurate, cx)
+                                    }
+                                    Err(_) => return,
+                                }
+                            }
+                            MediaCommand::Next | MediaCommand::Previous => {
+                                cx.emit(VideoPlayerEvent::SystemMediaAction(command));
+                                Ok(())
+                            }
+                            _ => Ok(()),
+                        };
+                        if let Err(error) = result {
+                            cx.emit(VideoPlayerEvent::SystemMediaError(error.to_string().into()));
+                        }
+                        player.publish_system_media(true, cx);
+                    });
+                }
+            }));
+        }
+        self.system_session = session;
+        self.system_options = options;
+        self.publish_system_media(true, cx);
+    }
+
+    /// Replaces the bound session's cover without re-registering media controls.
+    pub fn set_system_media_artwork(&mut self, artwork: Option<MediaArtwork>) -> MediaResult<()> {
+        if let Some(session) = &self.system_session {
+            session.set_artwork(artwork.clone()).map_err(|error| {
+                crate::MediaError::backend(format!("system media artwork: {error}"))
+            })?;
+        }
+        self.system_options.artwork = artwork;
+        Ok(())
+    }
+
+    fn publish_system_media(&mut self, force: bool, cx: &mut Context<Self>) {
+        let Some(session) = &self.system_session else {
+            return;
+        };
+        if !force
+            && self
+                .last_system_update
+                .is_some_and(|last| last.elapsed() < Duration::from_secs(1))
+        {
+            return;
+        }
+        let options = &self.system_options;
+        let result = session.update(MediaSessionState {
+            metadata: options.metadata.clone(),
+            icon: options.icon.clone(),
+            can_next: options.can_next,
+            can_previous: options.can_previous,
+            playback: match self.state {
+                PlaybackState::Playing => MediaPlayback::Playing,
+                PlaybackState::Paused => MediaPlayback::Paused,
+                PlaybackState::Loading | PlaybackState::Seeking => MediaPlayback::Buffering,
+                _ => MediaPlayback::Stopped,
+            },
+            position: self.timeline.position(),
+            duration: self.timeline.duration(),
+            rate: self.playback_rate,
+            volume: if self.muted { 0. } else { self.volume },
+            seekable: self.timeline.is_seekable(),
+        });
+        self.last_system_update = Some(web_time::Instant::now());
+        if let Err(error) = result {
+            self.system_session = None;
+            self.system_commands = None;
+            cx.emit(VideoPlayerEvent::SystemMediaError(error.to_string().into()));
+        }
     }
 
     pub fn toggle_muted(&mut self, cx: &mut Context<Self>) {
         self.set_muted(!self.muted, cx);
     }
 
-    /// Refreshes duration, position and seekability immediately.
+    /// Refreshes duration, position, seekability and buffered media immediately.
     pub fn refresh_timeline(&mut self, cx: &mut Context<Self>) {
         // A backend may continue reporting its running clock while an
         // asynchronous seek is still decoding toward the requested position.
         // Keep the public timeline pinned to the seek target until the backend
         // confirms completion with `MediaBackendEvent::Ready`.
         if !accept_backend_timeline(&self.state) {
+            self.publish_system_media(false, cx);
             return;
         }
 
         let timeline = timeline_without_regression(self.timeline, self.playback.timeline());
+        let buffered = if matches!(self.state, PlaybackState::Error(_)) {
+            PlaybackBuffer::Unknown
+        } else {
+            self.playback.buffered()
+        };
+        self.set_buffered(buffered, cx);
         if timeline != self.timeline {
             self.timeline = timeline;
             cx.emit(VideoPlayerEvent::TimelineChanged(timeline));
             cx.notify();
         }
+        self.publish_system_media(false, cx);
     }
 
     #[cfg(target_os = "linux")]
@@ -688,7 +912,18 @@ impl VideoPlayer {
         Ok(())
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "android")]
+    fn check_frame_import(&mut self, _: &mut Context<Self>) -> MediaResult<()> {
+        let failed = self.video_surface.surface().is_some_and(|frame| {
+            matches!(frame.backing(), gpui::SurfaceFrameBacking::HardwareBuffer(buffer) if buffer.import_failed())
+        });
+        if failed {
+            self.set_frame_transport_preference(FrameTransportPreference::CpuOnly)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     fn check_frame_import(&mut self, _: &mut Context<Self>) -> MediaResult<()> {
         Ok(())
     }
@@ -702,6 +937,9 @@ impl VideoPlayer {
     }
 
     fn finish_pending_transition(&mut self, cx: &mut Context<Self>) {
+        if self.playback.manages_playback_state() {
+            return;
+        }
         let next_state = self.state_after_seek.take().or_else(|| {
             (self.state == PlaybackState::Loading).then_some(if self.play_when_ready {
                 PlaybackState::Playing
@@ -721,9 +959,28 @@ impl VideoPlayer {
         }
     }
 
+    fn set_buffered(&mut self, buffered: PlaybackBuffer, cx: &mut Context<Self>) {
+        if self.buffered != buffered {
+            self.buffered = buffered.clone();
+            cx.emit(VideoPlayerEvent::BufferedChanged(buffered));
+            cx.notify();
+        }
+    }
+
     fn set_state(&mut self, state: PlaybackState, cx: &mut Context<Self>) {
+        if matches!(state, PlaybackState::Error(_)) {
+            self.set_buffered(PlaybackBuffer::Unknown, cx);
+        }
         if self.state != state {
+            if self.state == PlaybackState::Seeking {
+                if let Some(session) = &self.system_session {
+                    if let Err(error) = session.seeked(self.timeline.position()) {
+                        cx.emit(VideoPlayerEvent::SystemMediaError(error.to_string().into()));
+                    }
+                }
+            }
             self.state = state.clone();
+            self.publish_system_media(true, cx);
             cx.emit(VideoPlayerEvent::StateChanged(state));
             cx.notify();
         }
@@ -786,6 +1043,209 @@ mod tests {
         PlaybackState, PlaybackTimeline, accept_backend_timeline, multiply_duration,
         normalize_volume, timeline_without_regression,
     };
+
+    #[gpui::test]
+    fn native_playback_state_survives_buffering_and_paused_seek(cx: &mut gpui::TestAppContext) {
+        use super::*;
+        use std::sync::Mutex;
+
+        #[derive(Clone, Default)]
+        struct Backend {
+            output: Arc<Mutex<Option<MediaOutputSink>>>,
+            commands: Arc<Mutex<Vec<&'static str>>>,
+            buffered: Arc<Mutex<PlaybackBuffer>>,
+        }
+        impl MediaBackend for Backend {
+            fn name(&self) -> &'static str {
+                "native-state-test"
+            }
+            fn open_playback(
+                &self,
+                _: MediaPlaybackRequest,
+                output: MediaOutputSink,
+            ) -> MediaResult<Box<dyn MediaPlaybackSession>> {
+                *self.output.lock().unwrap() = Some(output);
+                Ok(Box::new(self.clone()))
+            }
+        }
+        impl MediaPlaybackSession for Backend {
+            fn capabilities(&self) -> MediaCapabilities {
+                MediaCapabilities::default()
+            }
+            fn manages_playback_state(&self) -> bool {
+                true
+            }
+            fn play(&mut self) -> MediaResult<()> {
+                self.commands.lock().unwrap().push("play");
+                Ok(())
+            }
+            fn pause(&mut self) -> MediaResult<()> {
+                self.commands.lock().unwrap().push("pause");
+                Ok(())
+            }
+            fn timeline(&self) -> PlaybackTimeline {
+                PlaybackTimeline::default()
+            }
+            fn buffered(&self) -> PlaybackBuffer {
+                self.buffered.lock().unwrap().clone()
+            }
+            fn reload(&mut self, _: bool) -> MediaResult<()> {
+                *self.buffered.lock().unwrap() = PlaybackBuffer::Unknown;
+                Ok(())
+            }
+            fn seek_to(&mut self, _: Duration, _: SeekMode) -> MediaResult<()> {
+                self.commands.lock().unwrap().push("seek");
+                Ok(())
+            }
+        }
+
+        let backend = Backend::default();
+        let player = cx.new(|cx| {
+            VideoPlayer::builder(
+                MediaSource::from_uri("https://example.com/test.mp4").unwrap(),
+                backend.clone(),
+            )
+            .build(cx)
+            .unwrap()
+        });
+        let output = backend.output.lock().unwrap().clone().unwrap();
+        let send = |events: Vec<MediaBackendEvent>, cx: &mut gpui::TestAppContext| {
+            for event in events {
+                assert!(output.emit(event));
+            }
+            cx.run_until_parked();
+        };
+
+        send(
+            vec![MediaBackendEvent::PlaybackStateChanged(
+                PlaybackState::Playing,
+            )],
+            cx,
+        );
+        send(
+            vec![MediaBackendEvent::PlaybackStateChanged(
+                PlaybackState::Paused,
+            )],
+            cx,
+        );
+        send(
+            vec![
+                MediaBackendEvent::Buffering(0),
+                MediaBackendEvent::Buffering(100),
+                MediaBackendEvent::Ready,
+            ],
+            cx,
+        );
+        assert_eq!(
+            player.read_with(cx, |p, _| p.state().clone()),
+            PlaybackState::Paused
+        );
+        assert_eq!(*backend.commands.lock().unwrap(), ["play"]);
+
+        // Buffered media can grow while paused without changing playback state.
+        let ranges = PlaybackBuffer::Ranges(Arc::from([
+            Duration::ZERO..Duration::from_secs(2),
+            Duration::from_secs(8)..Duration::from_secs(10),
+        ]));
+        *backend.buffered.lock().unwrap() = ranges.clone();
+        player.update(cx, |p, cx| p.refresh_timeline(cx));
+        assert_eq!(player.read_with(cx, |p, _| p.buffered().clone()), ranges);
+        assert_eq!(
+            player.read_with(cx, |p, _| p.state().clone()),
+            PlaybackState::Paused
+        );
+
+        send(
+            vec![MediaBackendEvent::PlaybackStateChanged(
+                PlaybackState::Playing,
+            )],
+            cx,
+        );
+        assert_eq!(
+            player.read_with(cx, |p, _| p.state().clone()),
+            PlaybackState::Playing
+        );
+        player.update(cx, |p, cx| p.pause(cx)).unwrap();
+        player
+            .update(cx, |p, cx| {
+                p.seek_to(Duration::from_secs(5), SeekMode::Accurate, cx)
+            })
+            .unwrap();
+        player.update(cx, |p, cx| p.refresh_timeline(cx));
+        assert_eq!(
+            player.read_with(cx, |p, _| p.buffered().clone()),
+            PlaybackBuffer::Unknown
+        );
+        send(
+            vec![
+                MediaBackendEvent::Buffering(0),
+                MediaBackendEvent::PlaybackStateChanged(PlaybackState::Paused),
+            ],
+            cx,
+        );
+        assert_eq!(
+            player.read_with(cx, |p, _| p.state().clone()),
+            PlaybackState::Seeking
+        );
+        send(
+            vec![
+                MediaBackendEvent::Buffering(100),
+                MediaBackendEvent::Ready,
+                MediaBackendEvent::PlaybackStateChanged(PlaybackState::Paused),
+            ],
+            cx,
+        );
+        assert_eq!(
+            player.read_with(cx, |p, _| p.state().clone()),
+            PlaybackState::Paused
+        );
+        assert_eq!(*backend.commands.lock().unwrap(), ["play", "pause", "seek"]);
+
+        send(
+            vec![MediaBackendEvent::SystemCommand(SystemMediaCommand::Play)],
+            cx,
+        );
+        send(
+            vec![MediaBackendEvent::SystemCommand(SystemMediaCommand::Pause)],
+            cx,
+        );
+        send(
+            vec![MediaBackendEvent::SystemCommand(
+                SystemMediaCommand::SeekTo(Duration::from_secs(1)),
+            )],
+            cx,
+        );
+        assert_eq!(
+            player.read_with(cx, |p, _| p.state().clone()),
+            PlaybackState::Seeking
+        );
+        assert_eq!(
+            player.read_with(cx, |p, _| p.timeline().position()),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            *backend.commands.lock().unwrap(),
+            ["play", "pause", "seek", "play", "pause", "seek"]
+        );
+        send(
+            vec![
+                MediaBackendEvent::Ready,
+                MediaBackendEvent::PlaybackStateChanged(PlaybackState::Paused),
+            ],
+            cx,
+        );
+        *backend.buffered.lock().unwrap() = PlaybackBuffer::Ranges(Arc::from([]));
+        player.update(cx, |p, cx| p.refresh_timeline(cx));
+        assert_eq!(
+            player.read_with(cx, |p, _| p.buffered().clone()),
+            PlaybackBuffer::Ranges(Arc::from([]))
+        );
+        player.update(cx, |p, cx| p.reload(false, cx)).unwrap();
+        assert_eq!(
+            player.read_with(cx, |p, _| p.buffered().clone()),
+            PlaybackBuffer::Unknown
+        );
+    }
 
     #[test]
     fn backend_timeline_is_suspended_while_seeking() {

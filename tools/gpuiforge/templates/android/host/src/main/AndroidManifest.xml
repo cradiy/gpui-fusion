@@ -1,0 +1,27 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+<!-- gpuiforge:if background-media -->
+        <service android:name="dev.gpui.android.MediaPlaybackService" android:exported="false" android:foregroundServiceType="mediaPlayback" />
+<!-- gpuiforge:endif -->
+<!-- gpuiforge:if data-sync -->
+        <service android:name="dev.gpui.android.DataSyncService" android:exported="false" android:foregroundServiceType="dataSync" />
+<!-- gpuiforge:endif -->
+<!-- gpuiforge:if notifications -->
+        <receiver android:name="dev.gpui.android.NotificationReceiver" android:exported="false" />
+<!-- gpuiforge:endif -->
+<!-- gpuiforge:if media-notifications -->
+        <receiver android:name="dev.gpui.android.MediaNotificationReceiver" android:exported="false" />
+<!-- gpuiforge:endif -->
+<!-- gpuiforge:if files -->
+        <provider
+            android:name="dev.gpui.android.GpuiFileProvider"
+            android:authorities="${applicationId}.gpui.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/gpui_file_paths" />
+        </provider>
+<!-- gpuiforge:endif -->
+    </application>
+</manifest>

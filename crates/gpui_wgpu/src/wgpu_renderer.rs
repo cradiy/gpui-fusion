@@ -42,6 +42,8 @@ mod particle_transition;
 mod particles;
 mod pipeline_cache;
 pub(crate) use pipeline_cache::PipelineCache;
+#[cfg(target_os = "android")]
+pub(crate) mod android_buffer;
 mod diagnostics;
 pub(crate) mod scene3d;
 mod scene_snapshot;
@@ -1774,19 +1776,16 @@ impl WgpuRenderer {
             self.surface_config.height = clamped_height.max(1);
             let surface_config = self.surface_config.clone();
 
+            if self.device_lost() {
+                return;
+            }
+
             let Some(resources) = self.resources.as_mut() else {
                 return;
             };
 
-            // Wait for any in-flight GPU work to complete before destroying textures
-            if let Err(e) = resources.device.poll(wgpu::PollType::Wait {
-                submission_index: None,
-                timeout: None,
-            }) {
-                warn!("Failed to poll device during resize: {e:?}");
-            }
-
-            // Destroy old textures before allocating new ones to avoid GPU memory spikes
+            // Submitted work retains its resources. Destroy releases these textures
+            // once that work completes; surface.configure synchronizes the swapchain.
             if let Some(ref texture) = resources.path_intermediate_texture {
                 texture.destroy();
             }
@@ -1988,6 +1987,8 @@ impl WgpuRenderer {
     pub fn gpu_specs(&self) -> GpuSpecs {
         let resources = self.resources();
         GpuSpecs {
+            #[cfg(target_os = "android")]
+            supports_hardware_buffer_import: android_buffer::supported(&resources.device),
             is_software_emulated: self.adapter_info.device_type == wgpu::DeviceType::Cpu,
             device_name: self.adapter_info.name.clone(),
             driver_name: self.adapter_info.driver.clone(),
@@ -3728,6 +3729,10 @@ impl WgpuRenderer {
                     ));
                 }
                 resources.surfaces.remove(&id);
+                #[cfg(target_os = "android")]
+                if let gpui::SurfaceFrameBacking::HardwareBuffer(buffer) = frame.backing() {
+                    buffer.report_import_failed();
+                }
                 continue;
             }
 
@@ -3802,6 +3807,55 @@ impl WgpuRenderer {
 
             #[cfg(target_os = "macos")]
             resources.core_video.surfaces.remove(&id);
+            #[cfg(target_os = "android")]
+            if let gpui::SurfaceFrameBacking::HardwareBuffer(buffer) = frame.backing() {
+                if resources
+                    .surfaces
+                    .get(&id)
+                    .is_some_and(|cached| cached.sequence == frame.sequence())
+                {
+                    continue;
+                }
+                let textures = resources
+                    .surfaces
+                    .remove(&id)
+                    .filter(|cached| {
+                        cached.size == frame.coded_size() && cached.format == frame.format()
+                    })
+                    .map(|cached| cached.textures)
+                    .unwrap_or_else(|| Self::create_surface_textures(&resources.device, &frame));
+                let CachedSurfaceTextures::Rgba {
+                    _texture: target, ..
+                } = &textures
+                else {
+                    unreachable!()
+                };
+                match android_buffer::copy(
+                    &resources.capture_context.instance,
+                    &resources.device,
+                    &resources.queue,
+                    buffer,
+                    target,
+                ) {
+                    Ok(()) => {
+                        resources.surfaces.insert(
+                            id,
+                            CachedSurface {
+                                sequence: frame.sequence(),
+                                format: frame.format(),
+                                size: frame.coded_size(),
+                                textures,
+                                owner: frame.handle().downgrade(),
+                            },
+                        );
+                    }
+                    Err(error) => {
+                        log::warn!("Android hardware buffer import failed: {error:#}");
+                        buffer.report_import_failed();
+                    }
+                }
+                continue;
+            }
             let action = surface_cache_action(
                 resources
                     .surfaces
@@ -5369,7 +5423,7 @@ impl WgpuRenderer {
         })
     }
 
-    /// Mark the surface as unconfigured so rendering is skipped until a new
+    /// Release the presentation surface so rendering is skipped until a new
     /// surface is provided via [`replace_surface`](Self::replace_surface).
     ///
     /// This does **not** drop the renderer — the device, queue, atlas, and
@@ -5381,6 +5435,7 @@ impl WgpuRenderer {
         // Drop intermediate textures since they reference the old surface size.
         if let Some(res) = self.resources.as_mut() {
             res.invalidate_intermediate_textures();
+            res.surface.take();
         }
     }
 
@@ -5449,6 +5504,23 @@ impl WgpuRenderer {
         self.device_lost.load(std::sync::atomic::Ordering::SeqCst)
     }
 
+    /// Wakes an event-driven host when the current device is lost.
+    /// Replaces the device's callback; install again after successful recovery.
+    /// The callback can run off the UI thread and must only schedule work.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn set_device_lost_waker(&self, wake: impl Fn() + Send + 'static) {
+        let lost = self.device_lost.clone();
+        self.resources()
+            .device
+            .set_device_lost_callback(move |reason, message| {
+                if reason != wgpu::DeviceLostReason::Destroyed {
+                    log::error!("wgpu device lost: reason={reason:?}, message={message}");
+                    lost.store(true, std::sync::atomic::Ordering::SeqCst);
+                    wake();
+                }
+            });
+    }
+
     /// Returns true if a redraw is needed because GPU state was cleared.
     /// Calling this method clears the flag.
     pub fn needs_redraw(&mut self) -> bool {
@@ -5486,10 +5558,10 @@ impl WgpuRenderer {
             self.resources = None;
             *gpu_context.borrow_mut() = None;
 
-            // Wait briefly for the GPU driver to stabilize, then try to
-            // recreate the context without software renderers. If this fails
-            // the caller should request another frame and retry — the real GPU
-            // may need more time to come back (e.g. after suspend/resume).
+            // Android schedules delayed retries through its host Looper instead
+            // of sleeping on the UI thread. Other hosts retain a short driver
+            // settling delay. Failed recovery can be retried on a later frame.
+            #[cfg(not(target_os = "android"))]
             std::thread::sleep(std::time::Duration::from_millis(350));
 
             let (new_context, surface) = create_context(window, self.compositor_gpu, true)?;
@@ -5532,6 +5604,19 @@ impl WgpuRenderer {
     }
 }
 
+#[cfg(target_os = "android")]
+#[derive(Debug)]
+struct AndroidDisplayProvider;
+
+#[cfg(target_os = "android")]
+impl HasDisplayHandle for AndroidDisplayProvider {
+    fn display_handle(
+        &self,
+    ) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
+        Ok(raw_window_handle::DisplayHandle::android())
+    }
+}
+
 #[cfg(not(target_family = "wasm"))]
 fn create_context<W>(
     window: &W,
@@ -5560,7 +5645,11 @@ where
         }
         for &backend in backends {
             let attempt = (|| {
-                let instance = WgpuContext::instance(Box::new(window.clone()), backend);
+                #[cfg(target_os = "android")]
+                let display = Box::new(AndroidDisplayProvider);
+                #[cfg(not(target_os = "android"))]
+                let display = Box::new(window.clone());
+                let instance = WgpuContext::instance(display, backend);
                 // The renderer caller keeps the native window alive for this surface.
                 let surface = create_surface(&instance, window_handle.as_raw())?;
                 let context = if hardware_only {

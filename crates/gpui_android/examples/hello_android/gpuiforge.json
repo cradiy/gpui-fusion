@@ -1,0 +1,48 @@
+{
+  "$schema": "../../../../tools/gpuiforge/gpuiforge.schema.json",
+  "app": {
+    "name": "GPUI Android"
+  },
+  "platforms": {
+    "android": {
+      "abis": ["arm64-v8a", "x86_64"],
+      "application-id": "dev.gpui.example",
+      "build": [
+        {
+          "args": ["gradlew", "--no-daemon", "-PgpuiAbis={{abis}}", "-PgpuiForgeExecutable={{tool_path}}", ":app:assemble{{variant}}"],
+          "cwd": "{{project_dir}}",
+          "program": "bash"
+        }
+      ],
+      "features": ["files", "sharing", "credentials", "data-sync"],
+      "permissions": ["android.permission.RECORD_AUDIO", "android.permission.POST_NOTIFICATIONS", "android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_DATA_SYNC", "android.permission.ACCESS_NETWORK_STATE"],
+      "run": [
+        {
+          "args": ["-s", "{{device}}", "install", "-r", "{{artifact}}"],
+          "program": "{{adb}}"
+        },
+        {
+          "args": ["-s", "{{device}}", "shell", "am", "start", "-W", "-n", "{{application_id}}/{{activity}}"],
+          "error-pattern": "Error:",
+          "program": "{{adb}}"
+        }
+      ],
+      "share-mime-types": ["text/plain", "image/*", "application/pdf"],
+      "url-schemes": ["gpui-example"]
+    },
+    "desktop": {
+      "build": [
+        {
+          "args": ["build", "-p", "hello_android", "--profile", "{{cargo_profile}}"],
+          "program": "cargo"
+        }
+      ],
+      "run": [
+        {
+          "args": ["run", "-p", "hello_android", "--profile", "{{cargo_profile}}"],
+          "program": "cargo"
+        }
+      ]
+    }
+  }
+}

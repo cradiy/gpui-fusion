@@ -1,0 +1,48 @@
+{
+  "$schema": "../../../../tools/gpuiforge/gpuiforge.schema.json",
+  "app": {
+    "name": "GPUI Notifications"
+  },
+  "platforms": {
+    "android": {
+      "abis": ["arm64-v8a", "x86_64"],
+      "application-id": "dev.gpui.notifications",
+      "build": [
+        {
+          "args": ["gradlew", "--no-daemon", "-PgpuiAbis={{abis}}", "-PgpuiForgeExecutable={{tool_path}}", ":app:assemble{{variant}}"],
+          "cwd": "{{project_dir}}",
+          "program": "bash"
+        }
+      ],
+      "features": ["notifications"],
+      "icon": "assets/app_icon.xml",
+      "notification-icon": "assets/ic_notification.xml",
+      "permissions": ["android.permission.POST_NOTIFICATIONS"],
+      "run": [
+        {
+          "args": ["-s", "{{device}}", "install", "-r", "{{artifact}}"],
+          "program": "{{adb}}"
+        },
+        {
+          "args": ["-s", "{{device}}", "shell", "am", "start", "-W", "-n", "{{application_id}}/{{activity}}"],
+          "error-pattern": "Error:",
+          "program": "{{adb}}"
+        }
+      ]
+    },
+    "desktop": {
+      "build": [
+        {
+          "args": ["build", "-p", "notifications", "--profile", "{{cargo_profile}}"],
+          "program": "cargo"
+        }
+      ],
+      "run": [
+        {
+          "args": ["run", "-p", "notifications", "--profile", "{{cargo_profile}}"],
+          "program": "cargo"
+        }
+      ]
+    }
+  }
+}

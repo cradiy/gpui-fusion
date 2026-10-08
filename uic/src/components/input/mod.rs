@@ -42,6 +42,7 @@ macro_rules! input_appearance {
     };
 }
 
+mod accessibility;
 mod actions;
 mod appearance;
 mod element;
@@ -106,6 +107,15 @@ pub enum InputMode {
     Password,
     /// A soft-wrapping multi-line editor. Enter inserts a newline and Ctrl/Cmd+Enter submits.
     Multiline,
+}
+
+/// A configured software keyboard action, separate from Enter's [`InputEvent::Submit`].
+#[derive(Clone, Debug)]
+pub struct InputActionEvent {
+    /// The configured software keyboard action.
+    pub action: gpui::TextInputAction,
+    /// The committed value at the time of the action.
+    pub text: SharedString,
 }
 
 #[derive(Clone, Debug)]

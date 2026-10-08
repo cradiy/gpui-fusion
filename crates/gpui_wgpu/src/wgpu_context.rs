@@ -295,17 +295,25 @@ impl WgpuContext {
 
         let color_atlas_texture_format = Self::select_color_texture_format(adapter)?;
 
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("gpui_device"),
-                required_features,
-                required_limits: required_device_limits(adapter.limits()),
-                memory_hints: wgpu::MemoryHints::MemoryUsage,
-                trace: wgpu::Trace::Off,
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to create wgpu device: {e}"))?;
+        let descriptor = wgpu::DeviceDescriptor {
+            label: Some("gpui_device"),
+            required_features,
+            required_limits: required_device_limits(adapter.limits()),
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
+            trace: wgpu::Trace::Off,
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+        };
+        #[cfg(target_os = "android")]
+        let native = super::wgpu_renderer::android_buffer::create_device(adapter, &descriptor);
+        #[cfg(not(target_os = "android"))]
+        let native: Option<(wgpu::Device, wgpu::Queue)> = None;
+        let (device, queue) = match native {
+            Some(device) => device,
+            None => adapter
+                .request_device(&descriptor)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to create wgpu device: {e}"))?,
+        };
 
         Ok((
             device,

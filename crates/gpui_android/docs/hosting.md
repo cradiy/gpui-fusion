@@ -1,0 +1,1051 @@
+# Android hosting
+
+## Build
+
+Requirements:
+
+- JDK 17 or newer, as supported by the bundled Gradle/Android Gradle plugin.
+- Android SDK platform 36.1 and build tools.
+- Android NDK r29 or newer.
+- The Rust targets for the selected Android ABIs (listed below).
+- Android 8.0/API 26 or newer with a compatible Vulkan or OpenGL ES driver.
+
+Install GPUiForge from the repository root with
+`cargo install --path tools/gpuiforge`. Set `ANDROID_HOME` to the SDK
+and `ANDROID_NDK_HOME` to the NDK. From
+`crates/gpui_android/examples/hello_android`:
+
+```sh
+rustup target add aarch64-linux-android x86_64-linux-android
+gpuiforge run
+```
+
+External applications enable the bundled Android support in `gpuiforge.json`:
+
+```json
+{
+  "platforms": {
+    "android": {
+      "application-id": "dev.example.app"
+    }
+  }
+}
+```
+
+GPUiForge derives the native library name from the application's Cargo package.
+No recipe or local GPUI checkout path is required.
+
+Enable optional host capabilities with `features`, for example
+`"features": ["files", "sharing", "credentials"]`. Media playback uses `"media"`;
+general and media notifications use `"notifications"` and `"media-notifications"`.
+Omitted modules are not generated. Use `"icon": "assets/app.png"` for the application
+icon and `gpuiforge sync` to regenerate the managed project without building.
+See [host features and icons](../../../tools/gpuiforge/docs/usage.md#android-host-features-and-icons)
+for available modules and resource configuration.
+
+The platform menu offers desktop and Android. Android run prompts for a device
+and builds its ABI. `gpuiforge build android` packages both configured ABIs;
+`gpuiforge run android --device emulator-5554` selects a device explicitly.
+
+`gpuiforge.json` belongs to the Rust application. GPUiForge generates the
+Kotlin host and Gradle application under
+`target/gpuiforge/android`. The debug APK is written to
+`target/gpuiforge/android/app/build/outputs/apk/debug/app-debug.apk`.
+
+Use `gpuiforge platform eject android` to export the generated application to
+`platforms/android` and switch the JSON configuration to manual management.
+Subsequent builds preserve user-owned Kotlin, Manifest, and Gradle files.
+See [GPUiForge configuration](../../../tools/gpuiforge/docs/usage.md) for recipes,
+template variables, and ownership rules.
+
+The application is a Cargo binary package with `src/main.rs`. The Android build
+generates a library manifest under `target/android` from the application's
+dependencies and workspace settings, then produces the native library required
+by the APK. The application's manifest does not need a `[lib]` target.
+The shell build helper supports Linux and macOS hosts. The generated project's
+`:host` module builds the Kotlin host library alongside the Rust application.
+
+The packaging helper currently accepts a binary package with `src/main.rs` and
+no companion library or explicit `[[bin]]` targets.
+
+The configured `abis` list uses Android ABI names:
+
+| Architecture | Android ABI | Rust target |
+| --- | --- | --- |
+| `aarch64` | `arm64-v8a` | `aarch64-linux-android` |
+| `x86_64` | `x86_64` | `x86_64-linux-android` |
+
+A multi-ABI APK is larger; Android loads the library matching the device.
+Native libraries use 16 KB load-segment and RELRO alignment. The APK's native
+library packaging uses the Android Gradle plugin's 16 KB alignment support.
+
+The renderer tries Vulkan first, then OpenGL ES if Vulkan initialization fails
+or no eligible Vulkan adapter is available. Drivers must meet WGPU's device
+requirements; non-conformant Vulkan adapters are not enabled. Use an ABI that
+matches the emulator's system image.
+
+Debug builds write GPU initialization diagnostics to `adb logcat -s GPUI`.
+
+## Rust application
+
+Use `gpui` and `gpui_platform` dependencies and an ordinary `main` function:
+
+```rust,ignore
+use gpui::{prelude::*, *};
+
+#[gpui_platform::main]
+fn main() {
+    gpui_platform::application().run(|cx| {
+        cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| MyView))
+            .expect("failed to open the GPUI window");
+    });
+}
+```
+
+The entry attribute generates Android's library loader; on desktop it leaves
+the normal executable entry unchanged. The same example runs on desktop with
+`cargo run -p hello_android`. Android retains the application automatically after
+`Application::run` returns and releases it when the hosting session closes.
+`main` runs once per new session; Surface recreation does not invoke it again.
+Use a normal GPUI window; additional windows and native popups are unsupported.
+In-window overlays remain available.
+
+The application is created on the first nonzero Surface size, not in Activity
+`onCreate`. It uses Android's main Looper. Foreground work is posted through a
+Handler and background work uses Rust workers. Visible, resumed, focused Views
+schedule Choreographer callbacks for invalidations, requested animation frames,
+inertial scrolling and selection-handle dragging. Idle Views stop scheduling frames;
+input, asynchronous updates and resuming the host wake them as needed.
+Visible picture-in-picture Views also schedule frames without taking input focus.
+If a frame cannot be presented, GPUI schedules another frame to retry it.
+Drawing and Surface configuration run on the main Looper; swapchain recreation
+can wait for in-flight GPU work.
+
+`Window::appearance()` follows the hosting View's Android night-mode
+configuration. Theme changes notify GPUI and redraw the window, including when
+an Activity recreates its View around a retained session. Embedded hosts that
+handle configuration changes receive updates through the View as well.
+The generated application supplies light and dark Android themes. Applications
+choose their GPUI colors from the reported appearance; custom colors are not
+automatically recolored.
+
+## Accessibility
+
+`GpuiView` exposes the GPUI AccessKit tree to Android accessibility services and
+system UI automation. No GPUiForge feature or application permission is required.
+Use the shared GPUI `.id()`, `.role()`, `.aria_label()` and `.on_a11y_action()`
+APIs described in the [accessibility guide](../../gpui/src/_accessibility.rs).
+Only elements that publish semantic information appear in the tree; drawing text
+or implementing pointer input alone does not provide a complete accessible control.
+
+The host forwards accessibility focus, touch exploration and supported node
+actions to AccessKit. Existing GPUI click and focus handlers remain the action
+targets. Node bounds follow the View's screen position and GPUI scale. Nodes
+outside the visible host cannot be activated through the node provider.
+Tree collection starts when a service requests it and stops when Android
+accessibility is disabled or the View is detached.
+
+Custom embedded hosts keep using `GpuiView` and its normal attachment lifecycle.
+Do not replace its `AccessibilityNodeProvider`. InputConnection support and
+native text-selection handles are independent of the control's semantic tree;
+custom text editors must also supply their accessible text and selection data.
+Android services can navigate and select this text; replacing its value through
+the system's set-text accessibility action is not supported by the adapter.
+
+## Picture-in-picture host
+
+The GPUiForge `media` feature enables picture-in-picture in the generated
+Activity and Manifest. Applications use the shared
+[window and playback API](../../gpui_media/docs/playback-lifecycle.md#picture-in-picture).
+
+An embedded host calls `session.attachPictureInPictureHost(activity)` and
+`session.detachPictureInPictureHost(activity)` with its Activity lifecycle,
+and forwards `onPictureInPictureModeChanged` to the session. Its Activity must
+declare `android:supportsPictureInPicture="true"` and handle
+`screenSize|smallestScreenSize|screenLayout|orientation` configuration changes.
+Android applies picture-in-picture to the whole Activity; embedded applications
+must also hide any surrounding native UI during that mode.
+
+## Fullscreen
+
+Use the shared window API to request immersive fullscreen:
+
+```rust
+window.toggle_fullscreen();
+let fullscreen = window.is_fullscreen();
+```
+
+`GpuiActivity` hides the system bars and restores their previous visibility when
+fullscreen ends. Edge swipes can temporarily reveal the bars. The fullscreen
+mode survives Activity configuration changes; `is_fullscreen()` reports the
+requested mode, including while transient bars are visible. The system may
+retain window controls in multi-window environments.
+
+Safe-area and keyboard insets remain available through `Window::insets()`. Fullscreen does not lock device
+orientation, change your view layout, or register a Back action. To make Back
+exit fullscreen, use `on_system_back` and enable Back handling only while that
+action is available; combine it with your application's navigation handler.
+
+Embedded hosts opt in with `session.setOnFullscreenChanged { enabled -> ... }`
+and apply the requested system-bar policy to their own window. The callback
+immediately receives the retained mode and later requests arrive on the main
+Looper. Clear it when its Activity is destroyed and restore any host-owned
+window state. Without a callback, fullscreen requests leave the GPUI mode
+unchanged. Temporary system-bar visibility must not be treated as an exit.
+
+## Host ownership
+
+Android media playback uses `gpui_media_backend::SystemBackend` with the Kotlin
+host's Media3 adapter. Playback sessions own their decoder surfaces independently
+of the View. Enable the [media host feature](../../gpui_media/docs/configuration.md)
+and use the shared [media API](../../gpui_media/README.md).
+
+The host library is written in Kotlin and can also be called from Java. A
+full-page Kotlin host only selects its Rust library:
+
+```kotlin
+class MainActivity : GpuiActivity() {
+    override fun nativeLibraryName() = "my_app"
+}
+```
+
+Load the application library before creating a `GpuiSession`. `GpuiActivity`
+does this through its `nativeLibraryName()` override and hosts a full-page View.
+It forwards lifecycle events and retains the session during configuration
+changes. The page fills the window; Rust controls safe-area and keyboard avoidance.
+Override `insetHandling()` with `InsetHandling.HOST` to let the host apply avoidance.
+
+For an embedded host, construct `GpuiView(context, session)`, forward the host's
+start/resume/pause/stop events through `session.setLifecycle(...)`, and call
+`session.close()` when the Rust application is permanently finished. A session
+can bind to one attached View at a time. Detach the previous View before
+attaching its replacement. The session does not own an Activity; clear any
+Activity-capturing close callback when that Activity is destroyed.
+
+`session.setOnError(...)` receives terminal initialization or rendering errors
+after the session has been closed. `GpuiActivity` displays an error page when no
+usable GPU backend is available. An embedded host can supply its own error UI.
+
+All public session and View operations run on the Android main Looper.
+Surface callbacks release the old WGPU surface before releasing the native
+window reference. Reattachment preserves the device, atlas, and logical GPUI
+window. Surface resizing preserves application state and device resources.
+`GpuiView` completes `SurfaceHolder.Callback2` redraws before returning control
+to Android. Hiding the View or backgrounding the host stops frame callbacks.
+
+### Safe areas and the keyboard
+
+The bundled Activity defaults to application-managed layout. Its GPUI viewport
+fills the window, including the area behind visible system bars and the keyboard.
+Configure ownership in `gpuiforge.json` and run `gpuiforge sync android`:
+
+```json
+{
+  "platforms": {
+    "android": {
+      "application-id": "com.example.app",
+      "inset-handling": "application"
+    }
+  }
+}
+```
+
+Use `"host"` for automatic safe-area and keyboard avoidance. This setting does
+not hide system bars; use the fullscreen API to control their visibility.
+
+`Window::insets()` reports system occlusion in logical pixels. `safe_area` and
+`ime` are measured from the host window edges; `consumed` records the space
+already excluded by host placement, padding, or viewport resizing. Use
+`insets.effective()` for additional padding inside GPUI. In application mode,
+`consumed` is zero. In host mode, effective padding accounts for avoidance already
+applied by Android. Floating keyboards do not necessarily produce edge insets.
+`Context::observe_window_insets` observes changes, and inset changes refresh
+the window even when its viewport size is unchanged.
+
+Read the insets during rendering. Keep the background on the outer element and
+place scrollable content inside the padded region:
+
+```rust
+let padding = window.insets().effective();
+div()
+    .size_full()
+    .bg(rgb(0x101923))
+    .pt(padding.top)
+    .pr(padding.right)
+    .pb(padding.bottom)
+    .pl(padding.left)
+    .child(content)
+```
+
+For independent header and footer placement, use `safe_area.top` and
+`safe_area.bottom`; `ime.bottom` describes keyboard occlusion. These are logical
+pixels and must not be scaled by display density again. Insets can change with
+rotation, navigation mode, system-bar visibility and keyboard animation.
+
+Choose readable system-bar foreground colors when drawing behind the bars:
+
+```rust
+window.set_system_bar_appearance(gpui::SystemBarAppearance {
+    status: gpui::SystemBarStyle::Light,
+    navigation: gpui::SystemBarStyle::Light,
+});
+```
+
+`Light` means light icons and text on a dark background; `Dark` means dark
+foreground on a light background. `Automatic` follows the system theme and is
+the default. Status and navigation styles are independent. The setting retains
+across Activity recreation and does not change bar visibility or layout. The
+method returns `false` on unsupported platforms or hosts. A custom Android host
+uses `GpuiSession.setOnSystemBarAppearanceChanged` to apply retained styles to
+its current window and clears the callback when detaching.
+
+Embedded hosts supply `GpuiWindowInsets` with physical-pixel `EdgeInsets` for
+`safeArea`, `ime`, and `consumed`, all measured from the same host window edges.
+Include the View's placement and any `viewportBottomInset` in `consumed`.
+Passing a zero bottom inset leaves the full Surface available for GPUI layout;
+the application can then use `effective()` to avoid remaining occlusion.
+On Android 11 and later, keyboard animation updates insets without resizing the
+rendering Surface. Host mode reduces GPUI's layout viewport; application mode
+leaves it intact. On Android 8–10, application mode uses AndroidX inset reporting;
+host mode uses legacy system resizing and reports combined system insets as
+consumed safe area without separate IME geometry.
+
+Text rendering loads the device's available system font files, including CJK
+and emoji fonts, alongside the embedded default font. Android 10 and later use
+`SystemFonts`; Android 8 and 9 use `/system/fonts`. Applications can also register
+their own fonts through GPUI's text system.
+
+The host handles its own embedding insets. SurfaceView hosting does not provide
+arbitrary Android View clipping or rotation semantics.
+
+Raw touches retain pointer IDs and include cancellation. A short single-finger
+tap also produces a mouse down/up pair for existing GPUI click handlers. A
+single-finger drag beyond Android's touch slop produces pixel scroll events,
+with velocity-based inertial scrolling after release. Scroll events remain
+anchored at the gesture's starting position. Positions and deltas are converted
+from physical pixels to GPUI logical pixels.
+
+`Window::on_touch_event`, registered during paint, receives raw contact phases
+with pointer-mapped coordinates. Handlers track ownership by touch ID and
+hit-test when accepting a contact; GPUI does not automatically capture contacts
+to elements.
+
+Preventing the default action in a raw touch handler suppresses synthesized
+clicking and scrolling for the rest of that contact sequence. Multiple fingers
+also suppress both. Multi-contact scaling uses Android's `ScaleGestureDetector`
+and produces `PinchEvent` through `on_pinch`, with a logical-pixel focus position
+and incremental `delta` (`scale *= 1.0 + event.delta`). Begin and end events have
+zero delta. Quick-scale and stylus-button scaling are disabled. Raw touch
+handlers that prevent the default action cancel scaling for the rest of the
+contact sequence. Lifting back to one finger does not resume scrolling or
+produce a click; a fresh touch starts a new interaction. Pinch routing follows
+the current focus position and the standard GPUI hit-test rules.
+
+Touch cancellation, focus loss, Surface replacement, and
+backgrounding stop the gesture and its inertia. Touching during inertia stops
+it without activating a button. Long holds do not synthesize clicks. There is
+no mouse drag emulation or Android nested-scrolling integration.
+
+`on_long_press` receives one `LongPressEvent` after a stationary single touch
+reaches Android's long-press timeout. Movement past touch slop, additional
+fingers, raw-touch default prevention, cancellation, or loss of the active
+Surface cancels a pending long press. It does not synthesize a click or right
+mouse button. Use `capture_long_press` to observe before descendants and
+`cx.stop_propagation()` to exclude ancestors. Call `window.prevent_default()`
+to claim the interaction and suppress native text selection; otherwise text
+inputs retain their selection menu and handles. A claimed long press suppresses
+scrolling and pinch recognition until every finger is lifted.
+
+External mice provide hover, button presses, dragging, double/triple clicks, and
+horizontal/vertical wheel scrolling. GPUI cursor styles use Android system pointer
+icons. Wheel distances follow Android's scroll factors and the View's density.
+Focus loss, cancellation, and Surface replacement release pressed buttons without
+activating click or drop handlers. Mouse input does not synthesize touch gestures
+or open the finger-selection handles.
+
+Configuration changes and Surface recreation preserve in-process state.
+Process death starts a new application; persistent document restoration is the
+application's responsibility.
+
+GPU device loss automatically rebuilds the renderer and its texture caches while
+retaining the Rust application, text input, and window state. Recovery requires a
+visible active window or picture-in-picture Surface. Failed attempts retry with
+delays from 100 ms up to 2 seconds; the host does not continuously draw or restart
+the application while waiting. Returning to the app resumes recovery. GPU driver
+initialization still runs on the main Looper and may take time. Decoder failures
+are reported separately through the media API.
+
+## Text input
+
+Focused GPUI input handlers are exposed through Android's `InputConnection`.
+Text stays in the Rust component. The connection supports text commitment,
+composition updates and completion, composing regions, directed UTF-16
+selections, and surrounding deletion in UTF-16 units or Unicode code points.
+Batch edits defer selection notifications until the batch ends. Connections
+are invalidated when their View detaches or their input focus changes.
+
+Input components must implement `EntityInputHandler::set_selected_text_range`
+to accept cursor and selection changes from Android. UIC's `TextInput` implements
+this contract. Tapping a focused input requests the soft keyboard. Hardware
+text keys and common editing shortcuts are forwarded to GPUI.
+
+Holding a finger inside an input focuses it, selects a word using Android's
+locale-aware word boundaries, and opens its floating edit menu. Input components
+accept `TextInputFocusEvent` through an occlusion-aware hitbox, without dispatching
+a click to surrounding controls. UIC's `TextInput` supports this request.
+Select all, copy, cut, and plain-text paste dispatch the component's existing
+editing shortcuts. Copy and cut require a selection and are hidden for password
+fields; paste appears when the clipboard advertises plain text. Select all
+keeps the menu open for a subsequent action. Sliding beyond touch slop, adding
+another finger, leaving the window, or changing the input focus dismisses it.
+
+Tapping an input shows a draggable insertion handle. Selected text exposes two
+endpoint handles using the Android theme's drawables. Handle positions and touch
+indices come from GPUI's input handler; text and selection remain GPUI-rendered.
+Dragging a handle shows Android's magnifier on API 28 and later and temporarily
+hides the toolbar. Password fields expose cursor movement without magnifying text.
+Handles are dismissed on focus loss, surface detachment, or a new gesture in the
+content. Holding a handle at an editor edge scrolls its text while extending the
+selection. Single-line fields scroll horizontally; multiline fields scroll
+vertically. Scrolling stops on release or cancellation and does not propagate
+to parent containers. Input components provide their visible viewport through
+`EntityInputHandler::element_bounds` and opt into scrolling through
+`EntityInputHandler::scroll_text_input`. UIC's `TextInput` implements both.
+Semantic actions such as text classification are not provided.
+
+Input methods can request immediate or monitored `CursorAnchorInfo` updates.
+GPUI supplies the selection, available composing text, insertion-marker bounds,
+and (on Android 13 and later) editor bounds in screen coordinates. Geometry
+tracks rendered layout and View placement; unchanged reports are suppressed.
+Password fields do not expose composing text. The caret baseline remains
+unspecified because GPUI's input-handler contract supplies a rectangle only.
+Character-bound, visible-line, and text-appearance filters are unsupported and
+return false. Closing the input connection stops its geometry subscription.
+
+Call `Window::show_soft_keyboard()` after focusing a text input to request the
+keyboard without tapping the field. `Window::hide_soft_keyboard()` dismisses
+it without clearing input focus or text. Requests are applied after the next
+GPUI frame so the input handler reflects the current focus. The latest pending
+request wins; requests are discarded when the View loses focus, detaches, or
+the session becomes inactive. In-app Back cancels pending keyboard requests and
+dismisses the keyboard. Showing requires an active, visible Surface and
+an input handler accepting text. Android and the selected IME decide whether
+to show an on-screen keyboard when a hardware keyboard is connected.
+
+Surrounding text queries are bounded around the selection and composition.
+Handlers that withhold `surrounding_text` expose no text snapshot to the IME.
+`EntityInputHandler::text_input_mode` describes the field as `SingleLine`,
+`Multiline`, or `Password`; custom editors default to `Multiline`. UIC maps its
+existing input modes automatically. By default, single-line and password fields
+request Done, which dispatches Enter (UIC emits `InputEvent::Submit`); multiline
+fields request a newline key. UIC's multiline Enter inserts a newline.
+
+`EntityInputHandler::text_input_action` can override this with `Done`, `Go`,
+`Search`, `Send`, `Next`, or `Previous`. Handle the action in
+`perform_text_input_action`, returning true when accepted. Composition completes
+before dispatch. Actions inconsistent with the current connection are rejected;
+unhandled Done falls back to Enter, while other actions require a handler.
+Done hides the keyboard if the original field still has focus. Other actions
+leave keyboard visibility and navigation to the application.
+
+UIC configures actions on its input state:
+
+```rust
+TextInput::new(cx).input_action(gpui::TextInputAction::Next)
+```
+
+Subscribe to `InputActionEvent` to receive the configured action and committed
+text. It is separate from `InputEvent::Submit`; physical Enter bindings are
+unchanged. A Next/Previous handler selects and focuses the destination field
+and can call `window.show_soft_keyboard()`. Use
+`set_input_action(Some(action), cx)` to update the action or `None` to restore
+the default. Changing the effective action restarts the connection. Explicit
+multiline actions replace the soft keyboard's newline key; physical Enter
+still inserts a newline.
+
+`EntityInputHandler::text_input_purpose` requests a single-line keyboard layout:
+`Text`, `Email`, `Url`, `Phone`, or `Number { decimal, signed }`. UIC configures
+it on the input state:
+
+```rust
+TextInput::new(cx).input_purpose(gpui::TextInputPurpose::Email)
+```
+
+Use `TextInput::set_input_purpose(purpose, cx)` to change it while editing.
+The value and selection are retained; the input connection restarts and finishes
+composition. These hints do not filter typing or pasted content. Validate values
+in the application. Password and multiline modes take precedence over purpose.
+The keyboard's available keys depend on the selected IME.
+
+Password fields never export surrounding text, even when their handler supplies
+it. Personalized learning is disabled for all modes. Changing mode restarts the
+input connection, completes composition, and invalidates callbacks from the old
+connection. Missing surrounding text alone does not change the keyboard type.
+Custom action labels, rich IME content, and hardware dead-key composition are
+not implemented.
+
+## Permissions
+
+Declare Android permissions in the application's `gpuiforge.json`:
+
+```json
+{
+  "platforms": {
+    "android": {
+      "application-id": "dev.example.app",
+      "permissions": ["android.permission.RECORD_AUDIO"]
+    }
+  }
+}
+```
+
+Capture `gpui_android::current_platform().permissions()` during application
+startup and retain the resulting `AndroidPermissions` handle in the application.
+It belongs to one session and is used on the GPUI foreground thread:
+
+```rust
+let status = permissions.status("android.permission.RECORD_AUDIO")?;
+let result = permissions.request("android.permission.RECORD_AUDIO").await?;
+```
+
+Request after the user invokes the relevant feature. `PermissionStatus` reports
+`Granted` or `Denied { should_show_rationale }`. A false rationale hint does not
+distinguish a first request from a denial without another prompt. Recheck before
+accessing a resource because Android or the user can revoke grants.
+
+The interface supports manifest-declared normal and dangerous permissions.
+Unknown permissions, undeclared permissions, specialized authorization flows
+(such as overlay access), unavailable Activities, cancellation, and concurrent
+requests return errors. Already granted permissions return without a dialog.
+Only one request can be pending per session. Dropping the future discards its
+result; an existing system dialog remains until Android completes it.
+
+`GpuiActivity` connects the permission host automatically. Embedded hosts call
+`session.attachPermissionHost(activity)`, forward `onRequestPermissionsResult`
+to the session, and call `detachPermissionHost(activity)` on destruction.
+Request codes `0x4700..0x7fff` are reserved for GPUI. Detaching the Activity,
+including configuration recreation, cancels pending requests; stale results
+are ignored. Closing the session also completes pending requests with an error.
+The requesting task should be cancelled with its owning UI when appropriate.
+
+### App settings
+
+Open the application's permission or notification settings from a user action:
+
+```rust,ignore
+let request = cx.open_app_settings(gpui::AppSettings::Application);
+cx.spawn(async move |_cx| {
+    if let Err(error) = request.await {
+        log::error!("Could not open app settings: {error}");
+    }
+}).detach();
+```
+
+Use `AppSettings::Notifications` for notification preferences. Call while the
+View is active. Success means Android launched the page; it does not mean
+the user changed a permission. Recheck permission status after returning.
+Unavailable settings activities and inactive Views return errors. These APIs
+are currently implemented on Android; other platforms return `Unsupported`.
+
+### Memory reclamation
+
+Use `cx.on_memory_trim` to release application-owned caches when the operating
+system recommends it:
+
+```rust,ignore
+let subscription = cx.on_memory_trim(|level, cx| {
+    match level {
+        gpui::MemoryTrimLevel::UiHidden => { /* Drop unused UI caches. */ }
+        gpui::MemoryTrimLevel::Background => { /* Reduce rebuildable caches. */ }
+        gpui::MemoryTrimLevel::Moderate => { /* Release unneeded allocations. */ }
+        gpui::MemoryTrimLevel::Critical => { /* Release nonessential resources promptly. */ }
+    }
+});
+```
+
+Retain the subscription to receive events. Dropping it stops delivery. Callbacks
+run on the GPUI thread and should return promptly. GPUI does not clear application
+data, stop transfers, or force garbage collection.
+
+`GpuiSession` registers with the application context and unregisters on close.
+Embedded Views require no Activity callback forwarding. Subscriptions survive
+View and Surface recreation, including retained Activity recreation.
+
+Android 14 and later send `UiHidden` and `Background` trim advice, but no longer
+send the older pressure levels or `onLowMemory`. On earlier releases, running
+moderate/low and background moderate pressure map to `Moderate`; running critical,
+background complete, and `onLowMemory` map to `Critical`. These events are not
+guaranteed before process termination: persist important state independently.
+See [Android memory callbacks](https://developer.android.com/reference/android/content/ComponentCallbacks2).
+Other backends may emit no events.
+
+### Reduced motion
+
+Read `window.prefers_reduced_motion()` during rendering to choose whether to
+animate. Preference changes refresh the window, including cached views.
+For effects with an `enabled` option:
+
+```rust,ignore
+gpui_effects::animated_style("card")
+    .enabled(!window.prefers_reduced_motion())
+    .bg(background)
+    .child(content)
+```
+
+Android reports reduced motion when the system's animator duration scale is
+zero, as set by Remove animations or the developer animation setting. A
+nonzero scale reports normal motion; the value does not adjust GPUI animation
+durations. GPUI does not automatically disable animations or media playback.
+The application chooses a static alternative or snaps to its target state.
+
+The preference is cached and observed for the session's lifetime, across View
+replacement. No permission or optional host feature is needed. Other backends
+currently return `false`, as does Android when the preference is unavailable.
+See [Android animator settings](https://developer.android.com/reference/android/provider/Settings.Global#ANIMATOR_DURATION_SCALE).
+
+### System font size
+
+Use `window.scaled_font_size` during rendering to opt text into the system's
+font-size preference:
+
+```rust,ignore
+div()
+    .text_size(window.scaled_font_size(px(16.)))
+    .whitespace_normal()
+    .child("Text that follows the system font size")
+```
+
+The argument and result are logical pixels. Android uses the system's `sp`
+conversion, including nonlinear scaling on Android 14 and later. Convert each
+base font size separately; do not multiply all sizes by a single factor or
+convert a result twice. The window refreshes when the preference changes,
+including after its View is replaced. Recompute sizes in `render` rather than
+keeping them in application state. Conversions are cached by base size until
+the configuration changes.
+
+`px`, `rem`, display density, and fixed layout dimensions keep their usual
+meaning. Allow text to wrap and its container to grow; a fixed height can clip
+larger text. Other backends currently return the base size unchanged. No
+permission or optional host feature is required. See
+[Android font scaling](https://developer.android.com/about/versions/14/features#non-linear-font-scaling).
+
+### Thermal state
+
+Read `cx.thermal_state()` for the current system thermal state. Subscribe to
+changes with the same API used on desktop:
+
+```rust,ignore
+let current = cx.thermal_state();
+let subscription = cx.on_thermal_state_change(|cx| {
+    let state = cx.thermal_state();
+    // Update application-owned workload or quality settings as appropriate.
+});
+```
+
+Keep the subscription while updates are needed. Callbacks run on the GPUI
+thread and fire when the mapped `ThermalState` changes. State reads use a cache;
+they do not poll Android services during rendering. The session releases the
+system listener on close and retains it across View or Surface replacement.
+
+Android 10 (API 29) and later use `PowerManager` thermal status events:
+
+| Android status | GPUI state |
+| --- | --- |
+| None | `Nominal` |
+| Light | `Fair` |
+| Moderate or severe | `Serious` |
+| Critical, emergency, or shutdown | `Critical` |
+
+No manifest permission or additional GPUiForge feature is required. Android
+8–9, unavailable thermal services, and devices that report no throttling use
+`Nominal`; this is not a temperature measurement. Workload changes remain the
+application's decision; GPUI's existing thermal-aware animation scheduling also
+uses this state. See [Android thermal status](https://developer.android.com/reference/android/os/PowerManager#getCurrentThermalStatus()).
+
+### Network state
+
+Add `"android.permission.ACCESS_NETWORK_STATE"` to
+`platforms.android.permissions` in `gpuiforge.json`. This manifest permission
+does not show a runtime permission dialog. Run `gpuiforge sync` after changing
+the configuration.
+
+```rust,ignore
+let current = cx.network_status()?;
+let subscription = cx.observe_network(|status, cx| {
+    // Store the status in application state and update interested views.
+    cx.refresh_windows();
+})?;
+```
+
+Retain the `Subscription` while updates are needed. The callback receives an
+initial snapshot and subsequent changes on the GPUI thread. Dropping the last
+subscription unregisters the system callback. Closing the session releases
+all observers; View or Surface recreation does not end the subscription.
+
+`NetworkStatus::Disconnected` means no default network is available to the app.
+`Connected` reports `internet_validated` and `metered`; either may be unknown
+during a network transition. Validation is Android's assessment of Internet
+access, not proof that a particular server is reachable. Meteredness follows
+network capabilities rather than assuming Wi-Fi is free. The interface does
+not probe servers, retry requests, or change transfer policy.
+
+Network queries and subscriptions return errors if the permission is missing.
+Other platform backends currently return `Unsupported`.
+
+The example's Request microphone permission button only checks authorization;
+it does not record audio.
+
+## Files
+
+Use `App::prompt_for_files(FilePromptOptions { multiple, ..Default::default() })` to open Android's
+system document picker. It returns `Some(files)` after selection and `None`
+after cancellation. Each `SelectedFile` exposes a display name and an asynchronous
+`read()` method. Metadata queries, descriptor opening, and reads run on background
+workers, including documents backed by a pipe or a remote provider.
+
+Android documents do not expose a GPUI filesystem path or browser URL. Use
+`SelectedFile::read()` instead; it loads the complete contents into memory. Each
+read opens a fresh descriptor. Reading can fail if the provider is unavailable or
+access has been revoked. Persistent access is explicit through file bookmarks.
+The picker requires no broad storage permission. Use `prompt_for_directory` for
+directory handles; `prompt_for_paths` is unsupported on Android.
+
+Set `FilePromptOptions::mime_types` to filter the selectable types:
+
+```rust,ignore
+let selection = cx.prompt_for_files(FilePromptOptions {
+    multiple: true,
+    mime_types: vec!["image/*".into(), "application/pdf".into()],
+    ..Default::default()
+});
+```
+
+Types are alternatives. Empty filters or `*/*` allow all files. Android and
+Linux use MIME filters, Web uses the input's `accept` attribute, and Windows and
+macOS map MIME types to known filename extensions. Unknown extension mappings
+return an error on those two platforms. Filter strings must be MIME types
+without parameters; invalid filters return an error before opening the picker.
+Filters guide selection and do not validate file contents.
+
+To edit an existing document, set `FilePromptOptions::writable` to `true`.
+To choose a new destination, call `App::prompt_for_file_save`:
+
+```rust
+let selection = cx.prompt_for_file_save(FileSaveOptions {
+    suggested_name: "note.txt".into(),
+    mime_type: "text/plain".into(),
+    ..Default::default()
+});
+// In a foreground task:
+if let Some(file) = selection.await?? {
+    file.write(contents).await?;
+}
+```
+
+The save picker creates a document before returning its handle. A duplicate
+filename creates a separate document with a system-selected suffix. Retain the
+handle and call `write()` again to save subsequent edits to that document.
+The `directory` option is a desktop hint and is ignored on Android.
+
+Read-only selections reject writes. Writable selection fails if the provider
+does not grant write access; `can_write()` reports permitted access, not whether
+a later provider operation will succeed. `SelectedFile` is the GPUI name for
+`gpui_io::FileHandle`. It supports metadata, independent reader sessions, writer
+sessions, and incremental `write_stream()`. One writer can be open per document
+handle; await completion before opening another.
+
+Writes replace and truncate contents. An error can leave an ordinary picker
+document partially written; provider completion does not imply cloud synchronization.
+Use `App::file_system(app_id)` for app-private storage and supported public
+collections. See [file I/O](../../gpui_io/docs/file_io.md) for location mappings,
+streaming, cancellation, and publication of new collection items.
+
+Only one file selection can be pending per session. Dropping its receiver discards
+the result without dismissing the system picker. Closing the session completes
+pending requests with an error.
+
+`GpuiActivity` connects the picker automatically. Embedded hosts call
+`session.attachFileHost(activity)`, forward `onActivityResult` to the session,
+and call `detachFileHost(activity)` on destruction. Request codes
+`0x8000..0xbfff` are reserved for GPUI. A retained session preserves its pending
+selection across Activity configuration recreation; final host detachment
+completes it with an error. Results from earlier requests are ignored.
+
+### Open with another application
+
+`App::open_file_with_system(&file)` dispatches `ACTION_VIEW` for a selected or
+restored document, a published MediaStore file, or a private path exposed by the
+host's FileProvider. Await the returned task to
+observe dispatch errors, including a missing viewer, rejected access, or a
+detached host view. Success does not report whether the receiving application
+finished reading the file.
+
+The intent includes the provider's MIME type and a temporary read-only URI grant.
+It does not request editing, persist access, copy contents, or add storage
+permissions. Finish writing before opening a file. Unpublished collection items
+and documents with an active writer are rejected. Path-based handles do not track
+other writers; the application must await its writes before opening them.
+
+The bundled host exposes `AppData` (`filesDir/Data`) and `Cache` through a
+non-exported, read-only `GpuiFileProvider` with authority
+`${applicationId}.gpui.files`. Only the requested file receives a temporary grant;
+other files in the directory remain inaccessible. Files are served in place,
+without copying. Keep them available while the viewer is using them. Missing
+files, directories, and paths resolving outside configured roots are rejected.
+`AppConfig`, `noBackupFilesDir`, databases, and shared preferences are not exposed
+by the default configuration. MIME types for path handles are inferred from the
+file extension, with `application/octet-stream` as the fallback.
+
+Hosts maintained outside GPUiForge must include the provider manifest entry,
+AndroidX Core dependency, and `gpui_file_paths.xml`. An application can override
+that XML resource with narrower directories. URI grants do not provide persistent
+bookmarks or report when a viewer has finished reading.
+
+### System sharing
+
+`App::share(ShareOptions)` opens the Android Sharesheet for plain text, URLs,
+files, or files accompanied by text. Other platform backends currently return
+`Unsupported`. Empty requests return `InvalidInput`.
+
+```rust
+let request = cx.share(ShareOptions {
+    text: Some("A note to accompany the document".into()),
+    files: vec![file.clone()],
+    ..Default::default()
+});
+// In a foreground task:
+request.await?;
+```
+
+File preparation follows the same provider, directory, and write-completion
+requirements as `open_file_with_system`. Files are not copied or loaded into
+memory. Single-file requests use `ACTION_SEND`; multiple files use
+`ACTION_SEND_MULTIPLE`. The MIME type is the files' common type, their shared
+top-level type such as `image/*`, or `*/*` for unrelated types. Text-only requests
+use `text/plain`. Receivers decide whether to use accompanying text.
+
+All file URIs are included in the intent's clip data with temporary read-only
+grants. Keep the source files available for the receiving application. Any file
+preparation failure prevents the entire share request. Success only reports that
+the Sharesheet was requested; choosing a target, cancelling the sheet, and
+delivery completion are not reported. The optional title is a system UI hint.
+
+### Receiving shares
+
+```rust,ignore
+let app = gpui_platform::application();
+app.on_receive_share(|result, cx| {
+    match result {
+        Ok(share) => { /* Present share.text and share.files for user review. */ }
+        Err(error) => { /* Show the receive error. */ }
+    }
+});
+app.run(|cx| { /* Open the application window. */ });
+```
+
+Enable the share target with GPUiForge's `platforms.android.share-mime-types`,
+for example `["text/plain", "image/*"]`. The host accepts `ACTION_SEND` and
+`ACTION_SEND_MULTIPLE`. `ReceivedShare` contains optional plain text, the
+sender-declared MIME type, and read-only `SelectedFile` handles. URI entries
+mirrored between `EXTRA_STREAM` and `ClipData` are delivered once in their
+original order. Only `content://` file URIs are accepted.
+
+Register the callback before `Application::run`. Cold-start requests and new
+intents are queued in arrival order and delivered on the main thread. Provider
+metadata is read on I/O workers. A malformed request or metadata failure returns
+an error for that request; subsequent requests continue. File contents are not
+read or copied automatically. MIME types, names, text, and contents are untrusted
+input and must be validated by the application.
+
+File access uses temporary grants from the sender. Holding a handle does not
+extend permission beyond the receiving Activity task's lifetime. These handles
+do not acquire persistent grants; applications needing durable content can copy
+it explicitly while access remains available. Configuration changes retaining
+the session do not replay a share. Process recreation creates a new session and
+can redeliver its launch intent. Closing a session discards its pending requests.
+
+Custom hosts forward each intent once through `GpuiSession.onOpenIntent` and
+declare matching manifest filters. Other GPUI backends do not currently deliver
+incoming shares.
+
+### Persistent file access
+
+Call `file.persist().await?` while a picked document's access is valid, then save
+the returned `gpui_io::FileBookmark` using Serde. After restarting, obtain
+`App::file_system(app_id)` and call `restore_file(&bookmark).await?`. Restore checks
+the retained permissions and opens the document for reading before returning a
+handle. It does not display a picker or request broader access. Missing files,
+revoked permissions and unavailable providers return errors.
+
+`release_file(&bookmark).await?` releases the bookmark's retained read/write
+permissions without deleting the document. Releasing an already absent grant
+succeeds. Grants belong to the Android application, not to a handle: releasing
+one can invalidate other bookmarks for the same URI. Temporary picker grants or
+already-open descriptors may remain usable. Dropping a handle does not release a
+persistent grant.
+
+The adapter persists only permissions requested by the handle and offered by the
+picker. Providers without persistable grants return an error. Public collection
+items and private path handles do not support this document-bookmark mechanism.
+Bookmarks do not preserve access after uninstall, app-data clearing, document
+removal, or movement to a provider that changes its URI. The application owns
+bookmark storage and decides when to retain or release access; GPUI maintains no
+recent-files list.
+
+## Credentials
+
+`App::write_credentials`, `read_credentials` and `delete_credentials` store one
+username and binary secret per exact URL string. Writing replaces that entry;
+reading a missing entry returns `None`, and deleting it succeeds. The UTF-8
+username and secret together may occupy at most 1 MiB minus four bytes.
+
+Android uses an application-scoped Android Keystore AES-GCM key. Encrypted
+records live in private, backup-excluded storage; credential storage requires no
+runtime permission or biometric prompt. Hardware protection depends on the
+device's Keystore implementation. See [Android Keystore](https://developer.android.com/privacy-and-security/keystore).
+
+Operations run on background workers. Await a write or deletion before issuing
+a dependent operation. Dropping its task does not roll back an operation already
+dispatched. Authentication failures, malformed records and unavailable keys
+return errors without deleting records or silently replacing the key. Explicit
+deletion remains available for an unreadable entry. Credentials are not portable
+between installations or devices.
+
+## System Back
+
+Register a window callback with `Window::on_system_back(cx, callback)` and call
+`Window::set_back_enabled(true)` while an in-app destination can go back.
+Disable it at the navigation root. The callback should update navigation state
+and disable Back when returning to the root; capture entities weakly or use
+`Window::handler_for`.
+
+`GpuiActivity` handles committed Back through `OnBackInvokedDispatcher` on
+Android 13 and later and `onBackPressed` on older releases. Its callback uses
+default priority so the IME can handle Back first. If Back reaches the host
+while the IME is visible, it hides the keyboard without navigating or sending
+preview events. The callback is unregistered while the Activity is paused or
+neither application Back nor the IME needs it. With the keyboard hidden, the
+navigation root keeps Android's default Back behavior.
+
+On Android 14 and later, `Window::on_system_back_gesture(cx, callback)` receives
+`BackGestureEvent` with a `TouchPhase`, progress in `0.0..=1.0`, and the starting
+display edge (`None` for non-edge sources). Use `Started` and `Moved` to draw a
+navigation preview. Restore the preview on `Cancelled`; `Ended` precedes the existing `on_system_back`
+callback, which commits navigation. Terminal events retain the last progress.
+Buttons and older releases may commit Back without preview events. Registering
+a preview listener does not enable Back interception or provide an animation.
+Pausing, losing the Surface, disabling Back, or detaching the platform callback
+cancels an unfinished preview.
+
+Custom hosts use `GpuiSession.setOnBackEnabledChanged` to register or unregister
+their navigation callbacks, then call `GpuiSession.handleSystemBack()` when Back
+is committed. A `false` result leaves navigation to the host. Enable
+`android:enableOnBackInvokedCallback` in the hosting Activity's manifest when
+using the platform dispatcher. Clear the listener when detaching the host.
+For predictive previews, forward `OnBackAnimationCallback` through
+`startBackGesture(progress, GpuiBackEdge)`, `progressBackGesture(progress)`,
+and `cancelBackGesture()` on the main thread. Commit through `handleSystemBack()`
+and cancel any unfinished preview before unregistering the host callback.
+
+## Touch feedback
+
+Call `window.perform_haptic_feedback(HapticFeedback::Selection)` from an
+interaction handler to request system feedback. The available intents are
+`Selection`, `Confirm`, `Reject`, `LongPress`, `GestureStart`, and `GestureEnd`.
+Android selects the waveform through AndroidX's compatible View feedback API;
+availability and feel depend on the device and OS version.
+
+Requests require an active, focused View with a live Surface and honor the
+system and View feedback settings. They need no `VIBRATE` permission. `false`
+means the request was unavailable or declined; `true` means it was accepted,
+not that physical vibration was verified. Other current backends return false.
+GPUI does not queue feedback for later activation or attach it to ordinary
+buttons automatically. Accepted long presses already request their native
+feedback, so handlers should not request a second pulse for the same action.
+
+## Clipboard and links
+
+Use `read_from_clipboard_async()` to read text and supported images and
+`write_to_clipboard_async()` to copy text or one encoded `ClipboardEntry::Image`.
+Both report host and provider errors. Call them from a user action while the
+application has focus. Android can return no item when clipboard access is denied.
+
+Image reads resolve `content://` URIs on an I/O worker. Image writes prepare an
+immutable cache file on a worker and publish its URI on the main thread. Enable
+the Android `files` feature for image export; no broad storage permission is
+required. Android grants readers temporary access through the clipboard.
+Exports live in the application cache, so they are not permanent file storage;
+successful exports remove older GPUI clipboard cache files after 24 hours.
+Reads accept at most 128 clipboard items and 32 MiB of encoded image data in
+total. A single image write has the same byte limit. Unsupported image MIME
+types and inaccessible providers return errors.
+
+Synchronous methods remain text-only. Text entries are concatenated when writing;
+multiple Android text items are joined with newlines when reading. Empty strings
+are supported; text metadata and spans are not preserved. File writes, mixed
+text/image writes, and empty item lists return errors without replacing the
+clipboard. URI and Intent items are not coerced into text.
+
+`App::open_url` sends an Android `ACTION_VIEW` intent using the attached View's
+context. The URL must include a scheme, and an installed application must handle
+it. Failures are logged without closing the GPUI session.
+
+Register `Application::on_open_urls` to receive inbound `ACTION_VIEW` URLs.
+`GpuiActivity` forwards the launch intent and `onNewIntent`; a retained session
+does not replay the launch URL when the Activity is recreated. URLs received
+before the first Surface or before callback registration are queued and delivered
+in order on the main thread before a frame. Repeated intents with the same URL
+remain separate requests. Closing the session discards pending requests.
+
+Custom hosts call `GpuiSession.onOpenIntent(intent)` once for each incoming intent.
+It accepts `ACTION_VIEW` with a URI scheme and `ACTION_SEND`/`ACTION_SEND_MULTIPLE`
+shares, returning false for other intents. Applications validate the content and
+decide which page or document to open.
+
+Declare custom schemes through GPUiForge's `platforms.android.url-schemes`.
+Custom manifests can provide narrower filters or verified HTTPS App Links.
+Android scheme registration is a build-time manifest setting;
+`register_url_scheme` does not change the installed manifest.
+
+## Device verification
+
+Open GPUI Android and tap the counter. Swipe through the list, release a fast
+swipe to check inertia, and touch again to stop it. Scrolling across a clickable
+row must not count as a tap. Verify that count and scroll position survive
+rotation, locking/unlocking the device, and switching to another app and back.
+Adding a second finger must not count as a tap or continue synthesized scrolling.
+Repeatedly open and finish the Activity to check teardown.
+
+Tap the text field, type and delete text, move the cursor, and replace a
+selection. With a composing IME, check preedit updates, candidate commitment,
+and deletion around emoji. Dismiss the keyboard with Back, then tap the field
+to reopen it. Check that the visible content resizes when the keyboard opens.
+Name's Done key must increment Name submissions without inserting a newline;
+Message must allow newlines. Password must use password input settings and hide
+its contents. Toggle Show / hide password while editing to check connection
+refresh without losing the value.
+In Details, type in the keyboard-layout field and use Change keyboard to cycle
+through email, URL, phone, digits, signed decimal, and plain text. Check that the
+layout changes and the field keeps its value; pasting text must remain possible
+with a numeric layout.
+Use Change action to cycle the layout field's action. Pressing its IME Next
+key focuses Reply; Previous focuses Name. Search, Go, Send, and Done report
+their action without inserting a newline. Reply's Send reports its character
+count and clears the field. Physical Enter in Reply must still insert a newline.
+
+Open details, focus its text field, and press Back: the keyboard closes first,
+then another Back returns to the main page. At the main page, Back uses Android's
+default navigation. Repeat with the edge gesture and after backgrounding the
+details page; state and Back handling must survive Activity recreation as well.
+Use Edit name to focus and open the keyboard without tapping the field. Hide
+keyboard must dismiss it while preserving the text and input focus; Edit name
+and tapping the field must both reopen it.
+
+Use Copy count and Paste clipboard to check clipboard round trips, then copy text
+between GPUI and another application. Include multiline text and non-ASCII
+characters. Open website should launch a browser or Android's app chooser;
+returning to GPUI must preserve the counter and scroll position.
+
+These checks require an Android device or a compatible emulator.
+Cross-compilation and APK assembly do not establish driver or lifecycle
+correctness on a device.

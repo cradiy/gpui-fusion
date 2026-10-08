@@ -3,8 +3,8 @@ use std::{sync::Arc, time::Duration};
 use crate::FrameOutputCapabilities;
 
 use crate::{
-    MediaError, MediaInfo, MediaResult, MediaSource, MediaStreamId, PlaybackTimeline, SeekMode,
-    SubtitleEvent, VideoFrame,
+    MediaError, MediaInfo, MediaResult, MediaSource, MediaStreamId, PlaybackBuffer, PlaybackState,
+    PlaybackTimeline, SeekMode, SubtitleEvent, VideoFrame,
 };
 
 use super::stats::PlaybackCounters;
@@ -22,10 +22,44 @@ pub enum MediaBackendEvent {
     /// seek and the session can continue in its requested play/pause state.
     Ready,
     Buffering(u8),
+    /// Authoritative state from a backend that manages buffering and system
+    /// interruptions. Emit after `Buffering` and `Ready` for the same update.
+    PlaybackStateChanged(PlaybackState),
+    /// A system controller command to execute through the consumer's playback API.
+    SystemCommand(SystemMediaCommand),
     MediaInfoChanged(Arc<MediaInfo>),
     Subtitle(SubtitleEvent),
     Ended,
     Error(Arc<MediaError>),
+}
+
+/// User-visible metadata for an opt-in system media session.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SystemMediaMetadata {
+    pub title: String,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+}
+
+/// Transport operations received from system media controls.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SystemMediaCommand {
+    Play,
+    Pause,
+    Stop,
+    SeekTo(Duration),
+}
+
+/// Power resources held during active playback by supporting backends.
+/// This does not keep the display on or grant background execution.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PlaybackWakeMode {
+    #[default]
+    None,
+    /// Keep the CPU awake while playback requires it.
+    Local,
+    /// Also request a Wi-Fi lock for playback requiring it.
+    Network,
 }
 
 /// Media capabilities exposed by one opened playback session.
@@ -171,9 +205,21 @@ impl MediaOutputSink {
 pub trait MediaPlaybackSession: Send {
     fn capabilities(&self) -> MediaCapabilities;
 
+    /// Whether playback state is reported through `PlaybackStateChanged`.
+    /// Such sessions handle buffering themselves; consumers must not pause
+    /// and restart them in response to buffering events.
+    fn manages_playback_state(&self) -> bool {
+        false
+    }
+
     fn play(&mut self) -> MediaResult<()>;
     fn pause(&mut self) -> MediaResult<()>;
     fn timeline(&self) -> PlaybackTimeline;
+
+    /// Buffered media snapshot; unrelated to the percentage needed to resume playback.
+    fn buffered(&self) -> PlaybackBuffer {
+        PlaybackBuffer::Unknown
+    }
 
     fn reload(&mut self, _autoplay: bool) -> MediaResult<()> {
         Err(MediaError::unsupported(
@@ -201,6 +247,31 @@ pub trait MediaPlaybackSession: Send {
 
     fn set_volume(&mut self, _volume: f64) {}
     fn set_muted(&mut self, _muted: bool) {}
+
+    /// Enables system audio-focus management where supported by the backend.
+    fn set_audio_focus_enabled(&mut self, _enabled: bool) -> MediaResult<()> {
+        Err(MediaError::unsupported(
+            "this media backend does not expose audio-focus management",
+        ))
+    }
+
+    /// Selects playback power management. Disabled by default.
+    fn set_wake_mode(&mut self, _mode: PlaybackWakeMode) -> MediaResult<()> {
+        Err(MediaError::unsupported(
+            "this media backend does not expose playback power management",
+        ))
+    }
+
+    /// Enables or updates system media controls; `None` releases them.
+    /// This does not start a background service or publish a notification.
+    fn set_system_media_controls(
+        &mut self,
+        _metadata: Option<SystemMediaMetadata>,
+    ) -> MediaResult<()> {
+        Err(MediaError::unsupported(
+            "this media backend does not expose system media controls",
+        ))
+    }
 
     fn media_info(&self) -> Option<Arc<MediaInfo>> {
         None

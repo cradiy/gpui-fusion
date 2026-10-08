@@ -215,6 +215,7 @@ fn sync_prunes_disabled_modules_and_icons() {
     assert_eq!(fs::metadata(&state).unwrap().modified().unwrap(), modified);
     let host = output.join("host/src/main/kotlin/dev/gpui/android");
     assert!(host.join("FileStore.kt").exists());
+    assert!(host.join("ClipboardImage.kt").exists());
     assert!(host.join("NotificationStore.kt").exists());
     assert!(host.join("DataSyncService.kt").exists());
     assert!(host.join("MediaPlaybackService.kt").exists());
@@ -274,6 +275,7 @@ fn sync_prunes_disabled_modules_and_icons() {
     app.ok(&["sync", "--check"]);
     for file in [
         "FileStore.kt",
+        "ClipboardImage.kt",
         "NotificationStore.kt",
         "ShareIntent.kt",
         "DataSyncService.kt",
@@ -282,6 +284,7 @@ fn sync_prunes_disabled_modules_and_icons() {
     ] {
         assert!(!host.join(file).exists());
     }
+    assert!(host.join("ClipboardSnapshot.kt").exists());
     let manifest = fs::read_to_string(output.join("host/src/main/AndroidManifest.xml")).unwrap();
     assert!(!manifest.contains("<receiver"));
     assert!(!manifest.contains("<provider"));

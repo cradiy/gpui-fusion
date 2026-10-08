@@ -4,6 +4,7 @@
 mod accessibility;
 mod background;
 mod bridge;
+mod clipboard;
 mod credentials;
 mod directory;
 mod dispatcher;

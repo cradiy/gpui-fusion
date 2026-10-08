@@ -531,10 +531,18 @@ impl<P: LinuxClient + 'static> Platform for LinuxPlatform<P> {
         &self,
         options: PathPromptOptions,
     ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>> {
+        self.prompt_for_paths_with_mime_types(options, Vec::new())
+    }
+
+    fn prompt_for_paths_with_mime_types(
+        &self,
+        options: PathPromptOptions,
+        mime_types: Vec<String>,
+    ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>> {
         let (done_tx, done_rx) = oneshot::channel();
 
         #[cfg(not(any(feature = "wayland", feature = "x11")))]
-        let _ = (done_tx.send(Ok(None)), options);
+        let _ = (done_tx.send(Ok(None)), options, mime_types);
 
         #[cfg(any(feature = "wayland", feature = "x11"))]
         let identifier = self.inner.window_identifier();
@@ -547,6 +555,16 @@ impl<P: LinuxClient + 'static> Platform for LinuxPlatform<P> {
                 } else {
                     "Open File"
                 };
+                let filters = if mime_types.is_empty() {
+                    Vec::new()
+                } else {
+                    let mut filter =
+                        ashpd::desktop::file_chooser::FileFilter::new("Supported files");
+                    for mime in mime_types {
+                        filter = filter.mimetype(&mime);
+                    }
+                    vec![filter]
+                };
 
                 let request = match ashpd::desktop::file_chooser::OpenFileRequest::default()
                     .identifier(identifier.await)
@@ -555,6 +573,7 @@ impl<P: LinuxClient + 'static> Platform for LinuxPlatform<P> {
                     .accept_label(options.prompt.as_ref().map(gpui::SharedString::as_str))
                     .multiple(options.multiple)
                     .directory(options.directories)
+                    .filters(filters)
                     .send()
                     .await
                 {

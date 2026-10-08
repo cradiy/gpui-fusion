@@ -52,6 +52,7 @@ path = "examples/screen_capture.rs"
 [dependencies]
 accesskit.workspace = true
 anyhow.workspace = true
+mime_guess = "2"
 async-task = "4.7"
 backtrace = { workspace = true, optional = true }
 bitflags.workspace = true

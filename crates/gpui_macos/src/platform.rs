@@ -875,7 +875,22 @@ impl Platform for MacPlatform {
         &self,
         options: PathPromptOptions,
     ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>> {
+        self.prompt_for_paths_with_mime_types(options, Vec::new())
+    }
+
+    fn prompt_for_paths_with_mime_types(
+        &self,
+        options: PathPromptOptions,
+        mime_types: Vec<String>,
+    ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>> {
         let (done_tx, done_rx) = oneshot::channel();
+        let extensions = match gpui::FilePromptOptions::filter_extensions(&mime_types) {
+            Ok(extensions) => extensions,
+            Err(error) => {
+                let _ = done_tx.send(Err(error));
+                return done_rx;
+            }
+        };
         self.foreground_executor()
             .spawn(async move {
                 unsafe {
@@ -883,6 +898,15 @@ impl Platform for MacPlatform {
                     panel.setCanChooseDirectories_(options.directories.to_objc());
                     panel.setCanChooseFiles_(options.files.to_objc());
                     panel.setAllowsMultipleSelection_(options.multiple.to_objc());
+                    if !extensions.is_empty() {
+                        let strings = extensions
+                            .iter()
+                            .map(|extension| ns_string(extension))
+                            .collect::<Vec<_>>();
+                        let types = NSArray::arrayWithObjects(nil, &strings);
+                        let _: () = msg_send![panel, setAllowedFileTypes: types];
+                        let _: () = msg_send![panel, setAllowsOtherFileTypes: NO];
+                    }
 
                     panel.setCanCreateDirectories(true.to_objc());
                     panel.setResolvesAliases_(false.to_objc());

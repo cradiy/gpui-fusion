@@ -4,6 +4,11 @@ Call `cx.prompt_for_files(FilePromptOptions { multiple: true, ..Default::default
 handler. Await the returned receiver: cancellation yields `Ok(None)`, and a
 selection yields `Ok(Some(files))`. The same API works on desktop and Web.
 
+Set `mime_types: vec!["image/*".into(), "application/pdf".into()]` to offer images
+or PDFs. An empty list allows all types. Web passes these alternatives to the
+file input's `accept` attribute. This is a picker hint; validate selected file
+contents before processing them.
+
 Each `SelectedFile` (`gpui_io::FileHandle`) exposes its name, metadata and asynchronous
 `read()` method. Desktop files also expose `path()`; browser files expose `url()`. Contents are read only
 when requested. Retain the file handle while using its URL for images or media.

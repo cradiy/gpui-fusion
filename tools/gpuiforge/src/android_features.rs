@@ -14,6 +14,7 @@ pub fn included(path: &str, platform: &Platform) -> bool {
         | "SelectedDirectory.kt"
         | "DocumentGrants.kt"
         | "FileStore.kt"
+        | "ClipboardImage.kt"
         | "GpuiFileProvider.kt"
         | "gpui_file_paths.xml" => Files,
         "IncomingShare.kt" | "ShareIntent.kt" => Sharing,

@@ -582,11 +582,21 @@ impl Platform for WindowsPlatform {
         &self,
         options: PathPromptOptions,
     ) -> Receiver<Result<Option<Vec<PathBuf>>>> {
+        self.prompt_for_paths_with_mime_types(options, Vec::new())
+    }
+
+    fn prompt_for_paths_with_mime_types(
+        &self,
+        options: PathPromptOptions,
+        mime_types: Vec<String>,
+    ) -> Receiver<Result<Option<Vec<PathBuf>>>> {
         let (tx, rx) = oneshot::channel();
         let window = self.find_current_active_window();
         self.foreground_executor()
             .spawn(async move {
-                let _ = tx.send(file_open_dialog(options, window));
+                let result = gpui::FilePromptOptions::filter_extensions(&mime_types)
+                    .and_then(|extensions| file_open_dialog(options, window, &extensions));
+                let _ = tx.send(result);
             })
             .detach();
 
@@ -1291,6 +1301,7 @@ fn open_target_in_explorer(target: &Path) -> Result<()> {
 fn file_open_dialog(
     options: PathPromptOptions,
     window: Option<HWND>,
+    extensions: &[&str],
 ) -> Result<Option<Vec<PathBuf>>> {
     let folder_dialog: IFileOpenDialog =
         unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)? };
@@ -1305,6 +1316,19 @@ fn file_open_dialog(
 
     unsafe {
         folder_dialog.SetOptions(dialog_options)?;
+        if !extensions.is_empty() {
+            let pattern = extensions
+                .iter()
+                .map(|ext| format!("*.{ext}"))
+                .collect::<Vec<_>>()
+                .join(";");
+            let name = HSTRING::from("Supported files");
+            let pattern = HSTRING::from(pattern);
+            folder_dialog.SetFileTypes(&[Common::COMDLG_FILTERSPEC {
+                pszName: PCWSTR(name.as_ptr()),
+                pszSpec: PCWSTR(pattern.as_ptr()),
+            }])?;
+        }
 
         if let Some(prompt) = options.prompt {
             let prompt: &str = &prompt;

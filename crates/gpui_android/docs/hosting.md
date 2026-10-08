@@ -707,8 +707,25 @@ Android documents do not expose a GPUI filesystem path or browser URL. Use
 `SelectedFile::read()` instead; it loads the complete contents into memory. Each
 read opens a fresh descriptor. Reading can fail if the provider is unavailable or
 access has been revoked. Persistent access is explicit through file bookmarks.
-The picker requires no broad storage permission. Directory selection
-and `prompt_for_paths` are not supported.
+The picker requires no broad storage permission. Use `prompt_for_directory` for
+directory handles; `prompt_for_paths` is unsupported on Android.
+
+Set `FilePromptOptions::mime_types` to filter the selectable types:
+
+```rust,ignore
+let selection = cx.prompt_for_files(FilePromptOptions {
+    multiple: true,
+    mime_types: vec!["image/*".into(), "application/pdf".into()],
+    ..Default::default()
+});
+```
+
+Types are alternatives. Empty filters or `*/*` allow all files. Android and
+Linux use MIME filters, Web uses the input's `accept` attribute, and Windows and
+macOS map MIME types to known filename extensions. Unknown extension mappings
+return an error on those two platforms. Filter strings must be MIME types
+without parameters; invalid filters return an error before opening the picker.
+Filters guide selection and do not validate file contents.
 
 To edit an existing document, set `FilePromptOptions::writable` to `true`.
 To choose a new destination, call `App::prompt_for_file_save`:
@@ -948,17 +965,26 @@ feedback, so handlers should not request a second pulse for the same action.
 
 ## Clipboard and links
 
-The standard GPUI clipboard APIs read and write plain text through the Android
-system clipboard. The asynchronous variants report host errors. Synchronous
-variants log errors and return no item on a failed read. Access requires an
-attached View and follows Android's clipboard access restrictions; a read can
-return no item when the application lacks focus.
+Use `read_from_clipboard_async()` to read text and supported images and
+`write_to_clipboard_async()` to copy text or one encoded `ClipboardEntry::Image`.
+Both report host and provider errors. Call them from a user action while the
+application has focus. Android can return no item when clipboard access is denied.
 
-Text entries are concatenated when writing. Reading multiple Android text items
-joins them with newlines. Empty strings are supported. Text metadata and spans
-are not preserved. Image and file writes, mixed text/non-text writes, and items
-without entries are rejected without replacing the clipboard. URI and Intent
-items are not resolved to text.
+Image reads resolve `content://` URIs on an I/O worker. Image writes prepare an
+immutable cache file on a worker and publish its URI on the main thread. Enable
+the Android `files` feature for image export; no broad storage permission is
+required. Android grants readers temporary access through the clipboard.
+Exports live in the application cache, so they are not permanent file storage;
+successful exports remove older GPUI clipboard cache files after 24 hours.
+Reads accept at most 128 clipboard items and 32 MiB of encoded image data in
+total. A single image write has the same byte limit. Unsupported image MIME
+types and inaccessible providers return errors.
+
+Synchronous methods remain text-only. Text entries are concatenated when writing;
+multiple Android text items are joined with newlines when reading. Empty strings
+are supported; text metadata and spans are not preserved. File writes, mixed
+text/image writes, and empty item lists return errors without replacing the
+clipboard. URI and Intent items are not coerced into text.
 
 `App::open_url` sends an Android `ACTION_VIEW` intent using the attached View's
 context. The URL must include a scheme, and an installed application must handle
@@ -1015,7 +1041,7 @@ Use Edit name to focus and open the keyboard without tapping the field. Hide
 keyboard must dismiss it while preserving the text and input focus; Edit name
 and tapping the field must both reopen it.
 
-Use Copy count and Paste text to check clipboard round trips, then copy text
+Use Copy count and Paste clipboard to check clipboard round trips, then copy text
 between GPUI and another application. Include multiline text and non-ASCII
 characters. Open website should launch a browser or Android's app chooser;
 returning to GPUI must preserve the counter and scroll position.

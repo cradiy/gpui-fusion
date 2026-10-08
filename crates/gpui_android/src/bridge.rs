@@ -170,16 +170,29 @@ impl Host {
         })
     }
 
-    pub fn request_files(&self, token: u64, multiple: bool, writable: bool) -> Result<()> {
+    pub fn request_files(
+        &self,
+        token: u64,
+        multiple: bool,
+        writable: bool,
+        mime_types: &[String],
+    ) -> Result<()> {
         self.with_env(|env| {
+            let types =
+                env.new_object_array(mime_types.len() as i32, "java/lang/String", JObject::null())?;
+            for (index, mime) in mime_types.iter().enumerate() {
+                let mime = env.new_string(mime)?;
+                env.set_object_array_element(&types, index as i32, mime)?;
+            }
             env.call_method(
                 self.object.as_obj(),
                 "requestFiles",
-                "(JZZ)V",
+                "(JZZ[Ljava/lang/String;)V",
                 &[
                     JValue::Long(token as i64),
                     JValue::Bool(multiple as u8),
                     JValue::Bool(writable as u8),
+                    JValue::Object(types.as_ref()),
                 ],
             )?;
             Ok(())
@@ -547,6 +560,33 @@ impl Host {
             }
             let text: String = env.get_string(&JString::from(value))?.into();
             Ok(Some(text))
+        })
+    }
+
+    pub fn clipboard_object(&self, method: &str) -> Result<Option<crate::file::Document>> {
+        self.with_env(|env| {
+            let object = env
+                .call_method(self.object.as_obj(), method, "()Ljava/lang/Object;", &[])?
+                .l()?;
+            if object.is_null() {
+                return Ok(None);
+            }
+            Ok(Some(crate::file::Document {
+                vm: self.vm.clone(),
+                object: env.new_global_ref(object)?,
+            }))
+        })
+    }
+
+    pub fn publish_clipboard_image(&self, image: &GlobalRef) -> Result<()> {
+        self.with_env(|env| {
+            env.call_method(
+                self.object.as_obj(),
+                "publishClipboardImage",
+                "(Ljava/lang/Object;)V",
+                &[JValue::Object(image.as_obj())],
+            )?;
+            Ok(())
         })
     }
 

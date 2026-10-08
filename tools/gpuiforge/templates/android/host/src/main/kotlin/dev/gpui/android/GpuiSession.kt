@@ -234,9 +234,9 @@ class GpuiSession : AutoCloseable {
         return !closed && files.result(activity, code, result, data)
     }
 
-    private fun requestFiles(token: Long, multiple: Boolean, writable: Boolean) {
+    private fun requestFiles(token: Long, multiple: Boolean, writable: Boolean, mimeTypes: Array<String>) {
         handler.postAtTime({
-            if (!closed) files.request(token, multiple, writable, active())
+            if (!closed) files.request(token, multiple, writable, active(), mimeTypes)
         }, this, SystemClock.uptimeMillis())
     }
 
@@ -254,7 +254,7 @@ class GpuiSession : AutoCloseable {
 
     private fun fileStore(): Any = FileStore(requireContext())
 // gpuiforge:else
-    private fun requestFiles(token: Long, multiple: Boolean, writable: Boolean) { unsupported("files") }
+    private fun requestFiles(token: Long, multiple: Boolean, writable: Boolean, mimeTypes: Array<String>) { unsupported("files") }
     private fun requestDirectory(token: Long) { unsupported("files") }
     private fun requestFileSave(token: Long, name: String, mime: String) { unsupported("files") }
     private fun fileStore(): Any = unsupported("files")
@@ -798,6 +798,30 @@ class GpuiSession : AutoCloseable {
         val clip = clipboard.primaryClip ?: return null
         val items = (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).text }
         return if (items.isEmpty()) null else items.joinToString("\n")
+    }
+
+    private fun clipboardSnapshot(): Any? {
+        val context = requireContext()
+        val clip = context.getSystemService(ClipboardManager::class.java).primaryClip ?: return null
+        return ClipboardSnapshot(context.contentResolver, clip)
+    }
+
+    private fun clipboardImage(): Any {
+// gpuiforge:if files
+        return ClipboardImage(requireContext())
+// gpuiforge:else
+        unsupported("files")
+// gpuiforge:endif
+    }
+
+    private fun publishClipboardImage(image: Any) {
+// gpuiforge:if files
+        val export = image as ClipboardImage
+        requireContext().getSystemService(ClipboardManager::class.java).setPrimaryClip(export.clip())
+        export.retain()
+// gpuiforge:else
+        unsupported("files")
+// gpuiforge:endif
     }
 
     private fun writeClipboard(text: String) {

@@ -50,8 +50,9 @@ impl FileDialog {
         options: FilePromptOptions,
     ) -> oneshot::Receiver<Result<Option<Vec<SelectedFile>>>> {
         let selection = self.prompt_with(false, |token| {
+            let mime_types = options.normalized_mime_types()?;
             self.host
-                .request_files(token, options.multiple, options.writable)
+                .request_files(token, options.multiple, options.writable, &mime_types)
         });
         let (tx, rx) = oneshot::channel();
         self.foreground

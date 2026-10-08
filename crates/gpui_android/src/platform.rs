@@ -492,9 +492,16 @@ impl Platform for AndroidPlatform {
         }
     }
     fn read_from_clipboard_async(&self) -> Task<Result<Option<ClipboardItem>>> {
-        Task::ready(self.read_clipboard())
+        crate::clipboard::read(&self.host, &self.foreground)
     }
     fn write_to_clipboard_async(&self, item: ClipboardItem) -> Task<Result<()>> {
+        if let [ClipboardEntry::Image(image)] = item.entries() {
+            return crate::clipboard::write_image(
+                self.host.clone(),
+                &self.foreground,
+                image.clone(),
+            );
+        }
         Task::ready(self.write_clipboard(item))
     }
     fn write_credentials(&self, url: &str, username: &str, password: &[u8]) -> Task<Result<()>> {

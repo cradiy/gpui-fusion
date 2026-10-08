@@ -88,6 +88,7 @@ fn main() {
                 haptic_status: "Try feedback on a physical device.".into(),
                 scroll: ScrollHandle::new(),
                 clipboard_status: "Copy the counter or paste text from another app.".into(),
+                clipboard_image: None,
                 file_status: "Choose a file to read its contents.".into(),
                 file_pending: false,
                 credential_pending: false,
@@ -236,6 +237,7 @@ struct Counter {
     haptic_status: String,
     scroll: ScrollHandle,
     clipboard_status: String,
+    clipboard_image: Option<std::sync::Arc<Image>>,
     file_status: String,
     file_pending: bool,
     credential_pending: bool,
@@ -298,6 +300,52 @@ fn button(id: &'static str, label: &'static str) -> Stateful<Div> {
 }
 
 impl Counter {
+    fn copy_image(&mut self, cx: &mut Context<Self>) {
+        let selection = cx.prompt_for_files(FilePromptOptions {
+            mime_types: vec!["image/*".into()],
+            ..Default::default()
+        });
+        cx.spawn(async move |this, cx| {
+            let result: anyhow::Result<Option<Image>> = async {
+                let Some(mut files) = selection.await?? else {
+                    return Ok(None);
+                };
+                let file = files
+                    .pop()
+                    .ok_or_else(|| anyhow::anyhow!("No image selected"))?;
+                let metadata = file.metadata().await?;
+                let format = metadata
+                    .mime_type
+                    .as_deref()
+                    .and_then(ImageFormat::from_mime_type)
+                    .ok_or_else(|| anyhow::anyhow!("Unsupported image type"))?;
+                let image = Image::from_bytes(format, file.read_limited(32 * 1024 * 1024).await?);
+                let task =
+                    cx.update(|cx| cx.write_to_clipboard_async(ClipboardItem::new_image(&image)));
+                task.await?;
+                Ok(Some(image))
+            }
+            .await;
+            let _ = this.update(cx, |this, cx| {
+                this.clipboard_status = match result {
+                    Ok(Some(image)) => {
+                        let status = format!(
+                            "Copied image: {} · {} bytes",
+                            image.format.mime_type(),
+                            image.bytes.len()
+                        );
+                        this.clipboard_image = Some(std::sync::Arc::new(image));
+                        status
+                    }
+                    Ok(None) => "Image selection cancelled.".into(),
+                    Err(error) => format!("Copy image: {error}"),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn toggle_thermal(&mut self, cx: &mut Context<Self>) {
         if self.thermal_subscription.take().is_some() {
             self.thermal_status = "Thermal monitoring is stopped.".into();
@@ -725,7 +773,7 @@ impl Counter {
         cx.notify();
     }
 
-    fn choose_files(&mut self, multiple: bool, cx: &mut Context<Self>) {
+    fn choose_files(&mut self, multiple: bool, mime_types: Vec<String>, cx: &mut Context<Self>) {
         if self.file_pending {
             return;
         }
@@ -733,6 +781,7 @@ impl Counter {
         self.file_status = "Choosing files...".into();
         let selection = cx.prompt_for_files(FilePromptOptions {
             multiple,
+            mime_types,
             ..Default::default()
         });
         cx.spawn(async move |this, cx| {
@@ -772,6 +821,7 @@ impl Counter {
         let selection = cx.prompt_for_files(FilePromptOptions {
             multiple: false,
             writable: true,
+            mime_types: vec!["text/plain".into()],
         });
         cx.spawn(async move |this, cx| {
             let result = async {
@@ -1337,18 +1387,34 @@ impl Counter {
                                     .detach();
                                 },
                             )))
-                            .child(button("paste", "Paste text").on_click(cx.listener(
+                            .child(button("copy-image", "Copy image").on_click(cx.listener(|this, _, _, cx| this.copy_image(cx))))
+                            .child(button("copy-preview", "Copy preview").on_click(cx.listener(|this, _, _, cx| {
+                                let Some(image) = &this.clipboard_image else { return; };
+                                let task = cx.write_to_clipboard_async(ClipboardItem::new_image(image));
+                                cx.spawn(async move |this, cx| {
+                                    let result = task.await;
+                                    let _ = this.update(cx, |this, cx| {
+                                        this.clipboard_status = result.map(|_| "Image preview copied.".into()).unwrap_or_else(|error| error.to_string());
+                                        cx.notify();
+                                    });
+                                }).detach();
+                            })))
+                            .child(button("paste", "Paste clipboard").on_click(cx.listener(
                                 |_, _, _, cx| {
                                     let task = cx.read_from_clipboard_async();
                                     cx.spawn(async move |this, cx| {
                                         let result = task.await;
                                         let _ = this.update(cx, |this, cx| {
                                             this.clipboard_status = match result {
-                                                Ok(Some(item)) => format!(
-                                                    "Pasted: {}",
-                                                    item.text().unwrap_or_default()
-                                                ),
-                                                Ok(None) => "No text available to paste.".into(),
+                                                Ok(Some(item)) => {
+                                                    this.clipboard_image = item.entries().iter().find_map(|entry| {
+                                                        if let ClipboardEntry::Image(image) = entry { Some(std::sync::Arc::new(image.clone())) } else { None }
+                                                    });
+                                                    if let Some(image) = &this.clipboard_image {
+                                                        format!("Pasted image: {} · {} bytes", image.format.mime_type(), image.bytes.len())
+                                                    } else { format!("Pasted: {}", item.text().unwrap_or_default()) }
+                                                }
+                                                Ok(None) => "No supported clipboard data.".into(),
                                                 Err(error) => error.to_string(),
                                             };
                                             cx.notify();
@@ -1360,11 +1426,15 @@ impl Counter {
                     )
                     .child(
                         div()
+                            .id("clipboard-status")
+                            .role(Role::Status)
+                            .aria_label(self.clipboard_status.clone())
                             .text_sm()
                             .whitespace_normal()
                             .text_color(rgb(muted))
                             .child(self.clipboard_status.clone()),
                     )
+                    .children(self.clipboard_image.clone().map(|image| img(image).h(px(100.)).max_w_full().object_fit(ObjectFit::Contain)))
                     .child(button("open-link", "Open website").on_click(|_, _, cx| {
                         cx.open_url("https://www.rust-lang.org/");
                     }))
@@ -1492,10 +1562,13 @@ impl Counter {
                             .flex_wrap()
                             .gap_3()
                             .child(button("choose-file", "Choose file").on_click(
-                                cx.listener(|this, _, _, cx| this.choose_files(false, cx)),
+                                cx.listener(|this, _, _, cx| this.choose_files(false, Vec::new(), cx)),
                             ))
                             .child(button("choose-files", "Choose files").on_click(
-                                cx.listener(|this, _, _, cx| this.choose_files(true, cx)),
+                                cx.listener(|this, _, _, cx| this.choose_files(true, Vec::new(), cx)),
+                            ))
+                            .child(button("choose-filtered", "Choose images or PDF").on_click(
+                                cx.listener(|this, _, _, cx| this.choose_files(true, vec!["image/*".into(), "application/pdf".into()], cx)),
                             )),
                     )
                     .child(

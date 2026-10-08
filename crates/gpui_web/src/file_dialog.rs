@@ -37,6 +37,7 @@ pub(crate) fn prompt(
         return rx;
     }
     let setup = || -> anyhow::Result<_> {
+        let mime_types = options.normalized_mime_types()?;
         let document = web_sys::window()
             .and_then(|w| w.document())
             .ok_or_else(|| anyhow::anyhow!("no browser document"))?;
@@ -47,6 +48,7 @@ pub(crate) fn prompt(
             .map_err(error)?;
         input.set_type("file");
         input.set_multiple(options.multiple);
+        input.set_accept(&mime_types.join(","));
         input.set_hidden(true);
         document
             .body()

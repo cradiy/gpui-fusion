@@ -286,12 +286,23 @@ pub trait Platform: 'static {
         &self,
         options: crate::FilePromptOptions,
     ) -> oneshot::Receiver<Result<Option<Vec<crate::SelectedFile>>>> {
-        let paths = self.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: options.multiple,
-            prompt: None,
-        });
+        let mime_types = match options.normalized_mime_types() {
+            Ok(types) => types,
+            Err(error) => {
+                let (tx, rx) = oneshot::channel();
+                let _ = tx.send(Err(error));
+                return rx;
+            }
+        };
+        let paths = self.prompt_for_paths_with_mime_types(
+            PathPromptOptions {
+                files: true,
+                directories: false,
+                multiple: options.multiple,
+                prompt: None,
+            },
+            mime_types,
+        );
         let executor = self.background_executor();
         let (tx, rx) = oneshot::channel();
         self.foreground_executor()
@@ -314,6 +325,21 @@ pub trait Platform: 'static {
                 let _ = tx.send(result);
             })
             .detach();
+        rx
+    }
+    /// Selects paths using normalized MIME filters. An empty list allows all types.
+    fn prompt_for_paths_with_mime_types(
+        &self,
+        options: PathPromptOptions,
+        mime_types: Vec<String>,
+    ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>> {
+        if mime_types.is_empty() {
+            return self.prompt_for_paths(options);
+        }
+        let (tx, rx) = oneshot::channel();
+        let _ = tx.send(Err(anyhow::anyhow!(
+            "file type filtering is not supported by this platform"
+        )));
         rx
     }
     /// Choose a writable destination. Cancellation returns `None`.

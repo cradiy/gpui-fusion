@@ -2564,6 +2564,7 @@ dependencies = [
  "lyon",
  "mach2",
  "metal",
+ "mime_guess",
  "moxcms",
  "num_cpus",
  "objc",

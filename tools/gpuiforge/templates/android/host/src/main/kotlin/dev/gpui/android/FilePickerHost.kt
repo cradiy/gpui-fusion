@@ -21,9 +21,10 @@ internal class FilePickerHost(private val deliver: (Long, Array<out Any>?, Strin
         owner.clear()
     }
 
-    fun request(token: Long, multiple: Boolean, writable: Boolean, active: Boolean) {
+    fun request(token: Long, multiple: Boolean, writable: Boolean, active: Boolean, mimeTypes: Array<String>) {
         launch(token, multiple, writable, active, Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            type = "*/*"
+            type = mimeTypes.singleOrNull() ?: "*/*"
+            if (mimeTypes.size > 1) putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
             putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple)
         })
     }

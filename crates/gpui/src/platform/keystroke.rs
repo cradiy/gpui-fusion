@@ -115,7 +115,8 @@ impl Keystroke {
     /// key syntax is:
     /// `[secondary-][ctrl-][alt-][shift-][cmd-][fn-]key[->key_char]`
     /// key_char syntax is only used for generating test events,
-    /// secondary means "cmd" on macOS and "ctrl" on other platforms
+    /// secondary follows the host's editing modifier: Command on macOS and
+    /// browsers running on Apple platforms, Control elsewhere.
     /// when matching a key with an key_char set will be matched without it.
     pub fn parse(source: &str) -> std::result::Result<Self, InvalidKeystrokeError> {
         let mut modifiers = Modifiers::none();
@@ -141,11 +142,9 @@ impl Keystroke {
                 continue;
             }
             if component.eq_ignore_ascii_case("secondary") {
-                if cfg!(target_os = "macos") {
-                    modifiers.platform = true;
-                } else {
-                    modifiers.control = true;
-                };
+                let secondary = Modifiers::secondary_key();
+                modifiers.platform |= secondary.platform;
+                modifiers.control |= secondary.control;
                 continue;
             }
 
@@ -478,16 +477,11 @@ impl Modifiers {
 
     /// Whether the semantically 'secondary' modifier key is pressed.
     ///
-    /// On macOS, this is the command key.
-    /// On Linux and Windows, this is the control key.
+    /// Uses Command on macOS and browsers running on Apple platforms, Control elsewhere.
     pub fn secondary(&self) -> bool {
-        #[cfg(target_os = "macos")]
-        {
+        if gpui_util::uses_command_modifier() {
             self.platform
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
+        } else {
             self.control
         }
     }
@@ -514,22 +508,13 @@ impl Modifiers {
         }
     }
 
-    /// A Returns [`Modifiers`] with just the secondary key pressed.
+    /// Returns [`Modifiers`] with just the host's editing modifier pressed.
     pub fn secondary_key() -> Modifiers {
-        #[cfg(target_os = "macos")]
-        {
-            Modifiers {
-                platform: true,
-                ..Default::default()
-            }
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            Modifiers {
-                control: true,
-                ..Default::default()
-            }
+        let command = gpui_util::uses_command_modifier();
+        Modifiers {
+            platform: command,
+            control: !command,
+            ..Default::default()
         }
     }
 

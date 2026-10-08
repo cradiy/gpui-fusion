@@ -26,12 +26,6 @@ actions!(
 );
 
 pub fn init(cx: &mut App) {
-    let ctrl = if cfg!(target_os = "macos") {
-        "cmd"
-    } else {
-        "ctrl"
-    };
-
     cx.bind_keys([
         KeyBinding::new("backspace", Backspace, Some("TextInput")),
         KeyBinding::new("delete", Delete, Some("TextInput")),
@@ -43,18 +37,14 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("shift-right", SelectRight, Some("TextInput")),
         KeyBinding::new("shift-up", SelectUp, Some("TextInput && multiline")),
         KeyBinding::new("shift-down", SelectDown, Some("TextInput && multiline")),
-        KeyBinding::new(&format!("{ctrl}-a"), SelectAll, Some("TextInput")),
-        KeyBinding::new(&format!("{ctrl}-v"), Paste, Some("TextInput")),
-        KeyBinding::new(&format!("{ctrl}-c"), Copy, Some("TextInput")),
-        KeyBinding::new(&format!("{ctrl}-x"), Cut, Some("TextInput")),
+        KeyBinding::new("secondary-a", SelectAll, Some("TextInput")),
+        KeyBinding::new("secondary-v", Paste, Some("TextInput")),
+        KeyBinding::new("secondary-c", Copy, Some("TextInput")),
+        KeyBinding::new("secondary-x", Cut, Some("TextInput")),
         KeyBinding::new("home", Home, Some("TextInput")),
         KeyBinding::new("end", End, Some("TextInput")),
         KeyBinding::new("enter", Submit, Some("TextInput && !multiline")),
         KeyBinding::new("enter", InsertNewline, Some("TextInput && multiline")),
-        KeyBinding::new(
-            &format!("{ctrl}-enter"),
-            Submit,
-            Some("TextInput && multiline"),
-        ),
+        KeyBinding::new("secondary-enter", Submit, Some("TextInput && multiline")),
     ]);
 }

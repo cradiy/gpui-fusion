@@ -1,5 +1,5 @@
 use crate::display::WebDisplay;
-use crate::events::{ClickState, WebEventListeners, is_mac_platform};
+use crate::events::{ClickState, WebEventListeners};
 use std::sync::Arc;
 use std::{cell::Cell, cell::RefCell, rc::Rc};
 
@@ -68,7 +68,6 @@ pub(crate) struct WebWindowInner {
     pub(crate) canvas: web_sys::HtmlCanvasElement,
     pub(crate) input_element: web_sys::HtmlInputElement,
     pub(crate) has_device_pixel_support: bool,
-    pub(crate) is_mac: bool,
     pub(crate) state: RefCell<WebWindowMutableState>,
     pub(crate) callbacks: Rc<RefCell<WebWindowCallbacks>>,
     pub(crate) click_state: RefCell<ClickState>,
@@ -185,8 +184,6 @@ impl WebWindow {
             capslock: Capslock::default(),
         };
 
-        let is_mac = is_mac_platform(&browser_window);
-
         let callbacks = Rc::new(RefCell::new(WebWindowCallbacks::default()));
         let weak = Rc::downgrade(&callbacks);
         let autofill_callback =
@@ -222,7 +219,6 @@ impl WebWindow {
             canvas,
             input_element,
             has_device_pixel_support,
-            is_mac,
             state: RefCell::new(mutable_state),
             callbacks,
             click_state: RefCell::new(ClickState::default()),

@@ -89,10 +89,8 @@ impl WebWindowInner {
                             key: key.into(),
                             key_char: None,
                             modifiers: Modifiers {
-                                control: !this.is_mac,
-                                platform: this.is_mac,
                                 shift,
-                                ..Default::default()
+                                ..Modifiers::secondary_key()
                             },
                         },
                         is_held: false,
@@ -165,7 +163,7 @@ impl WebWindowInner {
 
             let button = dom_mouse_button_to_gpui(event.button());
             let position = pointer_position_in_element(&event);
-            let modifiers = modifiers_from_mouse_event(&event, this.is_mac);
+            let modifiers = modifiers_from_mouse_event(&event);
             let time = js_sys::Date::now();
 
             this.pressed_button.set(Some(button));
@@ -195,7 +193,7 @@ impl WebWindowInner {
 
             let button = dom_mouse_button_to_gpui(event.button());
             let position = pointer_position_in_element(&event);
-            let modifiers = modifiers_from_mouse_event(&event, this.is_mac);
+            let modifiers = modifiers_from_mouse_event(&event);
 
             this.pressed_button.set(None);
             let click_count = this.click_state.borrow().current_count;
@@ -222,7 +220,7 @@ impl WebWindowInner {
             event.prevent_default();
 
             let position = pointer_position_in_element(&event);
-            let modifiers = modifiers_from_mouse_event(&event, this.is_mac);
+            let modifiers = modifiers_from_mouse_event(&event);
             let current_pressed = this.pressed_button.get();
 
             {
@@ -245,7 +243,7 @@ impl WebWindowInner {
             let event: web_sys::PointerEvent = event.unchecked_into();
 
             let position = pointer_position_in_element(&event);
-            let modifiers = modifiers_from_mouse_event(&event, this.is_mac);
+            let modifiers = modifiers_from_mouse_event(&event);
             let current_pressed = this.pressed_button.get();
 
             {
@@ -270,7 +268,7 @@ impl WebWindowInner {
 
             let mouse_event: &web_sys::MouseEvent = event.as_ref();
             let position = mouse_position_in_element(mouse_event);
-            let modifiers = modifiers_from_wheel_event(mouse_event, this.is_mac);
+            let modifiers = modifiers_from_wheel_event(mouse_event);
 
             let delta_mode = event.delta_mode();
             let delta = if delta_mode == 1 {
@@ -362,7 +360,7 @@ impl WebWindowInner {
                 return;
             };
 
-            let modifiers = modifiers_from_keyboard_event(&event, this.is_mac);
+            let modifiers = modifiers_from_keyboard_event(&event);
             let capslock = capslock_from_keyboard_event(&event);
 
             {
@@ -384,7 +382,7 @@ impl WebWindowInner {
 
             // Clipboard events supply the real data before GPUI's synchronous
             // copy/cut/paste handlers run. Let the browser generate those events.
-            if ((this.is_mac && modifiers.platform) || (!this.is_mac && modifiers.control))
+            if modifiers.secondary()
                 && !modifiers.alt
                 && (!modifiers.shift || key == "v")
                 && matches!(key.as_str(), "c" | "x" | "v")
@@ -441,7 +439,7 @@ impl WebWindowInner {
                 return;
             };
 
-            let modifiers = modifiers_from_keyboard_event(&event, this.is_mac);
+            let modifiers = modifiers_from_keyboard_event(&event);
             let capslock = capslock_from_keyboard_event(&event);
 
             {
@@ -612,7 +610,7 @@ fn dom_mouse_button_to_gpui(button: i16) -> MouseButton {
     }
 }
 
-fn modifiers_from_keyboard_event(event: &web_sys::KeyboardEvent, _is_mac: bool) -> Modifiers {
+fn modifiers_from_keyboard_event(event: &web_sys::KeyboardEvent) -> Modifiers {
     Modifiers {
         control: event.ctrl_key(),
         alt: event.alt_key(),
@@ -622,7 +620,7 @@ fn modifiers_from_keyboard_event(event: &web_sys::KeyboardEvent, _is_mac: bool) 
     }
 }
 
-fn modifiers_from_mouse_event(event: &web_sys::PointerEvent, _is_mac: bool) -> Modifiers {
+fn modifiers_from_mouse_event(event: &web_sys::PointerEvent) -> Modifiers {
     let mouse_event: &web_sys::MouseEvent = event.as_ref();
     Modifiers {
         control: mouse_event.ctrl_key(),
@@ -633,7 +631,7 @@ fn modifiers_from_mouse_event(event: &web_sys::PointerEvent, _is_mac: bool) -> M
     }
 }
 
-fn modifiers_from_wheel_event(event: &web_sys::MouseEvent, _is_mac: bool) -> Modifiers {
+fn modifiers_from_wheel_event(event: &web_sys::MouseEvent) -> Modifiers {
     Modifiers {
         control: event.ctrl_key(),
         alt: event.alt_key(),
@@ -647,24 +645,6 @@ fn capslock_from_keyboard_event(event: &web_sys::KeyboardEvent) -> Capslock {
     Capslock {
         on: event.get_modifier_state("CapsLock"),
     }
-}
-
-pub(crate) fn is_mac_platform(browser_window: &web_sys::Window) -> bool {
-    let navigator = browser_window.navigator();
-
-    #[allow(deprecated)]
-    // navigator.platform() is deprecated but navigator.userAgentData is not widely available yet
-    if let Ok(platform) = navigator.platform() {
-        if platform.contains("Mac") {
-            return true;
-        }
-    }
-
-    if let Ok(user_agent) = navigator.user_agent() {
-        return user_agent.contains("Mac");
-    }
-
-    false
 }
 
 fn is_modifier_only_key(key: &str) -> bool {

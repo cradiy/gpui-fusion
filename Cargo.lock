@@ -7742,6 +7742,7 @@ dependencies = [
  "gpui_platform",
  "gpui_wgpu",
  "rust-embed",
+ "scheduler",
  "serde",
  "strum",
  "uic-macros",

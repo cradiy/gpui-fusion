@@ -321,7 +321,7 @@ impl PlatformFile for AndroidFile {
             return Box::pin(async {
                 Err(io::Error::new(
                     io::ErrorKind::Unsupported,
-                    "document append is not supported",
+                    "document provider only supports truncating writes",
                 )
                 .into())
             });

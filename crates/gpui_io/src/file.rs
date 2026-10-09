@@ -51,6 +51,8 @@ pub enum WriteMode {
     Truncate,
     /// Append without replacing existing contents. Unsupported providers return an error.
     Append,
+    /// Stage contents separately and publish them atomically on close. Never falls back to truncation.
+    AtomicReplace,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -66,6 +68,11 @@ impl WriteOptions {
     pub fn append() -> Self {
         Self {
             mode: WriteMode::Append,
+        }
+    }
+    pub fn atomic_replace() -> Self {
+        Self {
+            mode: WriteMode::AtomicReplace,
         }
     }
 }
@@ -110,8 +117,13 @@ pub trait PlatformFile: Any + Debug + Send + Sync {
     fn can_write(&self) -> bool {
         false
     }
+    /// Whether atomic replacement is supported. Access or filesystem operations can still fail.
+    fn can_write_atomically(&self) -> bool {
+        false
+    }
     fn metadata(&self) -> LocalBoxFuture<'static, Result<FileMetadata>>;
     fn open_read(&self) -> LocalBoxFuture<'static, Result<FileReader>>;
+    /// Reject unsupported modes before modifying the file. Atomic replacement publishes only on close.
     fn open_write(&self, _options: WriteOptions) -> LocalBoxFuture<'static, Result<FileWriter>> {
         Box::pin(async { Err(unsupported("file handle does not support writing")) })
     }
@@ -173,6 +185,9 @@ impl FileHandle {
     pub fn can_write(&self) -> bool {
         self.0.can_write()
     }
+    pub fn can_write_atomically(&self) -> bool {
+        self.0.can_write_atomically()
+    }
     pub fn metadata(&self) -> LocalBoxFuture<'static, Result<FileMetadata>> {
         self.0.metadata()
     }
@@ -180,6 +195,13 @@ impl FileHandle {
         self.0.open_read()
     }
     pub fn open_write(&self, options: WriteOptions) -> LocalBoxFuture<'static, Result<FileWriter>> {
+        if options.mode == WriteMode::AtomicReplace && !self.can_write_atomically() {
+            return Box::pin(async {
+                Err(unsupported(
+                    "file provider does not support atomic replacement",
+                ))
+            });
+        }
         self.0.open_write(options)
     }
 

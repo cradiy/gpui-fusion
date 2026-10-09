@@ -39,7 +39,8 @@ work with sequential readers as well as after `seek`.
 `write_all()` writes the whole supplied slice. Native and Android adapters submit
 bounded chunks to background workers. `flush()` flushes bytes without finishing
 the session. `close()` consumes the writer and reports provider completion errors.
-It does not guarantee durable storage, cloud synchronization, or atomic replacement.
+It does not guarantee durable storage or cloud synchronization. Only an explicit
+atomic-replacement session guarantees atomic publication.
 `abort()` consumes an unfinished writer and awaits cleanup. Dropping a writer
 schedules best-effort cleanup without blocking the caller. Already dispatched
 blocking operations cannot be interrupted, and cancelling an operation does not
@@ -69,6 +70,42 @@ let mut header = [0; 16];
 reader.read_exact(&mut header).await?;
 let remaining = reader.read_to_end_limited(4096).await?;
 ```
+
+## Atomic replacement
+
+Use `can_write_atomically()` to query provider support, then request an atomic
+session explicitly:
+
+```rust,ignore
+let mut writer = file.open_write(WriteOptions::atomic_replace()).await?;
+writer.write_all(&contents).await?;
+writer.close().await?;
+```
+
+Writes and `flush()` leave the destination unchanged. Successful `close()` publishes
+the complete contents, including an empty file. `abort()` discards staged data;
+dropping an unfinished writer schedules cleanup. If close has already been
+dispatched, cancellation cannot prevent publication. Await close before reporting
+a successful save. Concurrent saves use last-completed replacement; there is no
+conflict detection.
+
+Native path handles on Linux, macOS, Windows and Android support this mode,
+including Android application-private files. A temporary file is created in the
+destination directory, so that directory must be writable and already exist.
+The destination may be absent. Existing symbolic links, directories and read-only
+files are rejected. Basic permissions are preserved; file identity, hard-link
+relationships, ownership, ACLs and extended attributes are not preserved. Other
+open handles may continue reading the previous file.
+
+Atomic visibility is distinct from crash durability. Native writes synchronize
+the staged file before replacement, but do not synchronize the parent directory.
+A process crash can leave a temporary file. Filesystem and access errors are
+reported; support queries do not guarantee that a later write succeeds.
+
+Android document/MediaStore handles and browser file handles do not support atomic
+replacement. They return `ErrorKind::Unsupported` without modifying contents.
+There is no automatic fallback to a truncating write. `write()` and `write_stream()`
+retain their ordinary truncating semantics.
 
 ## Reading directories and opening existing files
 

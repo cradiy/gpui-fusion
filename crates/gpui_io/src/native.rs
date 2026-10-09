@@ -12,6 +12,15 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "windows"
+))]
+#[path = "native_atomic.rs"]
+mod atomic;
+
 pub(crate) fn file(path: PathBuf, executor: IoExecutor, writable: bool) -> FileHandle {
     let name = path
         .file_name()
@@ -106,6 +115,15 @@ impl PlatformFile for NativeFile {
     fn can_write(&self) -> bool {
         self.writable
     }
+    fn can_write_atomically(&self) -> bool {
+        self.writable
+            && cfg!(any(
+                target_os = "linux",
+                target_os = "android",
+                target_os = "macos",
+                target_os = "windows"
+            ))
+    }
     fn metadata(&self) -> LocalBoxFuture<'static, Result<FileMetadata>> {
         let path = self.path.clone();
         self.executor.run(move || {
@@ -135,6 +153,27 @@ impl PlatformFile for NativeFile {
         let path = self.path.clone();
         let executor = self.executor.clone();
         self.executor.run(move || {
+            if options.mode == WriteMode::AtomicReplace {
+                #[cfg(any(
+                    target_os = "linux",
+                    target_os = "android",
+                    target_os = "macos",
+                    target_os = "windows"
+                ))]
+                return Ok(FileWriter::from_blocking(
+                    atomic::AtomicWriter::open(&path)?,
+                    executor,
+                ));
+                #[cfg(not(any(
+                    target_os = "linux",
+                    target_os = "android",
+                    target_os = "macos",
+                    target_os = "windows"
+                )))]
+                return Err(crate::unsupported(
+                    "native atomic replacement is unavailable",
+                ));
+            }
             let file = OpenOptions::new()
                 .write(true)
                 .create(true)

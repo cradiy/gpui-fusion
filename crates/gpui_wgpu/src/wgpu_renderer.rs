@@ -41,6 +41,8 @@ pub use memory::WgpuMemoryStats;
 mod particle_transition;
 mod particles;
 mod pipeline_cache;
+mod presentation;
+mod simulation_capabilities;
 pub(crate) use pipeline_cache::PipelineCache;
 #[cfg(target_os = "android")]
 pub(crate) mod android_buffer;
@@ -216,6 +218,7 @@ struct WgpuResources {
     path_intermediate_view: Option<wgpu::TextureView>,
     path_msaa_texture: Option<wgpu::Texture>,
     path_msaa_view: Option<wgpu::TextureView>,
+    presentation: Option<presentation::PresentationTarget>,
     backdrop_source_texture: Option<wgpu::Texture>,
     backdrop_source_view: Option<wgpu::TextureView>,
     backdrop_horizontal_texture: Option<wgpu::Texture>,
@@ -251,6 +254,7 @@ impl WgpuResources {
         self.path_intermediate_view = None;
         self.path_msaa_texture = None;
         self.path_msaa_view = None;
+        self.presentation = None;
         self.backdrop_source_texture = None;
         self.backdrop_source_view = None;
         self.backdrop_horizontal_texture = None;
@@ -557,10 +561,10 @@ impl WgpuRenderer {
             );
         }
 
-        let backdrop_blur_supported = surface_caps.usages.contains(wgpu::TextureUsages::COPY_SRC);
+        let surface_copy_supported = surface_caps.usages.contains(wgpu::TextureUsages::COPY_SRC);
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | if backdrop_blur_supported {
+                | if surface_copy_supported {
                     wgpu::TextureUsages::COPY_SRC
                 } else {
                     wgpu::TextureUsages::empty()
@@ -590,7 +594,7 @@ impl WgpuRenderer {
             atlas,
             transparent_alpha_mode,
             opaque_alpha_mode,
-            backdrop_blur_supported,
+            true,
             None,
         )
     }
@@ -758,6 +762,7 @@ impl WgpuRenderer {
             path_intermediate_view: None,
             path_msaa_texture: None,
             path_msaa_view: None,
+            presentation: None,
             backdrop_source_texture: None,
             backdrop_source_view: None,
             backdrop_horizontal_texture: None,
@@ -1841,6 +1846,7 @@ impl WgpuRenderer {
         }
         if self.unused_backdrop_frames >= 120 {
             let resources = self.resources_mut();
+            resources.presentation = None;
             resources.backdrop_source_texture = None;
             resources.backdrop_source_view = None;
             resources.backdrop_horizontal_texture = None;
@@ -2015,6 +2021,24 @@ impl WgpuRenderer {
         self.backdrop_blur_supported
     }
 
+    /// Whether this device can simulate and draw particles, including masked emission.
+    pub fn supports_gpu_particles(&self) -> bool {
+        !self.device_lost()
+            && self.resources.as_ref().is_some_and(|resources| {
+                simulation_capabilities::SimulationCapabilities::query(&resources.capture_context)
+                    .particles
+            })
+    }
+
+    /// Whether this device can simulate and draw the supported fluid grid sizes.
+    pub fn supports_gpu_fluid(&self) -> bool {
+        !self.device_lost()
+            && self.resources.as_ref().is_some_and(|resources| {
+                simulation_capabilities::SimulationCapabilities::query(&resources.capture_context)
+                    .fluid
+            })
+    }
+
     pub fn scene3d_support(&self) -> gpui::Scene3dSupport {
         if self.device_lost() {
             gpui::Scene3dSupport::Unsupported(gpui::Scene3dUnsupportedReason::DeviceLost)
@@ -2173,15 +2197,8 @@ impl WgpuRenderer {
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("main_encoder"),
                     });
-            let encoded = self.encode_scene(
-                scene,
-                &frame.texture,
-                &frame_view,
-                &mut encoder,
-                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                true,
-                &[],
-            );
+            let encoded =
+                self.encode_presented_scene(scene, &frame.texture, &frame_view, &mut encoder);
             if !matches!(encoded, Ok(SceneEncoding::Complete)) {
                 self.commit_encoded_scene(false);
                 self.commit_scene3d_outputs(false);
@@ -2935,6 +2952,8 @@ impl WgpuRenderer {
             });
         });
         scene.visit(&mut |scene| has_fluid |= !scene.fluids.is_empty());
+        has_particles &= self.supports_gpu_particles();
+        has_fluid &= self.supports_gpu_fluid();
         {
             let atlas = self.atlas.clone();
             let output_budget = self.scene3d_output_budget.clone();
@@ -3357,26 +3376,27 @@ impl WgpuRenderer {
                                     source_index = destination_index;
                                     continue;
                                 }
-                                let particle_draw = effect.particles.as_ref().map(|particles| {
-                                    let draw = particles::ParticleRenderer::masked_draw(
-                                        &layer.composite,
-                                        particles,
-                                    );
-                                    let resources = self.resources();
-                                    resources.particles.as_ref().unwrap().encode_masked(
-                                        &resources.device,
-                                        &resources.queue,
-                                        &draw,
-                                        particles.mask,
-                                        &source_view,
-                                        [
-                                            self.surface_config.width as f32,
-                                            self.surface_config.height as f32,
-                                        ],
-                                        encoder,
-                                    );
-                                    draw
-                                });
+                                let particle_draw =
+                                    effect.particles.as_ref().and_then(|particles| {
+                                        let draw = particles::ParticleRenderer::masked_draw(
+                                            &layer.composite,
+                                            particles,
+                                        );
+                                        let resources = self.resources();
+                                        resources.particles.as_ref()?.encode_masked(
+                                            &resources.device,
+                                            &resources.queue,
+                                            &draw,
+                                            particles.mask,
+                                            &source_view,
+                                            [
+                                                self.surface_config.width as f32,
+                                                self.surface_config.height as f32,
+                                            ],
+                                            encoder,
+                                        );
+                                        Some(draw)
+                                    });
                                 {
                                     let mut effect_pass =
                                         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

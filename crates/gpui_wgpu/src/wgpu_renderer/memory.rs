@@ -62,6 +62,9 @@ impl WgpuRenderer {
         {
             stats.backdrop_texture_bytes += texture_bytes(texture);
         }
+        if let Some(presentation) = &resources.presentation {
+            stats.backdrop_texture_bytes += texture_bytes(&presentation.texture);
+        }
         stats.subtree_texture_bytes += resources
             .subtree_textures
             .iter()

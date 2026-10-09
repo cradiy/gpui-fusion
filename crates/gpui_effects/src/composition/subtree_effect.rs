@@ -352,10 +352,14 @@ impl<E: Element> Element for SubtreeEffect<E> {
                     transition.scale_factor = window.raster_scale_factor();
                     transition
                 }),
-                particles: self.particles.clone().map(|mut particles| {
-                    particles.scale_factor = window.raster_scale_factor();
-                    particles
-                }),
+                particles: self
+                    .particles
+                    .clone()
+                    .filter(|_| window.supports_gpu_particles())
+                    .map(|mut particles| {
+                        particles.scale_factor = window.raster_scale_factor();
+                        particles
+                    }),
                 feedback: self.feedback.clone().map(|mut feedback| {
                     feedback.scale_factor = window.raster_scale_factor();
                     feedback

@@ -9,7 +9,7 @@ const DRAW: &str = concat!(
     include_str!("../particles.wgsl"),
     include_str!("../particles_draw.wgsl")
 );
-const MAX_MASK_SAMPLES: u32 = 131_072;
+pub(super) const MAX_MASK_SAMPLES: u32 = 131_072;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]

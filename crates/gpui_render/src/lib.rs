@@ -3,6 +3,9 @@
 #[cfg(feature = "native-shaders")]
 pub mod native;
 
+/// Pixel-preserving presentation from a copyable intermediate render target.
+pub const PRESENTATION_WGSL: &str = include_str!("presentation.wgsl");
+
 /// Separable backdrop blur and composition using a hardware linear sampler.
 pub const BACKDROP_BLUR_WGSL: &str = concat!(
     include_str!("backdrop_blur.wgsl"),

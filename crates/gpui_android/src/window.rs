@@ -809,6 +809,12 @@ impl PlatformWindow for AndroidWindowHandle {
     fn supports_subtree_effects(&self) -> bool {
         true
     }
+    fn supports_gpu_particles(&self) -> bool {
+        self.renderer.borrow().supports_gpu_particles()
+    }
+    fn supports_gpu_fluid(&self) -> bool {
+        self.renderer.borrow().supports_gpu_fluid()
+    }
     fn gpu_specs(&self) -> Option<GpuSpecs> {
         let renderer = self.renderer.borrow();
         (!renderer.device_lost()).then(|| renderer.gpu_specs())

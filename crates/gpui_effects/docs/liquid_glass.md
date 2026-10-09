@@ -222,6 +222,10 @@ redraws on interaction rather than running a continuous animation loop.
 
 Backdrop sampling is limited to previously painted content in the same window;
 it does not capture the desktop or another native window. Rendering requires
-backend support for custom backdrop shaders. Each surface adds backdrop capture
-and filtering work; share a surface where appropriate rather than painting
+backend support for custom backdrop shaders. Android uses the same `LiquidGlass`
+API without additional host modules or permissions. When a native WGPU window
+surface cannot be copied, frames containing backdrop effects use a copyable GPU
+render target and a final presentation pass. No CPU pixel readback is involved.
+
+Each surface adds backdrop capture and filtering work; share a surface where appropriate rather than painting
 many redundant overlapping materials. `FrostedGlass` remains a separate material.

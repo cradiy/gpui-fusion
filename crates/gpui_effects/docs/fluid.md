@@ -97,7 +97,8 @@ let surface = subtree_effect_chain(
 );
 ```
 
-Linux WGPU and macOS Metal support GPU fluid without an extra Cargo feature.
+GPU fluid does not require an extra Cargo feature. On Android, availability follows
+the active WGPU device's compute, storage-buffer and fragment-stage capabilities.
 Check `window.supports_gpu_fluid()` before offering the effect; unsupported
 renderers draw no surface.
 

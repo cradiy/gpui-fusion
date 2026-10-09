@@ -16,6 +16,7 @@ pub mod glass;
 pub mod input;
 pub mod modal;
 pub mod notification;
+pub mod number_input;
 mod overlay_anchor;
 pub mod pager;
 pub mod popover;

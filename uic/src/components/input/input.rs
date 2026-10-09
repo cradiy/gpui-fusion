@@ -14,6 +14,7 @@ pub struct Input {
     appearance: InputAppearance,
     configure_scrollbar: Option<Box<dyn FnOnce(Scrollbar) -> Scrollbar>>,
     rows: Option<usize>,
+    blur_on_click_outside: bool,
     style: StyleRefinement,
 }
 
@@ -28,8 +29,16 @@ impl Input {
             appearance: InputAppearance::default(),
             configure_scrollbar: None,
             rows: None,
+            blur_on_click_outside: true,
             style: StyleRefinement::default(),
         }
+    }
+
+    /// Clears focus on a primary click outside the complete input surface.
+    /// Disable this when a containing composite manages its own focus boundary.
+    pub fn blur_on_click_outside(mut self, enabled: bool) -> Self {
+        self.blur_on_click_outside = enabled;
+        self
     }
 
     pub fn prefix(mut self, prefix: impl IntoElement) -> Self {
@@ -82,6 +91,7 @@ impl RenderOnce for Input {
                 state.scrollbar_state.clone(),
             )
         };
+        let outside_focus = focus_handle.clone();
         let scrollbar_id = ("uic-input-scrollbar", self.state.entity_id());
 
         let row_height = self
@@ -117,6 +127,13 @@ impl RenderOnce for Input {
                 CursorStyle::Arrow
             } else {
                 CursorStyle::IBeam
+            })
+            .when(self.blur_on_click_outside, |input| {
+                input.on_mouse_down_out(move |event, window, _| {
+                    if event.button == MouseButton::Left && outside_focus.is_focused(window) {
+                        window.blur();
+                    }
+                })
             })
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 if !disabled {
@@ -158,5 +175,84 @@ impl RenderOnce for Input {
 impl Styled for Input {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{Context, Focusable, Render, TestAppContext, VisualTestContext, point, size};
+
+    struct Example {
+        first: Entity<TextInput>,
+        second: Entity<TextInput>,
+        clicks: usize,
+    }
+    impl Render for Example {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .p_4()
+                .flex()
+                .flex_col()
+                .gap_4()
+                .child(
+                    Input::new(&self.first)
+                        .w(px(280.))
+                        .suffix(div().w(px(32.)).child("px")),
+                )
+                .child(Input::new(&self.second).w(px(280.)))
+                .child(
+                    div()
+                        .id("action")
+                        .w(px(280.))
+                        .h(px(44.))
+                        .child("Action")
+                        .on_click(cx.listener(|this, _, _, _| this.clicks += 1)),
+                )
+        }
+    }
+    fn draw(cx: &mut VisualTestContext) {
+        cx.update(|window, cx| window.draw(cx).clear());
+    }
+
+    #[gpui::test]
+    fn outside_click_blurs_without_consuming_target_or_blurring_suffix(cx: &mut TestAppContext) {
+        let view = cx.open_window(size(px(400.), px(300.)), |_, cx| Example {
+            first: cx.new(|cx| TextInput::new(cx).initial_value("First")),
+            second: cx.new(TextInput::new),
+            clicks: 0,
+        });
+        let mut visual = VisualTestContext::from_window(view.into(), cx);
+        visual.update(|window, _| window.activate_window());
+        visual.run_until_parked();
+        draw(&mut visual);
+        visual.simulate_click(point(px(80.), px(38.)), Default::default());
+        draw(&mut visual);
+        visual.simulate_click(point(px(267.), px(38.)), Default::default());
+        draw(&mut visual);
+        view.update(&mut visual.cx, |this, window, cx| {
+            assert!(this.first.focus_handle(cx).is_focused(window))
+        })
+        .unwrap();
+        visual.simulate_click(point(px(350.), px(250.)), Default::default());
+        draw(&mut visual);
+        visual.update(|window, cx| assert!(window.focused(cx).is_none()));
+        visual.simulate_click(point(px(80.), px(38.)), Default::default());
+        draw(&mut visual);
+        visual.simulate_click(point(px(80.), px(98.)), Default::default());
+        draw(&mut visual);
+        view.update(&mut visual.cx, |this, window, cx| {
+            assert!(this.second.focus_handle(cx).is_focused(window))
+        })
+        .unwrap();
+        visual.simulate_click(point(px(80.), px(158.)), Default::default());
+        draw(&mut visual);
+        view.update(&mut visual.cx, |this, window, cx| {
+            assert!(window.focused(cx).is_none());
+            assert_eq!(this.clicks, 1);
+            assert_eq!(this.first.read(cx).value().as_ref(), "First");
+        })
+        .unwrap();
     }
 }

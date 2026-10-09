@@ -159,4 +159,15 @@ fn outside_click_and_escape_allow_reopening(cx: &mut TestAppContext) {
         );
     })
     .unwrap();
+    open_popup(&mut cx);
+    cx.simulate_click(point(px(80.), px(140.)), Default::default());
+    draw(&mut cx);
+    view.update(&mut cx.cx, |this, _, cx| {
+        assert!(!this.select.read(cx).is_open());
+        assert_eq!(
+            this.select.read(cx).selected_id().map(|id| id.as_ref()),
+            Some("a")
+        );
+    })
+    .unwrap();
 }

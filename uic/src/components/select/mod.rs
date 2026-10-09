@@ -424,6 +424,7 @@ fn panel(
     if searchable {
         root = root.child(
             Input::new(&search)
+                .blur_on_click_outside(false)
                 .flex_shrink_0()
                 .w_full()
                 .h(px(40.))

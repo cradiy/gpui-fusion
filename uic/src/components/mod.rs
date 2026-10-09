@@ -25,6 +25,7 @@ pub mod refresh;
 pub mod reorderable_list;
 pub mod screen_color_picker;
 pub mod scrollbar;
+pub mod select;
 pub mod selection;
 pub mod slider;
 pub mod swipe_actions;

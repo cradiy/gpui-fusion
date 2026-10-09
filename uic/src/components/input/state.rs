@@ -558,6 +558,11 @@ impl TextInput {
         self
     }
 
+    /// Whether the input method currently owns a pre-edit range.
+    pub fn is_composing(&self) -> bool {
+        self.marked_range.is_some()
+    }
+
     pub fn value(&self) -> SharedString {
         self.content.clone()
     }

@@ -9,6 +9,7 @@ pub fn included(path: &str, platform: &Platform) -> bool {
         .and_then(|s| s.to_str())
         .unwrap_or_default()
     {
+        "network-security.gradle.kts" => return false,
         "FilePickerHost.kt"
         | "SelectedDocument.kt"
         | "SelectedDirectory.kt"

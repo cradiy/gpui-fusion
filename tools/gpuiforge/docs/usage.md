@@ -186,6 +186,52 @@ permissions remain explicit in `permissions`. Its Android verifier version is
 resolved from the application's Cargo dependencies during the Gradle build.
 See [HTTPS setup](../../../crates/gpui_android/docs/hosting.md#https).
 
+To allow HTTP through Android networking components, set `cleartext-traffic`:
+
+```json
+{
+  "platforms": {
+    "android": {
+      "features": ["network"],
+      "cleartext-traffic": true
+    }
+  }
+}
+```
+
+To allow only specific hosts, use `cleartext-domains` instead:
+
+```json
+{
+  "platforms": {
+    "android": {
+      "features": ["network"],
+      "cleartext-domains": ["cloud.cradiy.org", "192.168.1.10", "[2001:db8::1]"]
+    }
+  }
+}
+```
+
+Entries are exact ASCII DNS names or IP addresses. Do not include `http://`,
+ports, paths, wildcards or CIDR ranges. All ports on a listed host are allowed;
+list subdomains separately. IPv6 addresses use brackets as in a URL host.
+`cleartext-domains` cannot be combined with `cleartext-traffic: true`.
+The `network` module's certificate revocation exceptions are preserved from its
+resolved Android library during the Gradle build; other hosts remain restricted.
+
+`cleartext-traffic: true` permits cleartext traffic to all destinations. GPUiForge generates an
+application Network Security Config, including when the `network` module supplies
+its own certificate-verification configuration. HTTPS certificate checks remain
+enabled. Set the field to `false` or omit it to remove the global opt-in; the
+verifier's HTTP exceptions for certificate revocation lists remain available.
+Run `gpuiforge sync` and rebuild the APK after changing the setting.
+
+HTTP uses the same `INTERNET` permission as HTTPS and has no runtime permission
+prompt. Without the `network` module, declare `INTERNET` in `permissions`.
+This setting applies to Android components and clients that honor the platform
+network policy. Native socket clients such as reqwest are not restricted by it;
+applications can apply their own URL policy when needed.
+
 `icon` sets the application and launcher icon. `notification-icon` sets the default
 small icon for general, media and data-sync notifications; it requires one of those
 features. Both paths resolve relative to `gpuiforge.json` and accept PNG, WebP or

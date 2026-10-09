@@ -154,6 +154,44 @@ fn synchronize(project: &Project, name: &str, check: bool) -> Result<PathBuf> {
         collect(&copy.from, &copy.to, None, &mut files)?;
     }
     if platform.bundled {
+        if platform.cleartext_traffic == Some(true) || !platform.cleartext_domains.is_empty() {
+            let resource = PathBuf::from("app/src/main/res/xml/network_security_config.xml");
+            ensure!(
+                !files.contains_key(&resource),
+                "cleartext settings conflict with a copied network_security_config.xml"
+            );
+            let path = if platform.merge_network_config() {
+                PathBuf::from("app/network-security-config.xml")
+            } else {
+                resource
+            };
+            let mut xml = format!(
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<network-security-config>\n    <base-config cleartextTrafficPermitted=\"{}\" />\n",
+                platform.cleartext_traffic == Some(true)
+            );
+            if !platform.cleartext_domains.is_empty() {
+                xml.push_str("    <domain-config cleartextTrafficPermitted=\"true\">\n");
+                for host in &platform.cleartext_domains {
+                    xml.push_str(&format!(
+                        "        <domain includeSubdomains=\"false\">{host}</domain>\n"
+                    ));
+                }
+                xml.push_str("    </domain-config>\n");
+            }
+            xml.push_str("</network-security-config>\n");
+            ensure!(
+                files
+                    .insert(
+                        path,
+                        File {
+                            bytes: xml.into_bytes(),
+                            permissions: None
+                        }
+                    )
+                    .is_none(),
+                "cleartext settings conflict with a copied network-security-config.xml"
+            );
+        }
         if platform.notification_icon.is_some() {
             let path = PathBuf::from("app/src/main/res/raw/gpui_notification_keep.xml");
             ensure!(

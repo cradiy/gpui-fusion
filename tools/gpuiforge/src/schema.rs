@@ -94,6 +94,8 @@ pub fn text(recipe: bool) -> Result<String> {
         "notification-icon",
         "inset-handling",
         "permissions",
+        "cleartext-traffic",
+        "cleartext-domains",
         "signing",
         "url-schemes",
         "share-mime-types",

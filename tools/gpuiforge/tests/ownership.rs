@@ -196,6 +196,7 @@ fn sync_prunes_disabled_modules_and_icons() {
         "data-sync",
         "background-media"
       ],
+      "cleartext-traffic": true,
       "permissions": ["android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_DATA_SYNC", "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"],
       "icon": "icon.xml",
       "notification-icon": "icon.xml"
@@ -229,6 +230,57 @@ fn sync_prunes_disabled_modules_and_icons() {
             .unwrap()
             .contains("android.permission.INTERNET")
     );
+    assert!(
+        fs::read_to_string(output.join("app/src/main/AndroidManifest.xml"))
+            .unwrap()
+            .contains("android:networkSecurityConfig=\"@xml/network_security_config\"")
+    );
+    assert!(
+        fs::read_to_string(output.join("app/src/main/res/xml/network_security_config.xml"))
+            .unwrap()
+            .contains("<base-config cleartextTrafficPermitted=\"true\" />")
+    );
+    let mut restricted: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+    restricted["platforms"]["android"]
+        .as_object_mut()
+        .unwrap()
+        .remove("cleartext-traffic");
+    restricted["platforms"]["android"]["cleartext-domains"] =
+        serde_json::json!(["Cloud.Example.com", "192.168.1.10", "[2001:db8::1]"]);
+    fs::write(&config, serde_json::to_vec(&restricted).unwrap()).unwrap();
+    app.ok(&["sync"]);
+    assert!(
+        !output
+            .join("app/src/main/res/xml/network_security_config.xml")
+            .exists()
+    );
+    let policy = fs::read_to_string(output.join("app/network-security-config.xml")).unwrap();
+    assert!(policy.contains("cleartextTrafficPermitted=\"false\""));
+    assert!(policy.contains("includeSubdomains=\"false\">cloud.example.com</domain>"));
+    assert!(policy.contains(">192.168.1.10</domain>"));
+    assert!(policy.contains(">[2001:db8::1]</domain>"));
+    assert!(
+        fs::read_to_string(output.join("app/build.gradle.kts"))
+            .unwrap()
+            .contains("NetworkSecurity")
+    );
+    for invalid in [
+        "http://example.com",
+        "example.com:80",
+        "*.example.com",
+        "192.168.0.0/16",
+        "example.com/<xml>",
+    ] {
+        restricted["platforms"]["android"]["cleartext-domains"] = serde_json::json!([invalid]);
+        fs::write(&config, serde_json::to_vec(&restricted).unwrap()).unwrap();
+        assert!(!app.run(&["sync"]).status.success());
+        assert_eq!(
+            fs::read_to_string(output.join("app/network-security-config.xml")).unwrap(),
+            policy
+        );
+    }
+    let modified = fs::metadata(&state).unwrap().modified().unwrap();
     let host = output.join("host/src/main/kotlin/dev/gpui/android");
     assert!(host.join("FileStore.kt").exists());
     assert!(host.join("ClipboardImage.kt").exists());
@@ -320,7 +372,19 @@ fn sync_prunes_disabled_modules_and_icons() {
             .unwrap()
             .contains("android.permission.INTERNET")
     );
+    assert!(!output.join("app/network-security-config.xml").exists());
+    assert!(!output.join("app/network-security.gradle.kts").exists());
     assert!(host.join("ClipboardSnapshot.kt").exists());
+    assert!(
+        !output
+            .join("app/src/main/res/xml/network_security_config.xml")
+            .exists()
+    );
+    assert!(
+        !fs::read_to_string(output.join("app/src/main/AndroidManifest.xml"))
+            .unwrap()
+            .contains("android:networkSecurityConfig")
+    );
     let manifest = fs::read_to_string(output.join("host/src/main/AndroidManifest.xml")).unwrap();
     assert!(!manifest.contains("<receiver"));
     assert!(!manifest.contains("<provider"));

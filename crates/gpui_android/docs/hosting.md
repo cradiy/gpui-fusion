@@ -114,6 +114,12 @@ version, starting with `rustls-platform-verifier` 0.7.1 in the 0.7 series.
 `INTERNET` requires no runtime permission prompt. Reading system trust settings
 does not require storage permission.
 
+For HTTP endpoints used by Android networking components, set
+`"cleartext-traffic": true` alongside `features` in `platforms.android`, then
+rebuild the APK. This permits HTTP to all destinations without disabling HTTPS
+certificate verification. To allow specific hosts instead, use
+`"cleartext-domains": ["cloud.example.com", "192.168.1.10"]`. See [HTTP configuration](../../../tools/gpuiforge/docs/usage.md#android-host-features-and-icons).
+
 With the Rust feature and host module disabled, the verifier initialization and
 its dedicated dependencies are omitted. Other dependencies, such as reqwest,
 may independently select their own TLS backend.

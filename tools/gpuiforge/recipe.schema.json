@@ -210,6 +210,19 @@
       },
       "type": "array"
     },
+    "cleartext-domains": {
+      "default": [],
+      "description": "Exact hosts allowed to use HTTP while other destinations keep the default Android policy. Accepts ASCII DNS names, IPv4 addresses and bracketed IPv6 addresses, for example cloud.example.com, 192.168.1.10 or [2001:db8::1]. Do not include a scheme, port, path, wildcard or CIDR range. Subdomains must be listed separately; all ports on each host are allowed. Defaults to empty. Cannot be combined with cleartext-traffic: true. The network module's certificate revocation exceptions remain available. Requires the bundled Android template and INTERNET permission.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "cleartext-traffic": {
+      "description": "Allow cleartext HTTP to all destinations through Android networking components. Defaults to no global opt-in. True generates a Network Security Config that also overrides the network verifier's restrictive base policy. False or omission keeps dependency-provided certificate revocation exceptions. Requires the bundled Android template. INTERNET is still required (included by network). Does not weaken HTTPS certificate verification or enforce policy on raw Rust sockets.",
+      "type": "boolean"
+    },
     "copies": {
       "description": "Extra file or directory copies into the generated native project. Contents are copied verbatim, including binary assets, without template expansion. Duplicate destinations and symlinks are rejected. Application arrays replace recipe copies; use icon and notification-icon for ordinary Android icons.",
       "items": {

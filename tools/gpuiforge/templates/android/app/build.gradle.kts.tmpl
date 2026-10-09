@@ -1,4 +1,11 @@
 import java.util.Properties
+import java.util.zip.ZipFile
+import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.transform.TransformerFactory
+import javax.xml.transform.dom.DOMSource
+import javax.xml.transform.stream.StreamResult
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.w3c.dom.Element
 
 plugins { id("com.android.application") }
 
@@ -56,3 +63,5 @@ for (profile in listOf("debug", "release")) {
 }
 
 dependencies { implementation(project(":host")) }
+
+{{android_network_config}}

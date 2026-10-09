@@ -97,6 +97,11 @@ pub struct Platform {
     /// Fully qualified Android permission names written as uses-permission entries in the bundled Manifest, for example android.permission.INTERNET. Defaults to empty; duplicates are removed. Modules do not grant or request runtime permissions automatically. Runtime authorization remains the application's responsibility.
     #[serde(default)]
     pub permissions: Vec<String>,
+    /// Allow cleartext HTTP to all destinations through Android networking components. Defaults to no global opt-in. True generates a Network Security Config that also overrides the network verifier's restrictive base policy. False or omission keeps dependency-provided certificate revocation exceptions. Requires the bundled Android template. INTERNET is still required (included by network). Does not weaken HTTPS certificate verification or enforce policy on raw Rust sockets.
+    pub cleartext_traffic: Option<bool>,
+    /// Exact hosts allowed to use HTTP while other destinations keep the default Android policy. Accepts ASCII DNS names, IPv4 addresses and bracketed IPv6 addresses, for example cloud.example.com, 192.168.1.10 or [2001:db8::1]. Do not include a scheme, port, path, wildcard or CIDR range. Subdomains must be listed separately; all ports on each host are allowed. Defaults to empty. Cannot be combined with cleartext-traffic: true. The network module's certificate revocation exceptions remain available. Requires the bundled Android template and INTERNET permission.
+    #[serde(default)]
+    pub cleartext_domains: BTreeSet<String>,
     /// Lowercase custom URI schemes delivered through Application::on_open_urls, for example myapp. Defaults to empty; duplicates are removed. Bundled templates generate VIEW/DEFAULT/BROWSABLE intent filters. HTTP(S) App Links and file/content URI handlers require a custom Manifest.
     #[serde(default)]
     pub url_schemes: Vec<String>,
@@ -130,6 +135,10 @@ pub enum AndroidFeature {
     BackgroundMedia,
 }
 impl Platform {
+    pub fn merge_network_config(&self) -> bool {
+        self.feature(AndroidFeature::Network) && !self.cleartext_domains.is_empty()
+    }
+
     pub fn feature(&self, feature: AndroidFeature) -> bool {
         self.features.contains(&feature)
             || (feature == AndroidFeature::MediaNotifications
@@ -326,8 +335,10 @@ impl Project {
                     bundled
                         || (platform.features.is_empty()
                             && platform.icon.is_none()
-                            && platform.notification_icon.is_none()),
-                    "features, icon and notification-icon require the bundled Android template"
+                            && platform.notification_icon.is_none()
+                            && platform.cleartext_traffic.is_none()
+                            && platform.cleartext_domains.is_empty()),
+                    "features, icons and cleartext settings require the bundled Android template"
                 );
                 ensure!(
                     !bundled
@@ -342,6 +353,38 @@ impl Project {
                         || platform.feature(AndroidFeature::DataSync),
                     "notification-icon requires notifications, media-notifications or data-sync"
                 );
+                ensure!(
+                    platform.cleartext_traffic != Some(true)
+                        || platform.cleartext_domains.is_empty(),
+                    "cleartext-domains cannot be combined with cleartext-traffic: true"
+                );
+                for host in &platform.cleartext_domains {
+                    let ipv6 = host.strip_prefix('[').and_then(|s| s.strip_suffix(']'));
+                    let valid = if let Some(ip) = ipv6 {
+                        ip.parse::<std::net::Ipv6Addr>().is_ok()
+                    } else if host.chars().all(|c| c.is_ascii_digit() || c == '.') {
+                        host.parse::<std::net::Ipv4Addr>().is_ok()
+                    } else {
+                        !host.is_empty()
+                            && host.len() <= 253
+                            && host.split('.').all(|label| {
+                                !label.is_empty()
+                                    && label.len() <= 63
+                                    && label.starts_with(|c: char| c.is_ascii_alphanumeric())
+                                    && label.ends_with(|c: char| c.is_ascii_alphanumeric())
+                                    && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+                            })
+                    };
+                    ensure!(
+                        valid,
+                        "invalid cleartext host {host:?}: use a DNS name, IPv4 or bracketed IPv6 address without a scheme, port, path or wildcard"
+                    );
+                }
+                platform.cleartext_domains = platform
+                    .cleartext_domains
+                    .iter()
+                    .map(|s| s.to_ascii_lowercase())
+                    .collect();
                 for permission in &platform.permissions {
                     ensure!(
                         permission.contains('.')
@@ -453,11 +496,13 @@ impl Project {
                         && platform.features.is_empty()
                         && platform.icon.is_none()
                         && platform.notification_icon.is_none()
+                        && platform.cleartext_traffic.is_none()
+                        && platform.cleartext_domains.is_empty()
                         && platform.inset_handling.is_none()
                         && platform.signing.is_none()
                         && platform.url_schemes.is_empty()
                         && platform.share_mime_types.is_empty(),
-                    "features, icons, inset-handling, permissions, signing, url-schemes and share-mime-types are Android-only settings"
+                    "features, icons, cleartext settings, inset-handling, permissions, signing, url-schemes and share-mime-types are Android-only settings"
                 );
             }
             platforms.insert(name, platform);
@@ -547,6 +592,23 @@ impl Project {
                 .into_iter()
                 .map(|name| format!("    <uses-permission android:name=\"{name}\" />\n"))
                 .collect(),
+        );
+        vars.insert(
+            "android_cleartext".into(),
+            match p.cleartext_traffic {
+                _ if !p.cleartext_domains.is_empty() => "android:usesCleartextTraffic=\"false\" android:networkSecurityConfig=\"@xml/network_security_config\"".into(),
+                Some(true) => "android:usesCleartextTraffic=\"true\" android:networkSecurityConfig=\"@xml/network_security_config\"".into(),
+                Some(false) => "android:usesCleartextTraffic=\"false\"".into(),
+                None => String::new(),
+            },
+        );
+        vars.insert(
+            "android_network_config".into(),
+            if p.merge_network_config() {
+                include_str!("../templates/android/app/network-security.gradle.kts").into()
+            } else {
+                String::new()
+            },
         );
         vars.insert("android_icon".into(), if p.icon.is_some() { "android:icon=\"@drawable/gpui_app_icon\" android:roundIcon=\"@drawable/gpui_app_icon\"".into() } else { String::new() });
         if let Some(id) = &p.application_id {

@@ -37,10 +37,18 @@ pub struct SelectChanged {
     pub selected: Option<SharedString>,
 }
 
-/// Retained options, selection and query for one Select trigger.
+/// Emitted when a multiple selection changes, in selection order.
+#[derive(Clone, Debug)]
+pub struct MultiSelectChanged {
+    pub selected: Vec<SharedString>,
+}
+
+/// Retained options, selection and query for one Select or MultiSelect trigger.
 pub struct SelectState {
     pub(super) options: Vec<SelectOption>,
-    selected: Option<SharedString>,
+    selected: Vec<SharedString>,
+    pub(super) multiple: bool,
+    limit: Option<usize>,
     pub(super) query: String,
     pub(super) search: Entity<TextInput>,
     pub(super) active: Option<SharedString>,
@@ -54,6 +62,7 @@ pub struct SelectState {
     _subscriptions: Vec<Subscription>,
 }
 impl EventEmitter<SelectChanged> for SelectState {}
+impl EventEmitter<MultiSelectChanged> for SelectState {}
 impl Focusable for SelectState {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.trigger_focus.clone()
@@ -99,7 +108,9 @@ impl SelectState {
         ];
         Self {
             options,
-            selected: None,
+            selected: Vec::new(),
+            multiple: false,
+            limit: Some(1),
             query: String::new(),
             search,
             active: None,
@@ -113,13 +124,42 @@ impl SelectState {
             _subscriptions: subscriptions,
         }
     }
+    pub fn multiple(
+        options: Vec<SelectOption>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut state = Self::new(options, window, cx);
+        state.multiple = true;
+        state.limit = None;
+        state
+    }
+    /// Limits the number of selected IDs in a multiple-selection state.
+    pub fn max_selected(mut self, maximum: usize) -> Self {
+        assert!(self.multiple, "max_selected requires SelectState::multiple");
+        assert!(
+            self.selected.len() <= maximum,
+            "selection exceeds max_selected"
+        );
+        self.limit = Some(maximum);
+        self
+    }
+    pub fn selection_limit(&self) -> Option<usize> {
+        self.limit
+    }
+    pub fn selected_ids(&self) -> &[SharedString] {
+        &self.selected
+    }
+    pub fn is_selected(&self, id: &str) -> bool {
+        self.selected.iter().any(|selected| selected == id)
+    }
     pub fn selected_id(&self) -> Option<&SharedString> {
-        self.selected.as_ref()
+        self.selected.first()
     }
     pub fn selected_option(&self) -> Option<&SelectOption> {
         self.options
             .iter()
-            .find(|item| Some(&item.id) == self.selected.as_ref())
+            .find(|item| Some(&item.id) == self.selected.first())
     }
     pub fn is_open(&self) -> bool {
         self.opened
@@ -127,22 +167,21 @@ impl SelectState {
     pub fn options(&self) -> &[SelectOption] {
         &self.options
     }
-    /// Replaces options, preserving selection by ID. Removing that ID clears the selection.
+    /// Replaces options, retaining selected IDs that still exist.
     pub fn set_options(&mut self, options: Vec<SelectOption>, cx: &mut Context<Self>) {
         validate(&options);
         self.options = options;
-        if self
-            .selected
-            .as_ref()
-            .is_some_and(|id| !self.options.iter().any(|item| &item.id == id))
-        {
-            self.clear(cx);
+        let previous = self.selected.len();
+        self.selected
+            .retain(|id| self.options.iter().any(|item| &item.id == id));
+        if self.selected.len() != previous {
+            self.changed(cx);
         }
         self.reconcile();
         self.reveal();
         cx.notify();
     }
-    /// Selects an enabled option. Returns false if the ID is absent or disabled.
+    /// Selects an enabled option, or adds it in multiple mode. Returns false if unavailable or full.
     pub fn select(&mut self, id: &str, cx: &mut Context<Self>) -> bool {
         let Some(option) = self
             .options
@@ -152,19 +191,88 @@ impl SelectState {
             return false;
         };
         let id = option.id.clone();
-        if self.selected.as_ref() != Some(&id) {
-            self.selected = Some(id);
-            cx.emit(SelectChanged {
-                selected: self.selected.clone(),
-            });
-            cx.notify();
+        if self.is_selected(&id) {
+            return true;
+        }
+        if self.multiple {
+            if self.at_limit() {
+                return false;
+            }
+            self.selected.push(id);
+        } else {
+            self.selected = vec![id];
+        }
+        self.changed(cx);
+        true
+    }
+    /// Removes an ID, including an option that has become disabled.
+    pub fn deselect(&mut self, id: &str, cx: &mut Context<Self>) -> bool {
+        let Some(index) = self.selected.iter().position(|selected| selected == id) else {
+            return false;
+        };
+        self.selected.remove(index);
+        self.changed(cx);
+        true
+    }
+    /// Atomically replaces selection with unique, enabled IDs within the limit.
+    pub fn set_selected_ids(&mut self, ids: Vec<SharedString>, cx: &mut Context<Self>) -> bool {
+        let unique: std::collections::HashSet<_> = ids.iter().collect();
+        if unique.len() != ids.len()
+            || self.limit.is_some_and(|limit| ids.len() > limit)
+            || ids.iter().any(|id| {
+                !self
+                    .options
+                    .iter()
+                    .any(|item| &item.id == id && !item.disabled)
+            })
+        {
+            return false;
+        }
+        if self.selected != ids {
+            self.selected = ids;
+            self.changed(cx);
         }
         true
     }
     pub fn clear(&mut self, cx: &mut Context<Self>) {
-        if self.selected.take().is_some() {
-            cx.emit(SelectChanged { selected: None });
-            cx.notify();
+        if !self.selected.is_empty() {
+            self.selected.clear();
+            self.changed(cx);
+        }
+    }
+    fn changed(&mut self, cx: &mut Context<Self>) {
+        if self.multiple {
+            cx.emit(MultiSelectChanged {
+                selected: self.selected.clone(),
+            });
+        } else {
+            cx.emit(SelectChanged {
+                selected: self.selected.first().cloned(),
+            });
+        }
+        self.reconcile();
+        cx.notify();
+    }
+    pub(super) fn at_limit(&self) -> bool {
+        self.limit.is_some_and(|limit| self.selected.len() >= limit)
+    }
+    pub(super) fn unavailable(&self, option: &SelectOption) -> bool {
+        option.disabled || (self.multiple && self.at_limit() && !self.is_selected(&option.id))
+    }
+    pub(super) fn choose(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.disabled
+            || self
+                .options
+                .iter()
+                .find(|item| item.id == id)
+                .is_none_or(|item| item.disabled)
+        {
+            return;
+        }
+        if self.multiple && self.is_selected(id) {
+            self.deselect(id, cx);
+        } else if self.select(id, cx) && !self.multiple {
+            self.close(window, cx);
         }
     }
     pub fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -183,7 +291,7 @@ impl SelectState {
     pub(super) fn begin(&mut self, cx: &mut Context<Self>) {
         self.query.clear();
         self.search.update(cx, |input, cx| input.clear(cx));
-        self.active = self.selected.clone();
+        self.active = self.selected.first().cloned();
         self.reconcile();
         self.scroll.set_offset(Default::default());
         self.reveal();
@@ -205,11 +313,11 @@ impl SelectState {
     fn reconcile(&mut self) {
         let visible = self.visible();
         if !visible.iter().any(|&i| {
-            !self.options[i].disabled && self.active.as_ref() == Some(&self.options[i].id)
+            !self.unavailable(&self.options[i]) && self.active.as_ref() == Some(&self.options[i].id)
         }) {
             self.active = visible
                 .into_iter()
-                .find(|&i| !self.options[i].disabled)
+                .find(|&i| !self.unavailable(&self.options[i]))
                 .map(|i| self.options[i].id.clone());
         }
     }
@@ -226,7 +334,7 @@ impl SelectState {
         let ids: Vec<_> = self
             .visible()
             .into_iter()
-            .filter(|&i| !self.options[i].disabled)
+            .filter(|&i| !self.unavailable(&self.options[i]))
             .map(|i| self.options[i].id.clone())
             .collect();
         if ids.is_empty() {
@@ -246,9 +354,8 @@ impl SelectState {
         if !self.disabled
             && self.is_open()
             && let Some(id) = self.active.clone()
-            && self.select(&id, cx)
         {
-            self.close(window, cx);
+            self.choose(&id, window, cx);
         }
     }
 }

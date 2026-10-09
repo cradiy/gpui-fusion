@@ -1,5 +1,8 @@
 use gpui::{prelude::*, *};
-use uic::components::pager::{PageChanged, Pager, PagerState};
+use uic::components::{
+    pager::{PageChanged, Pager, PagerState},
+    tabs::{TabVariant, Tabs},
+};
 
 const PAGES: [(&str, &str, &str, u32); 3] = [
     (
@@ -214,38 +217,21 @@ impl Render for Example {
                                     .child("Swipe between pages. Each page keeps its place."),
                             ),
                     )
-                    .child(div().flex_shrink_0().flex().gap_2().children(
-                        PAGES.iter().enumerate().map(|(index, (name, _, _, _))| {
-                            let state = self.pager.clone();
-                            div()
-                                .id(("tab", index))
-                                .role(Role::Button)
-                                .cursor_pointer()
-                                .flex_1()
-                                .min_w_0()
-                                .py_3()
-                                .rounded_xl()
-                                .flex()
-                                .justify_center()
-                                .text_sm()
-                                .bg(rgb(if index == selected {
-                                    0x23314a
-                                } else {
-                                    0xe7ecf3
-                                }))
-                                .text_color(rgb(if index == selected {
-                                    0xffffff
-                                } else {
-                                    0x758299
-                                }))
-                                .on_click(move |_, _, cx| {
+                    .child({
+                        let state = self.pager.clone();
+                        PAGES.iter().enumerate().fold(
+                            Tabs::new("page-tabs", selected)
+                                .label("Workspace pages")
+                                .variant(TabVariant::Pill)
+                                .flex_shrink_0()
+                                .on_change(move |index, _, cx| {
                                     state.update(cx, |state, cx| {
                                         state.scroll_to(index, cx);
                                     });
-                                })
-                                .child(*name)
-                        }),
-                    ))
+                                }),
+                            |tabs, (index, (name, _, _, _))| tabs.tab(index, *name),
+                        )
+                    })
                     .child(
                         Pager::new("workspace", &self.pager, move |index, _, _| {
                             pages[index].clone()

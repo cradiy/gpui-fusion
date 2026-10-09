@@ -40,6 +40,9 @@ completion event. Subscribe to it to update a separately rendered tab bar or pag
 indicator. Calling `scroll_to` during an animation continues from its displayed
 position.
 
+Use [Tabs](tabs.md) for a keyboard-accessible tab bar; the interactive example
+connects its selection callback to `scroll_to`.
+
 `set_page_count(count, cx)` updates the number of pages, clamps the selection and
 cancels motion. For a resizable application, pages follow the viewport dimensions;
 resizing during a drag cancels that gesture.

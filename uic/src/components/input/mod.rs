@@ -91,8 +91,8 @@ pub(crate) fn row_height(
     line_height * rows.max(1) as f32 + padding_top + padding_bottom + border_top + border_bottom
 }
 
-pub(crate) use actions::Submit;
 pub use actions::init;
+pub(crate) use actions::{Backspace, Delete, Left, Right, Submit};
 pub use appearance::InputAppearance;
 pub use input::Input;
 pub use read_only::ReadOnlyInput;

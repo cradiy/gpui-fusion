@@ -548,7 +548,7 @@ class GpuiSession : AutoCloseable {
     }
     internal fun touch(pointer: Int, phase: Int, x: Float, y: Float) =
         id != 0L && nativeTouch(id, pointer, phase, x, y)
-    internal fun tap(x: Float, y: Float) { if (id != 0L) nativeTap(id, x, y) }
+    internal fun tap(x: Float, y: Float, count: Int) { if (id != 0L) nativeTap(id, x, y, count) }
     internal fun focusTextInput(x: Float, y: Float): Boolean {
         checkThread()
         return !closed && id != 0L && nativeFocusTextInput(id, x, y)
@@ -1020,7 +1020,7 @@ class GpuiSession : AutoCloseable {
         @JvmStatic private external fun nativeTouch(id: Long, pointer: Int, phase: Int, x: Float, y: Float): Boolean
         @JvmStatic private external fun nativePinch(id: Long, phase: Int, x: Float, y: Float, delta: Float)
         @JvmStatic private external fun nativeLongPress(id: Long, x: Float, y: Float): Boolean
-        @JvmStatic private external fun nativeTap(id: Long, x: Float, y: Float)
+        @JvmStatic private external fun nativeTap(id: Long, x: Float, y: Float, count: Int)
         @JvmStatic private external fun nativeOpenUrl(id: Long, url: String)
         @JvmStatic private external fun nativeReceiveShare(id: Long, text: String?, mime: String?, documents: Array<out Any>, error: String?)
         @JvmStatic private external fun nativeFocusTextInput(id: Long, x: Float, y: Float): Boolean

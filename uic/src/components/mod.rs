@@ -31,5 +31,6 @@ pub mod tabs;
 pub mod toast;
 pub mod tree_picker;
 pub mod ui;
+pub mod zoom_view;
 
 pub use ui::space;

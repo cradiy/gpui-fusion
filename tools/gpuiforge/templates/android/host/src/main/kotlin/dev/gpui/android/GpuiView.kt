@@ -48,6 +48,11 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     private var downY = 0f
     private var tapX = 0f
     private var tapY = 0f
+    private var lastTapTime = 0L
+    private var lastTapX = 0f
+    private var lastTapY = 0f
+    private var consecutiveTaps = 0
+    private var pendingTapCount = 1
     private var inputState: TextInputState? = null
     private var inputConnection: GpuiInputConnection? = null
     // A connection request does not necessarily replace the connection served by the IME.
@@ -302,13 +307,17 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         }
         if (event.pointerCount > 1) {
             tapCandidate = false
+            consecutiveTaps = 0
             scroll.block()
         }
         when (action) {
             MotionEvent.ACTION_CANCEL -> cancelTouches()
             MotionEvent.ACTION_MOVE -> {
                 for (i in 0 until event.pointerCount) updateTouch(event, i, 1)
-                if (hypot(event.x - downX, event.y - downY) > touchSlop) tapCandidate = false
+                if (hypot(event.x - downX, event.y - downY) > touchSlop) {
+                    tapCandidate = false
+                    consecutiveTaps = 0
+                }
                 if (scroll.event(event)) tapCandidate = false
             }
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
@@ -324,6 +333,15 @@ class GpuiView(context: Context, private val session: GpuiSession) :
                         && hypot(event.x - downX, event.y - downY) <= touchSlop) {
                         tapX = event.x
                         tapY = event.y
+                        val interval = event.downTime - lastTapTime
+                        val nearby = hypot(downX - lastTapX, downY - lastTapY) <= ViewConfiguration.get(context).scaledDoubleTapSlop
+                        consecutiveTaps = if (consecutiveTaps > 0 && interval in 0..ViewConfiguration.getDoubleTapTimeout().toLong() && nearby) {
+                            (consecutiveTaps + 1).coerceAtMost(3)
+                        } else 1
+                        lastTapTime = event.eventTime
+                        lastTapX = downX
+                        lastTapY = downY
+                        pendingTapCount = consecutiveTaps
                         performClick()
                     }
                     tapCandidate = false
@@ -343,6 +361,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         val y = event.getY(index)
         contacts.put(id, PointF(x, y))
         if (session.touch(id, phase, x, y)) {
+            consecutiveTaps = 0
             tapCandidate = false
             scroll.block()
             pinch.cancel()
@@ -351,6 +370,7 @@ class GpuiView(context: Context, private val session: GpuiSession) :
     }
 
     private fun cancelTouches() {
+        consecutiveTaps = 0
         mouse.cancel()
         textMenu.close()
         tapCandidate = false
@@ -369,7 +389,9 @@ class GpuiView(context: Context, private val session: GpuiSession) :
         inputDiagnostic { "tap epoch=${inputState?.epoch}" }
         inputConnection?.finishComposingText()
         keyboardRequest = KeyboardRequest.TAP
-        session.tap(tapX, tapY)
+        val count = pendingTapCount
+        pendingTapCount = 1
+        session.tap(tapX, tapY, count)
         requestFrame()
         return true
     }

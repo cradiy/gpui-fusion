@@ -500,7 +500,7 @@ impl AndroidWindow {
         .default_prevented
     }
 
-    pub fn tap(&self, x: f32, y: f32) {
+    pub fn tap(&self, x: f32, y: f32, click_count: usize) {
         let position = point(
             px(x / self.display.scale.get()),
             px(y / self.display.scale.get()),
@@ -509,13 +509,13 @@ impl AndroidWindow {
         self.input(PlatformInput::MouseDown(MouseDownEvent {
             position,
             button: MouseButton::Left,
-            click_count: 1,
+            click_count,
             ..Default::default()
         }));
         self.input(PlatformInput::MouseUp(MouseUpEvent {
             position,
             button: MouseButton::Left,
-            click_count: 1,
+            click_count,
             ..Default::default()
         }));
     }

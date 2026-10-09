@@ -1,7 +1,7 @@
 use gpui::{
-    AnyElement, App, Bounds, EffectShader, EffectUniforms, Element, ElementId, GlobalElementId,
-    InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels,
-    PointerTransform, StyleRefinement, Styled, TransformationMatrix, Window,
+    AnyElement, App, Bounds, Corners, EffectShader, EffectUniforms, Element, ElementId,
+    GlobalElementId, InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement,
+    Pixels, PointerTransform, StyleRefinement, Styled, TransformationMatrix, Window,
 };
 
 /// Transforms a captured subtree and its interaction geometry with one matrix.
@@ -27,6 +27,7 @@ pub fn transform_group<E: IntoElement>(
         matrix,
         raster_scale: 1.,
         auto_raster_id: None,
+        clip_corners: Corners::default(),
     }
 }
 
@@ -42,9 +43,27 @@ pub struct TransformGroup<E: Element> {
     matrix: TransformationMatrix,
     raster_scale: f32,
     auto_raster_id: Option<ElementId>,
+    clip_corners: Corners<Pixels>,
 }
 
 impl<E: Element> TransformGroup<E> {
+    /// Clips the displayed result to these viewport corner radii, independent of its transform.
+    pub fn clip_corners(mut self, corners: Corners<Pixels>) -> Self {
+        assert!(
+            [
+                corners.top_left,
+                corners.top_right,
+                corners.bottom_right,
+                corners.bottom_left
+            ]
+            .iter()
+            .all(|radius| f32::from(*radius).is_finite() && *radius >= gpui::px(0.)),
+            "clip radii must be finite and nonnegative"
+        );
+        self.clip_corners = corners;
+        self
+    }
+
     /// Multiplies source raster density, independently of zoom. Defaults to one.
     /// Values must be finite and at least one. Each requested multiplier is limited
     /// to four and reduced to fit 8192 pixels per axis and 16 megapixels, without
@@ -116,7 +135,7 @@ fn uniforms(matrix: TransformationMatrix, capture: Bounds<Pixels>, scale: f32) -
         .with_slot(1, [c, d, translation.y.0, 0.])
 }
 
-/// Affine capture shader; two uniform slots contain inverse matrix rows in device pixels.
+/// Affine capture shader: slots 0–1 hold inverse matrix rows; slot 2 holds viewport corner radii in device pixels.
 pub fn transform_group_shader() -> EffectShader {
     EffectShader::wgsl_image(include_str!("shaders/transform_group.wgsl"))
 }
@@ -205,10 +224,23 @@ impl<E: Element> Element for TransformGroup<E> {
         let matrix = window_matrix(self.matrix, bounds);
         let transform =
             PointerTransform::affine(matrix).expect("resolved transform must be invertible");
+        let corners = self
+            .clip_corners
+            .clamp_radii_for_quad_size(bounds.size)
+            .scale(window.raster_scale_factor());
         let uniforms = uniforms(
             matrix,
             window.raster_snap_bounds(bounds),
             window.raster_scale_factor(),
+        )
+        .with_slot(
+            2,
+            [
+                corners.top_left.0,
+                corners.top_right.0,
+                corners.bottom_right.0,
+                corners.bottom_left.0,
+            ],
         );
         window.with_subtree_effect(
             bounds,

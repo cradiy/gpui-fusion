@@ -868,7 +868,7 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
         method("nativeTouch", "(JIIFF)Z", touch as *mut c_void),
         method("nativePinch", "(JIFFF)V", pinch as *mut c_void),
         method("nativeLongPress", "(JFF)Z", long_press as *mut c_void),
-        method("nativeTap", "(JFF)V", tap as *mut c_void),
+        method("nativeTap", "(JFFI)V", tap as *mut c_void),
         method(
             "nativeOpenUrl",
             "(JLjava/lang/String;)V",
@@ -1556,9 +1556,12 @@ extern "system" fn pinch(
     });
 }
 
-extern "system" fn tap(mut env: JNIEnv, _: JClass, id: jlong, x: jfloat, y: jfloat) {
+extern "system" fn tap(mut env: JNIEnv, _: JClass, id: jlong, x: jfloat, y: jfloat, count: jint) {
     call(&mut env, |_| {
-        session(id)?.platform.window.tap(x, y);
+        session(id)?
+            .platform
+            .window
+            .tap(x, y, count.max(1) as usize);
         Ok(())
     });
 }

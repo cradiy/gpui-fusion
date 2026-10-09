@@ -280,6 +280,7 @@ impl RenderOnce for Slider {
                     InteractionPhase::Start => state.start_drag(ratio, cx),
                     InteractionPhase::Preview => state.preview_ratio(ratio, cx),
                     InteractionPhase::Commit => state.commit_ratio(ratio, cx),
+                    InteractionPhase::Cancel => state.cancel_drag(cx),
                 });
             })
             .absolute()

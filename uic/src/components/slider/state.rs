@@ -97,6 +97,7 @@ impl SliderState {
         if self.disabled != disabled {
             self.disabled = disabled;
             if disabled {
+                self.capture.clear_touch();
                 self.dragging = false;
                 self.hovered = false;
                 self.hover_ratio = None;
@@ -186,6 +187,12 @@ impl SliderState {
 
     pub(super) fn commit_delta(&mut self, delta: f64, cx: &mut Context<Self>) {
         self.commit_value(self.value + delta, cx);
+    }
+
+    pub(super) fn cancel_drag(&mut self, cx: &mut Context<Self>) {
+        self.dragging = false;
+        self.hover_ratio = None;
+        cx.notify();
     }
 
     pub(super) fn commit_value(&mut self, value: f64, cx: &mut Context<Self>) {

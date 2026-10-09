@@ -1,9 +1,15 @@
 mod appearance;
 mod interaction;
+mod range_slider;
+mod range_state;
+#[cfg(test)]
+mod range_tests;
 mod slider;
 mod state;
 
 pub use appearance::SliderAppearance;
+pub use range_slider::RangeSlider;
+pub use range_state::{RangeSliderEvent, RangeSliderState, RangeSliderThumb};
 pub use slider::Slider;
 pub use state::SliderState;
 

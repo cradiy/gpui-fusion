@@ -77,9 +77,13 @@ the pointer without changing the slider value and remains visible while dragging
 Programmatic `set_value` updates the control without producing a user event.
 Pointer movement emits `SliderEvent::Changing`; pointer release, keyboard
 adjustment, and accessibility actions emit `SliderEvent::Changed`.
-`SliderState::is_dragging()` is true from pointer press through release, so a
+`SliderState::is_dragging()` is true during an active drag, so a
 view can also render a pressed thumb or retain a preview-only value while the
 drag is active.
+
+Touch dragging starts after horizontal intent is established. Vertical gestures
+remain available to the surrounding scroll view. A cancelled touch ends the drag
+and retains the last preview value without emitting `Changed`.
 
 ```rust,ignore
 match event {
@@ -96,6 +100,9 @@ step and range limits. Disabled sliders remain identifiable as disabled controls
 and reject adjustments.
 
 ## Custom surfaces
+
+For two endpoints and a minimum interval, use [RangeSlider](range_slider.md).
+It shares `SliderAppearance` with the single-value control.
 
 The `Progress` Styled surface is its track. `SliderAppearance` also implements
 `Styled`, targeting the slider track independently from the larger interaction

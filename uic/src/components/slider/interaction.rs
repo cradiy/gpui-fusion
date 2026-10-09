@@ -3,7 +3,8 @@ use std::{cell::Cell, rc::Rc};
 use gpui::{
     App, Bounds, DispatchPhase, Element, ElementId, FocusHandle, GlobalElementId, Hitbox,
     HitboxBehavior, HitboxId, InspectorElementId, IntoElement, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Refineable as _, Style, StyleRefinement, Styled, Window,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, Refineable as _, Style, StyleRefinement, Styled,
+    TouchId, TouchPhase, Window,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,12 +13,26 @@ pub(super) enum InteractionPhase {
     Start,
     Preview,
     Commit,
+    Cancel,
 }
 
 type Callback = Rc<dyn Fn(f32, InteractionPhase, &mut Window, &mut App)>;
 
 #[derive(Clone, Default)]
-pub(super) struct CaptureToken(Rc<Cell<Option<HitboxId>>>);
+pub(super) struct CaptureToken(Rc<Cell<Option<HitboxId>>>, Rc<Cell<Option<TouchDrag>>>);
+
+#[derive(Clone, Copy)]
+struct TouchDrag {
+    id: TouchId,
+    origin: Point<Pixels>,
+    claimed: bool,
+}
+
+impl CaptureToken {
+    pub(super) fn clear_touch(&self) {
+        self.1.set(None);
+    }
+}
 
 pub(super) struct SliderInteraction {
     capture_token: CaptureToken,
@@ -120,8 +135,83 @@ impl Element for SliderInteraction {
         let up_hitbox = hitbox.clone();
         let up_callback = self.callback.clone();
         let up_inset = self.edge_inset;
+        let touch = self.capture_token.1.clone();
+        let touch_hitbox = hitbox.clone();
+        let touch_callback = self.callback.clone();
+        let touch_focus = self.focus_handle.clone();
+        let touch_inset = self.edge_inset;
 
         style.paint(bounds, window, cx, move |window, _| {
+            window.on_touch_event(move |event, phase, window, cx| {
+                let current = touch.get();
+                if event.phase == TouchPhase::Started {
+                    if phase.bubble()
+                        && current.is_none()
+                        && !window.default_prevented()
+                        && touch_hitbox.is_hovered(window)
+                        && touch_hitbox.bounds.contains(&event.position)
+                    {
+                        touch.set(Some(TouchDrag {
+                            id: event.id,
+                            origin: event.position,
+                            claimed: false,
+                        }));
+                    }
+                    return;
+                }
+                if !phase.capture() {
+                    return;
+                }
+                let Some(mut drag) = current.filter(|drag| drag.id == event.id) else {
+                    return;
+                };
+                let ratio = horizontal_ratio(event.position.x, touch_hitbox.bounds, touch_inset);
+                match event.phase {
+                    TouchPhase::Moved => {
+                        if !drag.claimed {
+                            let delta = event.position - drag.origin;
+                            let dx = f32::from(delta.x).abs();
+                            let dy = f32::from(delta.y).abs();
+                            if dx.max(dy) < 6. {
+                                return;
+                            }
+                            if dy >= dx || window.default_prevented() {
+                                touch.set(None);
+                                return;
+                            }
+                            drag.claimed = true;
+                            touch.set(Some(drag));
+                            touch_focus.focus(window, cx);
+                            touch_callback(
+                                horizontal_ratio(drag.origin.x, touch_hitbox.bounds, touch_inset),
+                                InteractionPhase::Start,
+                                window,
+                                cx,
+                            );
+                        }
+                        touch_callback(ratio, InteractionPhase::Preview, window, cx);
+                    }
+                    TouchPhase::Ended | TouchPhase::Cancelled => {
+                        touch.set(None);
+                        if !drag.claimed {
+                            return;
+                        }
+                        touch_callback(
+                            ratio,
+                            if event.phase == TouchPhase::Ended {
+                                InteractionPhase::Commit
+                            } else {
+                                InteractionPhase::Cancel
+                            },
+                            window,
+                            cx,
+                        );
+                    }
+                    TouchPhase::Started => return,
+                }
+                window.prevent_default();
+                cx.stop_propagation();
+            });
             window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
                 if phase == DispatchPhase::Bubble
                     && event.button == MouseButton::Left

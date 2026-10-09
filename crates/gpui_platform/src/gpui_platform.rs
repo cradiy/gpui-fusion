@@ -26,7 +26,8 @@ pub fn headless() -> gpui::Application {
     gpui::Application::with_platform(current_platform(true))
 }
 
-/// Unlike `application`, this function returns a single-threaded web application.
+/// Creates a web application without background workers, regardless of build features.
+/// For stable Rust builds, also disable this crate's default `multithreaded` feature.
 #[cfg(target_family = "wasm")]
 pub fn single_threaded_web() -> gpui::Application {
     gpui::Application::with_platform(Rc::new(gpui_web::WebPlatform::new(false)))

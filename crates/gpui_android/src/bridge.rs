@@ -1,3 +1,5 @@
+mod deferred;
+
 use crate::{AndroidPlatform, surface::NativeWindow};
 use anyhow::{Context, Result};
 use gpui::{AppLifecyclePhase, ApplicationHandle, TouchPhase};
@@ -80,6 +82,7 @@ struct Session {
     platform: Rc<AndroidPlatform>,
 }
 
+#[derive(Clone)]
 pub(crate) struct Host {
     vm: Arc<JavaVM>,
     object: GlobalRef,
@@ -251,6 +254,11 @@ impl Host {
         })
     }
     pub fn request_frame(&self) {
+        let host = self.clone();
+        deferred::post(move || host.request_frame_now());
+    }
+
+    fn request_frame_now(&self) {
         if let Err(error) = self.with_env(|env| {
             env.call_method(self.object.as_obj(), "requestFrame", "()V", &[])?;
             Ok(())
@@ -696,6 +704,14 @@ impl Host {
     }
 
     pub fn schedule(&self, token: u64, delay: Duration) {
+        let host = self.clone();
+        let requested_at = std::time::Instant::now();
+        deferred::post(move || {
+            host.schedule_now(token, delay.saturating_sub(requested_at.elapsed()))
+        });
+    }
+
+    fn schedule_now(&self, token: u64, delay: Duration) {
         let result = (|| -> jni::errors::Result<()> {
             let mut env = self.vm.attach_current_thread()?;
             let result = env.call_method(
@@ -943,7 +959,10 @@ pub(crate) fn window(id: i64) -> Result<Rc<crate::window::AndroidWindow>> {
 }
 
 pub(crate) fn call<T: Default>(env: &mut JNIEnv, f: impl FnOnce(&mut JNIEnv) -> Result<T>) -> T {
-    match catch_unwind(AssertUnwindSafe(|| f(env))) {
+    let scope = deferred::Scope::enter();
+    let outcome = catch_unwind(AssertUnwindSafe(|| f(env)));
+    drop(scope);
+    match outcome {
         Ok(Ok(value)) => value,
         outcome => {
             let error = match outcome {

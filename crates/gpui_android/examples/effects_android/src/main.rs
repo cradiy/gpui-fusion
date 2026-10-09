@@ -1,16 +1,19 @@
 use gpui::{prelude::*, *};
 use gpui_effects::{
-    BloomOptions, BorderTrailOptions, EffectStage, Fluid, FluidOptions, FluidSplat, LiquidGlass,
-    ParticleSpawn, Particles, border_trail, subtree_effect_chain,
+    BloomOptions, BorderTrailOptions, EffectStage, Flip, FlipDirection, FlipLayout,
+    FlipReadingDirection, Fluid, FluidOptions, FluidSplat, LiquidGlass, ParticleSpawn, Particles,
+    border_trail, subtree_effect_chain,
 };
 use std::{
     cell::Cell,
     rc::Rc,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 struct Effects {
     tab: usize,
+    book: Entity<Flip>,
     particles: Particles,
     fluid: Fluid,
     bounds: Rc<Cell<Bounds<Pixels>>>,
@@ -23,8 +26,27 @@ struct Effects {
 }
 
 impl Effects {
-    fn new() -> Self {
+    fn new(cx: &mut Context<Self>) -> Self {
+        let pages: [&[u8]; 4] = [
+            include_bytes!("../../../../gpui_effects/examples/flip-16/page-01.svg"),
+            include_bytes!("../../../../gpui_effects/examples/flip-16/page-02.svg"),
+            include_bytes!("../../../../gpui_effects/examples/flip-16/page-03.svg"),
+            include_bytes!("../../../../gpui_effects/examples/flip-16/page-04.svg"),
+        ];
+        let book = cx.new(|_| {
+            Flip::from_slots(
+                pages.map(|bytes| Arc::new(Image::from_bytes(ImageFormat::Svg, bytes.to_vec()))),
+            )
+            .layout(FlipLayout::Single)
+        });
+        cx.subscribe(&book, |_, _, event: &gpui_effects::FlipEvent, cx| {
+            if matches!(event, gpui_effects::FlipEvent::PositionChanged { .. }) {
+                cx.notify();
+            }
+        })
+        .detach();
         Self {
+            book,
             tab: 0,
             particles: Particles::new(4096),
             fluid: Fluid::new(FluidOptions {
@@ -69,6 +91,12 @@ impl Effects {
     }
 
     fn surface(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if self.tab == 3 {
+            return div()
+                .size_full()
+                .child(self.book.clone())
+                .into_any_element();
+        }
         if self.tab == 2 {
             let compact = window.viewport_size().height < px(500.);
             if !self.paused {
@@ -257,12 +285,16 @@ impl Render for Effects {
         self.last_frame = now;
         let insets = window.insets().effective();
         let compact = window.viewport_size().height < px(500.);
-        let status = format!(
-            "Particles: {} · Fluid: {} · Backdrop: {}",
-            window.supports_gpu_particles(),
-            window.supports_gpu_fluid(),
-            window.supports_backdrop_blur()
-        );
+        let status = if self.tab == 3 {
+            format!("Page {} / 4", self.book.read(cx).position() + 1)
+        } else {
+            format!(
+                "Particles: {} · Fluid: {} · Backdrop: {}",
+                window.supports_gpu_particles(),
+                window.supports_gpu_fluid(),
+                window.supports_backdrop_blur()
+            )
+        };
         let surface = self.surface(window, cx);
         div()
             .size_full()
@@ -291,8 +323,8 @@ impl Render for Effects {
                             .child(status),
                     )
                     .child(
-                        div().flex().gap_2().children(
-                            ["Particles", "Fluid", "Materials"]
+                        div().flex().flex_wrap().gap_2().children(
+                            ["Particles", "Fluid", "Materials", "Flip"]
                                 .into_iter()
                                 .enumerate()
                                 .map(|(tab, label)| {
@@ -309,13 +341,57 @@ impl Render for Effects {
                     )
                     .child(div().flex_1().min_h_0().w_full().child(surface))
                     .when(!compact, |this| {
-                        this.child(
-                            div().text_sm().text_color(rgb(0x9aacc8)).child(
-                                "Touch or drag to paint. Try rotating and resuming the app.",
-                            ),
-                        )
+                        this.child(div().text_sm().text_color(rgb(0x9aacc8)).child(
+                            if self.tab == 3 {
+                                "Drag either page edge inward to turn."
+                            } else {
+                                "Touch or drag to paint. Try rotating and resuming the app."
+                            },
+                        ))
                     })
-                    .child(
+                    .child(if self.tab == 3 {
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap_2()
+                            .child(button("previous", "Previous", false).on_click(cx.listener(
+                                |this, _, _, cx| {
+                                    this.book.update(cx, |book, cx| {
+                                        book.flip(FlipDirection::Backward, cx);
+                                    });
+                                },
+                            )))
+                            .child(button("next", "Next", false).on_click(cx.listener(
+                                |this, _, _, cx| {
+                                    this.book.update(cx, |book, cx| {
+                                        book.flip(FlipDirection::Forward, cx);
+                                    });
+                                },
+                            )))
+                            .child(
+                                button(
+                                    "rtl",
+                                    "RTL",
+                                    self.book.read(cx).current_reading_direction()
+                                        == FlipReadingDirection::RightToLeft,
+                                )
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.book.update(cx, |book, cx| {
+                                            let direction = if book.current_reading_direction()
+                                                == FlipReadingDirection::LeftToRight
+                                            {
+                                                FlipReadingDirection::RightToLeft
+                                            } else {
+                                                FlipReadingDirection::LeftToRight
+                                            };
+                                            book.set_reading_direction(direction, cx);
+                                        });
+                                        cx.notify();
+                                    },
+                                )),
+                            )
+                    } else {
                         div()
                             .flex()
                             .gap_2()
@@ -346,8 +422,8 @@ impl Render for Effects {
                                     this.bloom = !this.bloom;
                                     cx.notify();
                                 },
-                            ))),
-                    ),
+                            )))
+                    }),
             )
     }
 }
@@ -355,7 +431,7 @@ impl Render for Effects {
 #[gpui_platform::main]
 fn main() {
     gpui_platform::application().run(|cx| {
-        cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| Effects::new()))
+        cx.open_window(WindowOptions::default(), |_, cx| cx.new(Effects::new))
             .expect("open effects example");
     });
 }

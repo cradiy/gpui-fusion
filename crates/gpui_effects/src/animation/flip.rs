@@ -1,9 +1,10 @@
+mod input;
+
 use crate::four_image_effect;
 use gpui::prelude::*;
 use gpui::{
     Bounds, Context, EffectShader, EffectUniforms, EventEmitter, ImageSource, IntoElement,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Render, Rgba,
-    Window, canvas, div, img, px,
+    MouseButton, ObjectFit, Pixels, Render, Rgba, Window, canvas, div, img, px,
 };
 use std::{cell::Cell, ops::Range, rc::Rc, time::Instant};
 
@@ -321,6 +322,10 @@ pub enum FlipStyle {
 /// Construct this inside a GPUI context with
 /// `cx.new(|_| Flip::new(previous, front, back, next))`, then add the
 /// entity as a child. Pressing and dragging either outer edge starts the turn.
+/// Touch input claims an inward horizontal drag after the movement threshold;
+/// vertical motion remains available for scrolling. A second contact or system
+/// cancellation returns the sheet without completing a turn. Mouse and touch
+/// share the same reading direction, readiness checks and completion threshold.
 pub struct Flip {
     previous: SlotTexture,
     front: SlotTexture,
@@ -358,6 +363,7 @@ pub struct Flip {
     velocity: f32,
     target: Option<f32>,
     dragging: bool,
+    touch: input::TouchState,
     trigger_width: f32,
     completion_threshold: f32,
     curl_radius: f32,
@@ -414,6 +420,7 @@ impl Flip {
             velocity: 0.0,
             target: None,
             dragging: false,
+            touch: Default::default(),
             trigger_width: 42.0,
             completion_threshold: 0.42,
             curl_radius: 0.13,
@@ -1054,6 +1061,7 @@ impl Flip {
     }
 
     fn reset_interaction(&mut self) {
+        self.touch.pending = None;
         self.progress = 0.0;
         self.velocity = 0.0;
         self.target = None;
@@ -1064,6 +1072,7 @@ impl Flip {
 
     /// Animates the active sheet back to its resting position.
     pub fn reset(&mut self, cx: &mut Context<Self>) {
+        self.touch.pending = None;
         self.target = Some(0.0);
         self.dragging = false;
         self.last_frame = Instant::now();
@@ -1488,53 +1497,6 @@ impl Flip {
             ((y - f32::from(bounds.origin.y)) / height).clamp(0.0, 1.0),
         )
     }
-
-    fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(edge) = self.edge_at(f32::from(event.position.x)) else {
-            return;
-        };
-        let direction = self.direction_for_edge(edge);
-        self.anticipated_position = self.destination_position(direction);
-        self.emit_preload_request(FlipPreloadReason::Triggered(direction), cx);
-        self.load_slot_range(self.flip_range(direction), window, cx);
-        if !self.flip_ready(direction) {
-            cx.notify();
-            return;
-        }
-        self.active_edge = edge;
-        self.configure_sequence_edge(direction, edge);
-        let (progress, pointer_y) =
-            self.normalized_pointer(f32::from(event.position.x), f32::from(event.position.y));
-        self.progress = progress.max(0.015);
-        self.pointer_y = pointer_y;
-        self.velocity = 0.0;
-        self.target = None;
-        self.dragging = true;
-        cx.notify();
-    }
-
-    fn mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if self.dragging {
-            let (progress, pointer_y) =
-                self.normalized_pointer(f32::from(event.position.x), f32::from(event.position.y));
-            self.velocity = progress - self.progress;
-            self.progress = progress;
-            self.pointer_y = pointer_y;
-            cx.notify();
-            return;
-        }
-    }
-
-    fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.dragging {
-            return;
-        }
-        self.dragging = false;
-        let complete = self.progress + self.velocity * 5.0 >= self.completion_threshold;
-        self.target = Some(if complete { 1.0 } else { 0.0 });
-        self.last_frame = Instant::now();
-        cx.notify();
-    }
 }
 
 impl Render for Flip {
@@ -1679,6 +1641,7 @@ impl Render for Flip {
                 self.background.a,
             ],
         );
+        let entity = cx.entity().downgrade();
         let effect = four_image_effect(
             self.front.source.clone(),
             self.back.source.clone(),
@@ -1705,8 +1668,11 @@ impl Render for Flip {
             )
             .child(
                 canvas(
-                    move |new_bounds, _, _| bounds.set(new_bounds),
-                    |_, _, _, _| {},
+                    move |new_bounds, window, _| {
+                        bounds.set(new_bounds);
+                        window.insert_hitbox(new_bounds, gpui::HitboxBehavior::Normal)
+                    },
+                    move |_, hitbox, window, _| input::register(entity, hitbox, window),
                 )
                 .absolute()
                 .inset_0(),

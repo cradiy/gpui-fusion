@@ -16,6 +16,9 @@ gpui_effects = { workspace = true }
 rust-embed = { version = "8.11", features = ["include-exclude"] }
 uic_macros = { workspace = true }
 
+[target.'cfg(any(target_os = "android", target_family = "wasm"))'.dependencies]
+# These targets cannot read assets from the build machine in debug mode.
+rust-embed = { version = "8.11", features = ["debug-embed"] }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

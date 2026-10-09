@@ -17,6 +17,7 @@ pub mod input;
 pub mod modal;
 pub mod notification;
 mod overlay_anchor;
+pub mod pager;
 pub mod popover;
 pub mod progress;
 mod range;

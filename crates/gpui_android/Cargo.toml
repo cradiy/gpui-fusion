@@ -11,6 +11,9 @@ path = "src/gpui_android.rs"
 [lints]
 workspace = true
 
+[features]
+network = ["dep:jni22", "dep:rustls-platform-verifier"]
+
 [target.'cfg(target_os = "android")'.dependencies]
 accesskit.workspace = true
 accesskit_android.workspace = true
@@ -20,6 +23,8 @@ gpui.workspace = true
 gpui_wgpu.workspace = true
 gpui_util.workspace = true
 jni = "0.21.1"
+jni22 = { package = "jni", version = "0.22.4", optional = true }
+rustls-platform-verifier = { workspace = true, optional = true }
 log.workspace = true
 parking_lot.workspace = true
 serde.workspace = true

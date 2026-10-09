@@ -20,6 +20,8 @@ mod platform;
 mod share;
 mod surface;
 mod system_services;
+#[cfg(feature = "network")]
+mod tls;
 mod window;
 
 pub use background::{

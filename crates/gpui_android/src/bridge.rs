@@ -993,6 +993,8 @@ extern "system" fn create(
             .call_method(&host, "requireContext", "()Landroid/content/Context;", &[])?
             .l()?;
         gpui_util::android::AndroidRuntime::initialize(env, &context)?;
+        #[cfg(feature = "network")]
+        crate::tls::initialize(env)?;
         let host = Arc::new(Host {
             vm: VM.get().context("JNI VM not initialized")?.clone(),
             object: env.new_global_ref(host)?,

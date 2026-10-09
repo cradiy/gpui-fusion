@@ -47,7 +47,7 @@ pub struct Platform {
     /// Optional editor schema reference for a platform recipe. Relative references resolve from the JSON file. GPUiForge does not fetch schema URLs.
     #[serde(default, rename = "$schema")]
     pub _schema: Option<String>,
-    /// Optional modules for the bundled Android host. Defaults to an empty list: window rendering, input, IME, lifecycle and accessibility remain available. Disabled modules omit their Kotlin files, Manifest components and dedicated dependencies. Cargo features and Android permissions are configured separately. TalkBack uses the semantics published by GPUI controls; no extra host feature is required.
+    /// Optional modules for the bundled Android host. Defaults to an empty list: window rendering, input, IME, lifecycle and accessibility remain available. Disabled modules omit their Kotlin files, Manifest components and dedicated dependencies. Cargo features are configured separately. The network module includes INTERNET; other permissions are declared explicitly. TalkBack uses the semantics published by GPUI controls; no extra host feature is required.
     #[serde(default)]
     pub features: BTreeSet<AndroidFeature>,
     /// Application and launcher icon for the bundled Android host. Accepts PNG, WebP or Android drawable XML. Resolve relative paths from gpuiforge.json. Omit to leave the application icon unspecified; no copy entry is required.
@@ -110,6 +110,8 @@ pub struct Platform {
 #[derive(schemars::JsonSchema, Clone, Copy, Debug, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(rename_all = "kebab-case")]
 pub enum AndroidFeature {
+    /// HTTPS system certificate verification for Rust HTTP clients. Includes INTERNET and the Cargo-matched rustls-platform-verifier Android component. Also enable the network Cargo feature on gpui_platform (or gpui_android) to initialize the verifier before application main. Requires rustls-platform-verifier 0.7.1 or a compatible 0.7 release; application requests use their HTTP client's normal runtime and API.
+    Network,
     /// Document open/save pickers, persistent document grants, private/public storage and the file provider. Does not require broad storage access permissions for document picker use.
     Files,
     /// Sending and receiving Android shares. Automatically includes files. Set share-mime-types separately to register the application as a share target.
@@ -536,6 +538,13 @@ impl Project {
             "android_permissions".into(),
             p.permissions
                 .iter()
+                .map(String::as_str)
+                .chain(
+                    p.feature(AndroidFeature::Network)
+                        .then_some("android.permission.INTERNET"),
+                )
+                .collect::<BTreeSet<_>>()
+                .into_iter()
                 .map(|name| format!("    <uses-permission android:name=\"{name}\" />\n"))
                 .collect(),
         );

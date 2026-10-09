@@ -86,6 +86,42 @@ matches the emulator's system image.
 
 Debug builds write GPU initialization diagnostics to `adb logcat -s GPUI`.
 
+## HTTPS
+
+Enable the `network` Cargo feature on your existing `gpui_platform` dependency
+(or on `gpui_android` when using the backend directly), and enable the matching
+host module in `gpuiforge.json`:
+
+```json
+{
+  "platforms": {
+    "android": {
+      "features": ["network"]
+    }
+  }
+}
+```
+
+The host module includes `android.permission.INTERNET` and the Android certificate
+verification component. The Rust feature initializes the system verifier before
+calling the application's `main`. No application-side JNI setup is required.
+Use reqwest 0.13 with its default TLS configuration and run asynchronous requests
+on a Tokio runtime. Requests keep the same API as other platforms.
+
+GPUiForge packages the Android component at the version resolved by Cargo for
+the application. Keep the Rust TLS dependencies on one compatible verifier
+version, starting with `rustls-platform-verifier` 0.7.1 in the 0.7 series.
+`INTERNET` requires no runtime permission prompt. Reading system trust settings
+does not require storage permission.
+
+With the Rust feature and host module disabled, the verifier initialization and
+its dedicated dependencies are omitted. Other dependencies, such as reqwest,
+may independently select their own TLS backend.
+
+For a manually maintained Android host, include the matching
+`org.rustls:rustls-platform-verifier` Maven dependency and its JNI preservation
+rules as described in the [upstream Android setup](https://docs.rs/rustls-platform-verifier/latest/rustls_platform_verifier/#android).
+
 ## Rust application
 
 Use `gpui` and `gpui_platform` dependencies and an ordinary `main` function:

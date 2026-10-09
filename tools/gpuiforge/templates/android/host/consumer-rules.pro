@@ -1,5 +1,8 @@
 -keep class dev.gpui.android.GpuiSession { *; }
 -keep class dev.gpui.android.TextInputState { *; }
+# gpuiforge:if network
+-keep,includedescriptorclasses class org.rustls.platformverifier.** { *; }
+# gpuiforge:endif
 # gpuiforge:if files
 -keep class dev.gpui.android.SelectedDocument { *; }
 -keep class dev.gpui.android.DocumentOutput { *; }

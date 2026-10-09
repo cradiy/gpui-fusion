@@ -3,6 +3,11 @@
     "AndroidFeature": {
       "oneOf": [
         {
+          "const": "network",
+          "description": "HTTPS system certificate verification for Rust HTTP clients. Includes INTERNET and the Cargo-matched rustls-platform-verifier Android component. Also enable the network Cargo feature on gpui_platform (or gpui_android) to initialize the verifier before application main. Requires rustls-platform-verifier 0.7.1 or a compatible 0.7 release; application requests use their HTTP client's normal runtime and API.",
+          "type": "string"
+        },
+        {
           "const": "files",
           "description": "Document open/save pickers, persistent document grants, private/public storage and the file provider. Does not require broad storage access permissions for document picker use.",
           "type": "string"
@@ -113,7 +118,7 @@
           "type": "array"
         },
         "features": {
-          "description": "Optional modules for the bundled Android host. Defaults to an empty list: window rendering, input, IME, lifecycle and accessibility remain available. Disabled modules omit their Kotlin files, Manifest components and dedicated dependencies. Cargo features and Android permissions are configured separately. TalkBack uses the semantics published by GPUI controls; no extra host feature is required.",
+          "description": "Optional modules for the bundled Android host. Defaults to an empty list: window rendering, input, IME, lifecycle and accessibility remain available. Disabled modules omit their Kotlin files, Manifest components and dedicated dependencies. Cargo features are configured separately. The network module includes INTERNET; other permissions are declared explicitly. TalkBack uses the semantics published by GPUI controls; no extra host feature is required.",
           "examples": [
             [
               "files",

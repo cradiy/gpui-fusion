@@ -168,6 +168,7 @@ Optional modules are:
 
 | Feature | Capability |
 | --- | --- |
+| `network` | HTTPS system certificate verification and `INTERNET`; also enable the `network` Cargo feature on `gpui_platform` or `gpui_android` |
 | `files` | Document pickers, persistent document grants, private/public storage and file provider |
 | `sharing` | Sending and receiving shares; automatically includes `files` |
 | `credentials` | Android credential storage |
@@ -180,7 +181,10 @@ Optional modules are:
 Disabled modules omit their Kotlin sources, Manifest components and module-specific
 dependencies. Applications must enable the modules used by their Rust APIs;
 calling an unavailable host capability returns an error. Rust Cargo dependencies
-are configured separately. Permissions remain explicit in `permissions`.
+are configured separately. The `network` module includes `INTERNET`; other
+permissions remain explicit in `permissions`. Its Android verifier version is
+resolved from the application's Cargo dependencies during the Gradle build.
+See [HTTPS setup](../../../crates/gpui_android/docs/hosting.md#https).
 
 `icon` sets the application and launcher icon. `notification-icon` sets the default
 small icon for general, media and data-sync notifications; it requires one of those

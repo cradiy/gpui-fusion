@@ -190,6 +190,7 @@ fn sync_prunes_disabled_modules_and_icons() {
     "android": {
       "application-id": "dev.example.app",
       "features": [
+        "network",
         "sharing",
         "notifications",
         "data-sync",
@@ -213,6 +214,21 @@ fn sync_prunes_disabled_modules_and_icons() {
     let modified = fs::metadata(&state).unwrap().modified().unwrap();
     app.ok(&["sync", "--check"]);
     assert_eq!(fs::metadata(&state).unwrap().modified().unwrap(), modified);
+    assert!(
+        fs::read_to_string(output.join("host/build.gradle.kts"))
+            .unwrap()
+            .contains("org.rustls:rustls-platform-verifier")
+    );
+    assert!(
+        fs::read_to_string(output.join("settings.gradle.kts"))
+            .unwrap()
+            .contains("maven-archive")
+    );
+    assert!(
+        fs::read_to_string(output.join("app/src/main/AndroidManifest.xml"))
+            .unwrap()
+            .contains("android.permission.INTERNET")
+    );
     let host = output.join("host/src/main/kotlin/dev/gpui/android");
     assert!(host.join("FileStore.kt").exists());
     assert!(host.join("ClipboardImage.kt").exists());
@@ -284,6 +300,26 @@ fn sync_prunes_disabled_modules_and_icons() {
     ] {
         assert!(!host.join(file).exists());
     }
+    assert!(
+        !fs::read_to_string(output.join("host/build.gradle.kts"))
+            .unwrap()
+            .contains("rustls")
+    );
+    assert!(
+        !fs::read_to_string(output.join("settings.gradle.kts"))
+            .unwrap()
+            .contains("maven-archive")
+    );
+    assert!(
+        !fs::read_to_string(output.join("host/consumer-rules.pro"))
+            .unwrap()
+            .contains("org.rustls")
+    );
+    assert!(
+        !fs::read_to_string(output.join("app/src/main/AndroidManifest.xml"))
+            .unwrap()
+            .contains("android.permission.INTERNET")
+    );
     assert!(host.join("ClipboardSnapshot.kt").exists());
     let manifest = fs::read_to_string(output.join("host/src/main/AndroidManifest.xml")).unwrap();
     assert!(!manifest.contains("<receiver"));

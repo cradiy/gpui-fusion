@@ -1,0 +1,91 @@
+// gpuiforge:if network
+import groovy.json.JsonSlurper
+import java.io.ByteArrayOutputStream
+import java.io.File
+import javax.inject.Inject
+// gpuiforge:endif
+
+plugins { id("com.android.library") }
+
+// gpuiforge:if network
+abstract class RustlsAndroidVersion : ValueSource<String, RustlsAndroidVersion.Parameters> {
+    interface Parameters : ValueSourceParameters {
+        val manifest: RegularFileProperty
+        val target: Property<String>
+    }
+
+    @get:Inject abstract val execOperations: ExecOperations
+
+    @Suppress("UNCHECKED_CAST")
+    override fun obtain(): String {
+        val manifest = parameters.manifest.get().asFile.canonicalFile
+        val output = ByteArrayOutputStream()
+        execOperations.exec {
+            workingDir(manifest.parentFile)
+            commandLine("cargo", "metadata", "--format-version", "1",
+                "--manifest-path", manifest.absolutePath,
+                "--filter-platform", parameters.target.get())
+            standardOutput = output
+        }.assertNormalExitValue()
+        val metadata = JsonSlurper().parseText(output.toString("UTF-8")) as Map<String, Any>
+        val packages = metadata["packages"] as List<Map<String, Any>>
+        val root = packages.single { File(it["manifest_path"] as String).canonicalFile == manifest }
+        val resolve = metadata["resolve"] as Map<String, Any>
+        val nodes = (resolve["nodes"] as List<Map<String, Any>>).associateBy { it["id"] as String }
+        val reachable = mutableSetOf<String>()
+        fun visit(id: String) {
+            if (!reachable.add(id)) return
+            val node = nodes.getValue(id)
+            for (dependency in node["deps"] as List<Map<String, Any>>) {
+                val kinds = dependency["dep_kinds"] as List<Map<String, Any?>>
+                if (kinds.any { it["kind"] == null }) visit(dependency["pkg"] as String)
+            }
+        }
+        visit(root["id"] as String)
+        for (backend in packages.filter { it["id"] in reachable && it["name"] == "gpui_android" }) {
+            require("network" in (nodes.getValue(backend["id"] as String)["features"] as List<String>)) {
+                "Enable the network Cargo feature on gpui_platform or gpui_android to initialize Android TLS verification."
+            }
+        }
+        val versions = packages.filter {
+            it["id"] in reachable && it["name"] == "rustls-platform-verifier-android"
+        }.map { it["version"] as String }.distinct()
+        require(versions.size == 1) {
+            "Expected one rustls-platform-verifier-android version in the application's Android dependencies, found $versions. Align the Rust TLS dependencies before building."
+        }
+        return versions.single()
+    }
+}
+
+val rustlsAndroidVersion = providers.of(RustlsAndroidVersion::class.java) {
+    parameters.manifest.set(file("{{app_dir|kotlin}}/Cargo.toml"))
+    parameters.target.set(providers.gradleProperty("gpuiAbis").map {
+        when (it.substringBefore(',').trim()) {
+            "arm64-v8a" -> "aarch64-linux-android"
+            "x86_64" -> "x86_64-linux-android"
+            else -> error("Unsupported Android ABI: $it")
+        }
+    }.orElse("aarch64-linux-android"))
+}
+// gpuiforge:endif
+
+android {
+    namespace = "dev.gpui.android"
+    compileSdk { version = release(36) { minorApiLevel = 1 } }
+    defaultConfig {
+        minSdk = 26
+        consumerProguardFiles("consumer-rules.pro")
+    }
+}
+
+dependencies {
+    implementation("androidx.core:core:1.18.0")
+// gpuiforge:if network
+    implementation(rustlsAndroidVersion.map { "org.rustls:rustls-platform-verifier:$it" })
+// gpuiforge:endif
+// gpuiforge:if media
+    implementation("androidx.media3:media3-exoplayer:1.9.0")
+    implementation("androidx.media3:media3-exoplayer-hls:1.9.0")
+    implementation("androidx.media3:media3-exoplayer-dash:1.9.0")
+// gpuiforge:endif
+}

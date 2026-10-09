@@ -230,7 +230,7 @@ resvg = { version = "0.46.0", default-features = false, features = [
 ] }
 rustc-hash = "2.1.0"
 rustls = { version = "0.23.26" }
-rustls-platform-verifier = "0.5.0"
+rustls-platform-verifier = "0.7.1"
 # WARNING: If you change this, you must also publish a new version of gpui-scap to crates.io
 scap = { git = "https://github.com/cradiy/scap.git", rev = "3b96a5a74114a5327143542998b16a43289c9c0f", default-features = false, package = "gpui-scap", version = "0.0.9-gpui" }
 schemars = { version = "1.0", features = ["indexmap2"] }

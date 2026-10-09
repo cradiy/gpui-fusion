@@ -669,6 +669,15 @@ impl PlatformWindow for AndroidWindowHandle {
     fn is_fullscreen(&self) -> bool {
         self.fullscreen.get()
     }
+    fn set_screen_orientation(&self, orientation: ScreenOrientation) -> bool {
+        match self.host.set_screen_orientation(orientation) {
+            Ok(accepted) => accepted,
+            Err(error) => {
+                log::error!("Android screen orientation request failed: {error}");
+                false
+            }
+        }
+    }
     fn set_system_bar_appearance(&self, appearance: SystemBarAppearance) -> bool {
         if self.system_bar_appearance.get() == Some(appearance) {
             return true;

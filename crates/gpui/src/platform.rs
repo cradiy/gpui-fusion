@@ -932,6 +932,25 @@ pub enum HapticFeedback {
     GestureEnd,
 }
 
+/// Requested orientation policy for a mobile host window.
+/// The operating system may override requests on large screens or in multi-window mode.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ScreenOrientation {
+    /// Let the system choose, respecting its rotation settings.
+    #[default]
+    Automatic,
+    /// Fixed portrait orientation.
+    Portrait,
+    /// Fixed landscape orientation.
+    Landscape,
+    /// Portrait rotated 180 degrees from the normal portrait orientation.
+    ReversePortrait,
+    /// Landscape rotated 180 degrees from the normal landscape orientation.
+    ReverseLandscape,
+    /// Keep the orientation currently displayed by the host.
+    Locked,
+}
+
 /// Foreground color of system-bar icons and text, independently of their background.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SystemBarStyle {
@@ -1242,6 +1261,12 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn update_ime_position(&self, _bounds: Bounds<Pixels>);
 
     // Mobile platform methods.
+
+    /// Requests a mobile screen orientation policy. Returns false when unsupported.
+    /// True means the host accepted the request, not that rotation has completed.
+    fn set_screen_orientation(&self, _orientation: ScreenOrientation) -> bool {
+        false
+    }
 
     /// Requests system-bar foreground styles. Returns false when unsupported.
     fn set_system_bar_appearance(&self, _appearance: SystemBarAppearance) -> bool {

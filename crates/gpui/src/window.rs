@@ -1689,6 +1689,14 @@ impl Window {
         self.platform_window.insets()
     }
 
+    /// Requests a screen orientation without changing fullscreen or system-bar visibility.
+    /// Android applies this to the hosting Activity; unsupported hosts return false.
+    /// True means the host accepted the request. Rotation is asynchronous and the OS may
+    /// ignore it on large screens or in multi-window mode. Layout follows window resizing.
+    pub fn set_screen_orientation(&mut self, orientation: crate::ScreenOrientation) -> bool {
+        self.platform_window.set_screen_orientation(orientation)
+    }
+
     /// Sets system-bar icon and text colors without changing visibility or layout.
     /// Supported by the Android host; other platforms return false without changes.
     /// Automatic styles follow the system theme, not the application's background.

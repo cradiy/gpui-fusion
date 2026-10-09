@@ -294,6 +294,26 @@ impl Host {
             Ok(())
         })
     }
+    pub fn set_screen_orientation(&self, orientation: gpui::ScreenOrientation) -> Result<bool> {
+        let value = match orientation {
+            gpui::ScreenOrientation::Automatic => 0,
+            gpui::ScreenOrientation::Portrait => 1,
+            gpui::ScreenOrientation::Landscape => 2,
+            gpui::ScreenOrientation::ReversePortrait => 3,
+            gpui::ScreenOrientation::ReverseLandscape => 4,
+            gpui::ScreenOrientation::Locked => 5,
+        };
+        self.with_env(|env| {
+            Ok(env
+                .call_method(
+                    self.object.as_obj(),
+                    "setScreenOrientation",
+                    "(I)Z",
+                    &[JValue::Int(value)],
+                )?
+                .z()?)
+        })
+    }
     pub fn set_fullscreen(&self, enabled: bool) -> Result<bool> {
         self.with_env(|env| {
             Ok(env

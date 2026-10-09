@@ -48,6 +48,7 @@ abstract class GpuiActivity : Activity() {
         session = retained ?: GpuiSession()
         fullscreen = FullscreenHost(window)
         session.setOnFullscreenChanged { fullscreen.setEnabled(it) }
+        session.setOnScreenOrientationChanged { requestedOrientation = it.activityOrientation }
         session.setOnSystemBarAppearanceChanged {
             systemBarAppearance = it
             applySystemBarAppearance()
@@ -180,6 +181,7 @@ abstract class GpuiActivity : Activity() {
         backRegistration = null
         session.setOnBackEnabledChanged(null)
         session.setOnFullscreenChanged(null)
+        session.setOnScreenOrientationChanged(null)
         session.setOnSystemBarAppearanceChanged(null)
         fullscreen.setEnabled(false)
         session.setOnCloseRequested(null)

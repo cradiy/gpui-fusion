@@ -235,6 +235,35 @@ Looper. Clear it when its Activity is destroyed and restore any host-owned
 window state. Without a callback, fullscreen requests leave the GPUI mode
 unchanged. Temporary system-bar visibility must not be treated as an exit.
 
+## Screen orientation
+
+Request orientation through the shared window API:
+
+```rust
+window.set_screen_orientation(gpui::ScreenOrientation::Landscape);
+window.set_screen_orientation(gpui::ScreenOrientation::Portrait);
+window.set_screen_orientation(gpui::ScreenOrientation::Automatic);
+```
+
+`Automatic` restores the system's orientation policy, including the user's
+rotation preference. `ReversePortrait` and `ReverseLandscape` select the opposite
+orientation; `Locked` holds the current orientation. These requests do not change
+fullscreen or system-bar visibility and require no permission or optional feature.
+
+The return value indicates whether the host accepted the request, not whether
+rotation completed. Desktop and other unsupported hosts return `false`.
+Use the normal window resize/layout flow to adapt content to the actual viewport.
+Android may override orientation restrictions in multi-window environments and
+on large screens; see [Android orientation behavior](https://developer.android.com/develop/adaptive-apps/guides/app-orientation-aspect-ratio-resizability).
+
+`GpuiActivity` applies requests on the main Looper after the Rust callback returns.
+The selected policy survives Activity recreation through the retained session;
+no request is applied before the application selects a policy. Embedded hosts
+register `session.setOnScreenOrientationChanged { requestedOrientation = it.activityOrientation }`
+on their Activity and clear the callback on destruction. Registration immediately
+replays any retained request. The request affects the whole Activity, including
+native views alongside GPUI; the embedding host owns restoring any prior policy.
+
 ## Host ownership
 
 Android media playback uses `gpui_media_backend::SystemBackend` with the Kotlin

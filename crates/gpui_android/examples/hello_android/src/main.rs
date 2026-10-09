@@ -1355,6 +1355,15 @@ impl Counter {
                     .flex_col()
                     .gap_4()
                     .child(div().text_2xl().child(format!("{} taps", self.count)))
+                    .child(div().flex().flex_wrap().gap_2().children([
+                        ("portrait", "Portrait", ScreenOrientation::Portrait),
+                        ("landscape", "Landscape", ScreenOrientation::Landscape),
+                        ("auto-rotate", "System rotation", ScreenOrientation::Automatic),
+                    ].into_iter().map(|(id, label, orientation)| {
+                        button(id, label).on_click(move |_, window, _| {
+                            window.set_screen_orientation(orientation);
+                        })
+                    })))
                     .child(button("increment", "Tap to count").on_click(cx.listener(
                         |this, _, _, cx| {
                             this.count += 1;

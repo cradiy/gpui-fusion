@@ -41,6 +41,9 @@ class GpuiSession : AutoCloseable {
     private var backProgress = 0f
     private var backEdge = 0
     private var backChanged: Consumer<Boolean>? = null
+    private var screenOrientation: ScreenOrientation? = null
+    private var screenOrientationChanged: Consumer<ScreenOrientation>? = null
+    private var screenOrientationPosted = false
     private var fullscreen = false
     private var fullscreenChanged: Consumer<Boolean>? = null
     private var systemBarAppearance = SystemBarAppearance()
@@ -600,6 +603,30 @@ class GpuiSession : AutoCloseable {
         callback?.accept(!closed && backEnabled)
     }
 
+    /** Applies the last requested Activity orientation on attachment. Main thread only. */
+    fun setOnScreenOrientationChanged(callback: Consumer<ScreenOrientation>?) {
+        checkThread()
+        screenOrientationChanged = callback
+        if (!closed) screenOrientation?.let { callback?.accept(it) }
+    }
+
+    private fun setScreenOrientation(value: Int): Boolean {
+        checkThread()
+        if (closed || screenOrientationChanged == null) return false
+        val next = ScreenOrientation.entries.getOrNull(value) ?: return false
+        if (screenOrientation == next) return true
+        screenOrientation = next
+        if (!screenOrientationPosted) {
+            screenOrientationPosted = true
+            // Rotation may resize or recreate the host. Apply after the Rust JNI call returns.
+            handler.postAtTime({
+                screenOrientationPosted = false
+                if (!closed) screenOrientation?.let { screenOrientationChanged?.accept(it) }
+            }, this, SystemClock.uptimeMillis())
+        }
+        return true
+    }
+
     /** Handles window-wide fullscreen requests. Receives the retained mode on attachment. */
     fun setOnFullscreenChanged(callback: Consumer<Boolean>?) {
         checkThread()
@@ -929,6 +956,9 @@ class GpuiSession : AutoCloseable {
                 backEnabled = false
                 backChanged?.accept(false)
                 backChanged = null
+                screenOrientation = null
+                screenOrientationChanged = null
+                screenOrientationPosted = false
                 fullscreen = false
                 fullscreenChanged?.accept(false)
                 fullscreenChanged = null

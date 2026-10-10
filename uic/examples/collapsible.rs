@@ -147,12 +147,20 @@ fn section(title: &'static str, description: &'static str) -> gpui::Div {
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(title),
             )
-            .child(div().text_sm().text_color(rgb(0x667085)).child(description)),
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(0x667085))
+                    .child(description),
+            ),
     )
 }
 
 fn body(text: &'static str) -> gpui::Div {
-    div().text_sm().line_height(px(22.)).child(text)
+    div()
+        .text_sm()
+        .line_height(px(22.))
+        .child(text)
 }
 
 fn main() {

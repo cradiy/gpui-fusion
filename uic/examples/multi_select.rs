@@ -51,7 +51,11 @@ impl Render for Example {
             status: SystemBarStyle::Dark,
             navigation: SystemBarStyle::Dark,
         });
-        let count = self.categories.read(cx).selected_ids().len();
+        let count = self
+            .categories
+            .read(cx)
+            .selected_ids()
+            .len();
         div().size_full().bg(rgb(0xf3f5f9)).text_color(rgb(0x25354b))
             .pt(safe.top).pb(safe.bottom).pl(safe.left).pr(safe.right)
             .child(div().id("page").size_full().overflow_y_scroll().p_5()

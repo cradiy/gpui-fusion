@@ -94,7 +94,11 @@ impl Render for ContextMenuExample {
                     .flex_col()
                     .gap_3()
                     .context_menu(move |_, cx| Self::menu(menu_entity.clone(), cx))
-                    .child(div().text_xl().child("Context menu surfaces"))
+                    .child(
+                        div()
+                            .text_xl()
+                            .child("Context menu surfaces"),
+                    )
                     .child("Right-click this card. The menu supports three levels.")
                     .child(format!("Root material: {}", self.material.label()))
                     .child(format!("Last action: {}", self.last_action)),

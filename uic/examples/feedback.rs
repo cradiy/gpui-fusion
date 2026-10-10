@@ -53,7 +53,11 @@ impl FeedbackExample {
             .text_sm()
             .text_color(rgb(0x000000).opacity(0.88))
             .cursor_pointer()
-            .hover(|style| style.border_color(rgb(0x1677ff)).text_color(rgb(0x1677ff)))
+            .hover(|style| {
+                style
+                    .border_color(rgb(0x1677ff))
+                    .text_color(rgb(0x1677ff))
+            })
             .on_click(on_click)
             .child(label.into())
     }

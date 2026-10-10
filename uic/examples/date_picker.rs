@@ -77,7 +77,10 @@ impl Render for DatePickerExample {
                                             .child("Choose dates"),
                                     )
                                     .child(
-                                        div().text_xs().text_color(rgb(0x718096)).child(selection),
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(0x718096))
+                                            .child(selection),
                                     ),
                             )
                             .child(mode_switcher(self.mode, entity)),
@@ -112,7 +115,11 @@ fn mode_switcher(
     mode: CalendarSelectionMode,
     entity: Entity<DatePickerExample>,
 ) -> impl IntoElement {
-    let mut switcher = div().p(px(3.)).flex().rounded(px(10.)).bg(rgb(0xf1f4f8));
+    let mut switcher = div()
+        .p(px(3.))
+        .flex()
+        .rounded(px(10.))
+        .bg(rgb(0xf1f4f8));
     for (index, (candidate, label)) in [
         (CalendarSelectionMode::Single, "Single"),
         (CalendarSelectionMode::Range, "Range"),

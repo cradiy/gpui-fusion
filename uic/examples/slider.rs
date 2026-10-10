@@ -52,7 +52,9 @@ impl Render for RangeControlsExample {
             ],
         );
         let progress_appearance = ProgressAppearance::default().fill(accent.clone());
-        let volume_slider = SliderAppearance::default().h(px(4.)).rounded_full();
+        let volume_slider = SliderAppearance::default()
+            .h(px(4.))
+            .rounded_full();
         let custom_slider = SliderAppearance::default()
             .active_track(accent)
             .secondary_track(rgba(0x38bdf840).into())
@@ -162,7 +164,10 @@ impl Render for RangeControlsExample {
                                     .appearance(custom_slider)
                                     .active_content(div().size_full().bg(rgba(0xffffff18)))
                                     .thumb_content(
-                                        div().size(px(7.)).rounded_full().bg(rgb(0xe0f2fe)),
+                                        div()
+                                            .size(px(7.))
+                                            .rounded_full()
+                                            .bg(rgb(0xe0f2fe)),
                                     ),
                             )
                             .child(

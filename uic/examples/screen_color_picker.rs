@@ -57,10 +57,18 @@ impl Render for Demo {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().text_size(px(22.)).child("Screen color"))
+                    .child(
+                        div()
+                            .text_size(px(22.))
+                            .child("Screen color"),
+                    )
                     .child(ScreenColorPicker::new(&self.screen)),
             )
-            .child(div().text_size(px(13.)).child(self.status.clone()))
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .child(self.status.clone()),
+            )
             .child(ColorPicker::new(&self.color))
             .child(AlphaSlider::new(&self.color))
             .child(div().h(px(60.)).rounded_md().bg(color))

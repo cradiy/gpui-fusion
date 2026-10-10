@@ -30,6 +30,7 @@ pub mod scrollbar;
 pub mod select;
 pub mod selection;
 pub mod slider;
+pub mod split_pane;
 pub mod swipe_actions;
 pub mod tabs;
 pub mod tags_input;

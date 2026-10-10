@@ -75,7 +75,11 @@ impl Example {
     }
 }
 fn unit() -> impl IntoElement {
-    div().text_sm().text_color(rgb(0x8391a4)).pr_2().child("px")
+    div()
+        .text_sm()
+        .text_color(rgb(0x8391a4))
+        .pr_2()
+        .child("px")
 }
 impl Render for Example {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

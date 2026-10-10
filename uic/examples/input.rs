@@ -24,7 +24,11 @@ impl InputExample {
 
         Self {
             title: cx.new(|cx| TextInput::new(cx).placeholder("Give your notes a title")),
-            notes: cx.new(|cx| TextInput::new(cx).multiline().initial_value(notes)),
+            notes: cx.new(|cx| {
+                TextInput::new(cx)
+                    .multiline()
+                    .initial_value(notes)
+            }),
             draft: cx.new(|cx| {
                 TextInput::new(cx)
                     .multiline()

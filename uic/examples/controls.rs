@@ -245,7 +245,10 @@ impl Render for ControlsExample {
 }
 
 fn badge_anchor() -> gpui::Div {
-    div().size(px(48.)).rounded(px(10.)).bg(rgb(0x5b6472))
+    div()
+        .size(px(48.))
+        .rounded(px(10.))
+        .bg(rgb(0x5b6472))
 }
 
 fn main() {

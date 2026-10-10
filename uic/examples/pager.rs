@@ -96,7 +96,11 @@ impl Render for Page {
                     .flex()
                     .justify_between()
                     .items_center()
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child(name))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(name),
+                    )
                     .child(
                         div()
                             .text_sm()
@@ -132,12 +136,18 @@ impl Render for Page {
                             .child(format!("{:02}", index + 1)),
                     )
                     .child(
-                        div().flex_1().flex().flex_col().gap_1().child(label).child(
-                            div()
-                                .text_sm()
-                                .text_color(rgb(0x8994a4))
-                                .child("Personal workspace · Just for you"),
-                        ),
+                        div()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(label)
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(rgb(0x8994a4))
+                                    .child("Personal workspace · Just for you"),
+                            ),
                     )
             }))
     }
@@ -177,7 +187,11 @@ impl Render for Example {
             status: SystemBarStyle::Dark,
             navigation: SystemBarStyle::Dark,
         });
-        let selected = self.pager.read(cx).current_page().unwrap_or(0);
+        let selected = self
+            .pager
+            .read(cx)
+            .current_page()
+            .unwrap_or(0);
         let pages = self.pages.clone();
         div()
             .size_full()

@@ -44,7 +44,8 @@ fn menu() -> ContextMenu {
     context_menu_style::menu(MenuMaterial::DarkFrosted)
         .action("Open", |_, _| {})
         .submenu("More", |menu| {
-            menu.action("Details", |_, _| {}).action("Copy", |_, _| {})
+            menu.action("Details", |_, _| {})
+                .action("Copy", |_, _| {})
         })
 }
 
@@ -57,57 +58,70 @@ impl Render for Controls {
             .bg(rgb(0x19232e))
             .context_menu(|_, _| menu())
             .child(
-                div().absolute().left(px(24.)).top(px(36.)).child(
-                    dropdown(&self.dropdown)
-                        .w(px(192.))
-                        .p(px(5.))
-                        .rounded(px(10.))
-                        .border_color(rgb(0x3b4858))
-                        .shadow_md()
-                        .bg(rgb(0x222e3b))
-                        .text_size(px(13.))
-                        .text_color(rgb(0xf1f5f9))
-                        .trigger(button("Dropdown"))
-                        .menu_with(|_, _| {
-                            div()
-                                .flex()
-                                .flex_col()
-                                .child(div().px_3().py_2().child("Recent files"))
-                                .child(
-                                    div()
-                                        .px_3()
-                                        .py_2()
-                                        .text_color(rgb(0x93a5b8))
-                                        .child("Shared with me"),
-                                )
-                        }),
-                ),
+                div()
+                    .absolute()
+                    .left(px(24.))
+                    .top(px(36.))
+                    .child(
+                        dropdown(&self.dropdown)
+                            .w(px(192.))
+                            .p(px(5.))
+                            .rounded(px(10.))
+                            .border_color(rgb(0x3b4858))
+                            .shadow_md()
+                            .bg(rgb(0x222e3b))
+                            .text_size(px(13.))
+                            .text_color(rgb(0xf1f5f9))
+                            .trigger(button("Dropdown"))
+                            .menu_with(|_, _| {
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .child(
+                                        div()
+                                            .px_3()
+                                            .py_2()
+                                            .child("Recent files"),
+                                    )
+                                    .child(
+                                        div()
+                                            .px_3()
+                                            .py_2()
+                                            .text_color(rgb(0x93a5b8))
+                                            .child("Shared with me"),
+                                    )
+                            }),
+                    ),
             )
             .child(
-                div().absolute().left(px(140.)).top(px(36.)).child(
-                    Popover::new(&self.popover)
-                        .p_3()
-                        .rounded(px(10.))
-                        .border_color(rgb(0x3b4858))
-                        .shadow_md()
-                        .bg(rgb(0x222e3b))
-                        .text_size(px(13.))
-                        .text_color(rgb(0xf1f5f9))
-                        .trigger(button("Popover"))
-                        .content(|_, _| {
-                            div()
-                                .w(px(176.))
-                                .flex()
-                                .flex_col()
-                                .gap_2()
-                                .child("Popover")
-                                .child(
-                                    div()
-                                        .text_color(rgb(0x93a5b8))
-                                        .child("Content stays readable at every zoom level."),
-                                )
-                        }),
-                ),
+                div()
+                    .absolute()
+                    .left(px(140.))
+                    .top(px(36.))
+                    .child(
+                        Popover::new(&self.popover)
+                            .p_3()
+                            .rounded(px(10.))
+                            .border_color(rgb(0x3b4858))
+                            .shadow_md()
+                            .bg(rgb(0x222e3b))
+                            .text_size(px(13.))
+                            .text_color(rgb(0xf1f5f9))
+                            .trigger(button("Popover"))
+                            .content(|_, _| {
+                                div()
+                                    .w(px(176.))
+                                    .flex()
+                                    .flex_col()
+                                    .gap_2()
+                                    .child("Popover")
+                                    .child(
+                                        div()
+                                            .text_color(rgb(0x93a5b8))
+                                            .child("Content stays readable at every zoom level."),
+                                    )
+                            }),
+                    ),
             )
             .child(
                 div()
@@ -124,7 +138,13 @@ impl Render for Demo {
         let content = self
             .controls
             .clone()
-            .cached(div().w(px(780.)).h(px(320.)).style().clone())
+            .cached(
+                div()
+                    .w(px(780.))
+                    .h(px(320.))
+                    .style()
+                    .clone(),
+            )
             .cache_across_transforms();
         div()
             .size_full()
@@ -140,7 +160,11 @@ impl Render for Demo {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().text_size(px(22.)).child("Anchored overlays"))
+                    .child(
+                        div()
+                            .text_size(px(22.))
+                            .child("Anchored overlays"),
+                    )
                     .child(
                         div()
                             .px_3()

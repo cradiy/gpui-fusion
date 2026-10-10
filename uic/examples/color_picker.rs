@@ -116,12 +116,12 @@ impl ColorPickerExample {
 
     fn handle_input(&mut self, format: ColorFormat, event: &InputEvent, cx: &mut Context<Self>) {
         if let InputEvent::Change(value) = event
-            && let Some(index) =
-                self.pending_input_changes
-                    .iter()
-                    .position(|(pending_format, pending_value)| {
-                        *pending_format == format && pending_value == value
-                    })
+            && let Some(index) = self
+                .pending_input_changes
+                .iter()
+                .position(|(pending_format, pending_value)| {
+                    *pending_format == format && pending_value == value
+                })
         {
             self.pending_input_changes.remove(index);
             return;
@@ -188,7 +188,8 @@ impl ColorPickerExample {
                 continue;
             }
             let value = SharedString::from(value);
-            self.pending_input_changes.push((format, value.clone()));
+            self.pending_input_changes
+                .push((format, value.clone()));
             input.update(cx, |input, cx| input.set_value(value, cx));
         }
     }
@@ -220,7 +221,11 @@ impl ColorPickerExample {
                     })
                     .bg(color)
                     .cursor_pointer()
-                    .focus_visible(|style| style.border_2().border_color(rgb(0x06b6d4)))
+                    .focus_visible(|style| {
+                        style
+                            .border_2()
+                            .border_color(rgb(0x06b6d4))
+                    })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.set_palette_color(color, cx);
                     })),
@@ -230,7 +235,12 @@ impl ColorPickerExample {
             .flex()
             .flex_col()
             .gap_2()
-            .child(div().text_sm().text_color(rgb(0xe5e7eb)).child(label))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(0xe5e7eb))
+                    .child(label),
+            )
             .child(swatches)
     }
 
@@ -600,7 +610,10 @@ fn split_channels(value: &str) -> Vec<&str> {
 fn parse_number(value: &str, suffixes: &[&str]) -> anyhow::Result<f32> {
     let mut value = value.trim();
     for suffix in suffixes {
-        value = value.strip_suffix(suffix).unwrap_or(value).trim();
+        value = value
+            .strip_suffix(suffix)
+            .unwrap_or(value)
+            .trim();
     }
     value
         .parse::<f32>()

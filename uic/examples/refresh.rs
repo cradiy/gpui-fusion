@@ -14,7 +14,9 @@ impl Example {
         let subscription = cx.subscribe(&refresh, |_, state, _: &RefreshRequested, cx| {
             let state = state.downgrade();
             cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(Duration::from_secs(2)).await;
+                cx.background_executor()
+                    .timer(Duration::from_secs(2))
+                    .await;
                 let _ = this.update(cx, |this, cx| {
                     this.completed += 1;
                     let _ = state.update(cx, |state, cx| state.finish(cx));

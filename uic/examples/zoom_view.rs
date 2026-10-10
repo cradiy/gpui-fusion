@@ -63,7 +63,11 @@ impl Render for Example {
             status: SystemBarStyle::Dark,
             navigation: SystemBarStyle::Dark,
         });
-        let index = self.pager.read(cx).current_page().unwrap_or(0);
+        let index = self
+            .pager
+            .read(cx)
+            .current_page()
+            .unwrap_or(0);
         let zoom = self.previews[index].read(cx).zoom();
         let pager = self.pager.clone();
         let previews = self.previews.clone();

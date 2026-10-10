@@ -46,7 +46,11 @@ impl Example {
                 subscriptions.push(cx.subscribe(
                     &swipe,
                     move |this, _, event: &SwipeTriggered, cx| {
-                        if let Some(row) = this.tracks.iter_mut().find(|row| row.id == id) {
+                        if let Some(row) = this
+                            .tracks
+                            .iter_mut()
+                            .find(|row| row.id == id)
+                        {
                             row.saved = event.direction == SwipeDirection::Right;
                             this.status = format!(
                                 "{} · {}",
@@ -133,7 +137,11 @@ impl Render for Example {
                         .flex()
                         .flex_col()
                         .gap_1()
-                        .child(div().font_weight(FontWeight::SEMIBOLD).child(track.title))
+                        .child(
+                            div()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(track.title),
+                        )
                         .child(
                             div()
                                 .text_sm()

@@ -106,8 +106,18 @@ impl Render for DropdownExample {
                             .flex_col()
                             .gap_1()
                             .text_color(rgb(0xe2e8f0))
-                            .child(div().px_3().py_2().child("Arbitrary content"))
-                            .child(div().px_3().py_2().child("Any GPUI element works")),
+                            .child(
+                                div()
+                                    .px_3()
+                                    .py_2()
+                                    .child("Arbitrary content"),
+                            )
+                            .child(
+                                div()
+                                    .px_3()
+                                    .py_2()
+                                    .child("Any GPUI element works"),
+                            ),
                     ),
             )
             .child(

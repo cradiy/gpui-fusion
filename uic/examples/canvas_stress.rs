@@ -138,38 +138,49 @@ impl Render for Board {
             .w(px(1000.))
             .h(px(600.))
             .bg(rgb(0x17212c))
-            .children(self.nodes.iter().enumerate().map(|(index, node)| {
-                let content = if self.cached {
-                    node.clone()
-                        .cached(div().w(px(90.)).h(px(50.)).style().clone())
-                        .cache_across_transforms()
-                        .into_any_element()
-                } else {
-                    div()
-                        .w(px(90.))
-                        .h(px(50.))
-                        .child(node.clone())
-                        .into_any_element()
-                };
-                let content = if self.nested && index % 10 == 0 {
-                    transform_group(
-                        content,
-                        TransformationMatrix {
-                            rotation_scale: [[1.05, 0.], [0., 1.05]],
-                            translation: [0., 0.],
-                        },
-                    )
-                    .auto_raster_scale(("nested", index))
-                    .into_any_element()
-                } else {
-                    content
-                };
-                div()
-                    .absolute()
-                    .left(px(10. + (index % 10) as f32 * 98.))
-                    .top(px(10. + (index / 10) as f32 * 57.))
-                    .child(content)
-            }))
+            .children(
+                self.nodes
+                    .iter()
+                    .enumerate()
+                    .map(|(index, node)| {
+                        let content = if self.cached {
+                            node.clone()
+                                .cached(
+                                    div()
+                                        .w(px(90.))
+                                        .h(px(50.))
+                                        .style()
+                                        .clone(),
+                                )
+                                .cache_across_transforms()
+                                .into_any_element()
+                        } else {
+                            div()
+                                .w(px(90.))
+                                .h(px(50.))
+                                .child(node.clone())
+                                .into_any_element()
+                        };
+                        let content = if self.nested && index % 10 == 0 {
+                            transform_group(
+                                content,
+                                TransformationMatrix {
+                                    rotation_scale: [[1.05, 0.], [0., 1.05]],
+                                    translation: [0., 0.],
+                                },
+                            )
+                            .auto_raster_scale(("nested", index))
+                            .into_any_element()
+                        } else {
+                            content
+                        };
+                        div()
+                            .absolute()
+                            .left(px(10. + (index % 10) as f32 * 98.))
+                            .top(px(10. + (index / 10) as f32 * 57.))
+                            .child(content)
+                    }),
+            )
     }
 }
 
@@ -197,7 +208,9 @@ impl Samples {
             .iter()
             .map(|frame| {
                 if platform {
-                    frame.platform_draw_time.unwrap_or_default()
+                    frame
+                        .platform_draw_time
+                        .unwrap_or_default()
                 } else {
                     frame.build_time
                 }
@@ -217,8 +230,16 @@ impl Samples {
     }
 
     fn report(&self, phase: &str) {
-        let view_hits: u64 = self.frames.iter().map(|f| f.view_cache.hits).sum();
-        let view_misses: u64 = self.frames.iter().map(|f| f.view_cache.misses).sum();
+        let view_hits: u64 = self
+            .frames
+            .iter()
+            .map(|f| f.view_cache.hits)
+            .sum();
+        let view_misses: u64 = self
+            .frames
+            .iter()
+            .map(|f| f.view_cache.misses)
+            .sum();
         let mut reasons = gpui::ViewCacheMisses::default();
         for frame in &self.frames {
             reasons.cold += frame.view_cache_misses.cold;
@@ -247,7 +268,12 @@ impl Samples {
                     .sum::<u64>()
             })
         };
-        let peak = self.frames.iter().map(bytes).max().unwrap_or(0);
+        let peak = self
+            .frames
+            .iter()
+            .map(bytes)
+            .max()
+            .unwrap_or(0);
         let end = self.frames.back().map_or(0, bytes);
         let renderer_samples = self
             .frames
@@ -304,7 +330,8 @@ impl Demo {
             return;
         }
         if self.automated && self.step > 0 && self.step.is_multiple_of(PHASE_FRAMES) {
-            self.samples.report(PHASES[self.step / PHASE_FRAMES - 1]);
+            self.samples
+                .report(PHASES[self.step / PHASE_FRAMES - 1]);
             self.samples.frames.clear();
             if self.step == PHASE_FRAMES * PHASES.len() {
                 cx.quit();

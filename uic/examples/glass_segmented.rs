@@ -24,7 +24,12 @@ fn tab(icon: LucideIcons, label: &'static str, color: Hsla) -> impl IntoElement 
         .flex_col()
         .items_center()
         .gap(px(6.))
-        .child(svg().path(icon.path()).size(px(24.)).text_color(color))
+        .child(
+            svg()
+                .path(icon.path())
+                .size(px(24.))
+                .text_color(color),
+        )
         .child(div().child(label))
 }
 
@@ -239,13 +244,16 @@ impl Render for Demo {
                                     .items_center()
                                     .gap(px(14.))
                                     .child(self.control(true, foreground.into(), cx))
-                                    .child(div().text_size(px(12.)).text_color(secondary).child(
-                                        format!(
-                                            "Vertical · {}",
-                                            ["Overview", "Activity", "Files"]
-                                                [self.vertical_selected]
-                                        ),
-                                    )),
+                                    .child(
+                                        div()
+                                            .text_size(px(12.))
+                                            .text_color(secondary)
+                                            .child(format!(
+                                                "Vertical · {}",
+                                                ["Overview", "Activity", "Files"]
+                                                    [self.vertical_selected]
+                                            )),
+                                    ),
                             )
                             .child(
                                 div()

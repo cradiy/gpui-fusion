@@ -28,6 +28,10 @@ impl WgpuOffscreenRenderer {
     /// Creates an offscreen renderer with the requested device-pixel size.
     pub fn new(size: Size<DevicePixels>) -> anyhow::Result<Self> {
         let context = WgpuContext::new_headless()?;
+        Self::with_context(context, size)
+    }
+
+    fn with_context(context: WgpuContext, size: Size<DevicePixels>) -> anyhow::Result<Self> {
         let size = clamped_size(size);
         let renderer = WgpuRenderer::new_external(
             &context,

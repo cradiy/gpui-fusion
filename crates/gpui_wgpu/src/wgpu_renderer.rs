@@ -43,6 +43,7 @@ mod particles;
 mod pipeline_cache;
 mod presentation;
 mod simulation_capabilities;
+use pipeline_cache::EffectPipelineKind;
 pub(crate) use pipeline_cache::PipelineCache;
 #[cfg(target_os = "android")]
 pub(crate) mod android_buffer;
@@ -190,10 +191,11 @@ struct WgpuResources {
     queue: Arc<wgpu::Queue>,
     surface: Option<wgpu::Surface<'static>>,
     pipelines: Arc<WgpuPipelines>,
-    effect_pipelines: HashMap<u64, wgpu::RenderPipeline>,
-    subtree_effect_pipelines: HashMap<(u64, wgpu::TextureFormat), Option<wgpu::RenderPipeline>>,
+    effect_pipelines: HashMap<u64, Arc<wgpu::RenderPipeline>>,
+    subtree_effect_pipelines:
+        HashMap<(u64, wgpu::TextureFormat), Option<Arc<wgpu::RenderPipeline>>>,
     subtree_image_effect_pipelines:
-        HashMap<(u64, wgpu::TextureFormat), Option<wgpu::RenderPipeline>>,
+        HashMap<(u64, wgpu::TextureFormat), Option<Arc<wgpu::RenderPipeline>>>,
     subtree_textures: Vec<wgpu::Texture>,
     subtree_cache: subtree_cache::SubtreeCaptureCache,
     bloom_textures: HashMap<u32, [wgpu::Texture; 2]>,
@@ -206,7 +208,7 @@ struct WgpuResources {
     ui_captures: Vec<ui_capture::UiCapture>,
     ui_capture_indices: HashMap<usize, usize>,
     failed_effect_pipelines: HashSet<u64>,
-    backdrop_effect_pipelines: HashMap<u64, wgpu::RenderPipeline>,
+    backdrop_effect_pipelines: HashMap<u64, Arc<wgpu::RenderPipeline>>,
     failed_backdrop_effect_pipelines: HashSet<u64>,
     bind_group_layouts: Arc<WgpuBindGroupLayouts>,
     atlas_sampler: wgpu::Sampler,
@@ -1139,14 +1141,10 @@ impl WgpuRenderer {
                     .subtree_image_effect_pipelines
                     .contains_key(&key)
                 {
-                    let result = Self::create_effect_pipeline(
-                        &self.resources().device,
-                        &self.resources().bind_group_layouts,
+                    let result = self.shared_effect_pipeline(
                         surface_format,
-                        self.surface_config.alpha_mode,
                         &effect.shader,
-                        true,
-                        true,
+                        EffectPipelineKind::SubtreeImages,
                     );
                     self.resources_mut()
                         .subtree_image_effect_pipelines
@@ -1180,15 +1178,8 @@ impl WgpuRenderer {
             {
                 let key = (shader.id().as_u64(), format);
                 if !self.resources().subtree_effect_pipelines.contains_key(&key) {
-                    let result = Self::create_effect_pipeline(
-                        &self.resources().device,
-                        &self.resources().bind_group_layouts,
-                        format,
-                        self.surface_config.alpha_mode,
-                        shader,
-                        true,
-                        false,
-                    );
+                    let result =
+                        self.shared_effect_pipeline(format, shader, EffectPipelineKind::Subtree);
                     self.resources_mut()
                         .subtree_effect_pipelines
                         .insert(key, result.ok());
@@ -1209,14 +1200,10 @@ impl WgpuRenderer {
                 continue;
             }
 
-            let result = Self::create_effect_pipeline(
-                &self.resources().device,
-                &self.resources().bind_group_layouts,
+            let result = self.shared_effect_pipeline(
                 self.surface_config.format,
-                self.surface_config.alpha_mode,
                 &shader,
-                false,
-                false,
+                EffectPipelineKind::Quad,
             );
             match result {
                 Ok(pipeline) => {
@@ -1329,13 +1316,7 @@ impl WgpuRenderer {
                 continue;
             }
 
-            let result = Self::create_backdrop_effect_pipeline(
-                &self.resources().device,
-                &self.resources().bind_group_layouts,
-                self.surface_config.format,
-                self.surface_config.alpha_mode,
-                &shader,
-            );
+            let result = self.shared_backdrop_effect_pipeline(&shader);
             match result {
                 Ok(pipeline) => {
                     self.resources_mut()

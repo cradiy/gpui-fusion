@@ -5,6 +5,9 @@ use std::{
     sync::{Arc, Weak},
 };
 
+mod effects;
+pub(super) use effects::EffectPipelineKind;
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct PipelineKey {
     format: wgpu::TextureFormat,
@@ -15,7 +18,7 @@ struct PipelineKey {
 
 const RETAINED_PIPELINE_CAPACITY: usize = 4;
 
-/// Retains layouts and the most recently used pipeline configurations per device.
+/// Device-local layouts and bounded strong caches for base and custom pipelines.
 /// Weak entries share evicted configurations while renderers still use them.
 #[derive(Default)]
 pub(crate) struct PipelineCache {
@@ -23,6 +26,19 @@ pub(crate) struct PipelineCache {
     layouts: Option<Arc<WgpuBindGroupLayouts>>,
     pipelines: HashMap<PipelineKey, Weak<WgpuPipelines>>,
     retained: VecDeque<(PipelineKey, Arc<WgpuPipelines>)>,
+    effects: effects::EffectPipelineCache,
+}
+
+impl PipelineCache {
+    fn set_device(&mut self, device: &Arc<wgpu::Device>) {
+        let device = Arc::downgrade(device);
+        if !self.device.ptr_eq(&device) {
+            *self = Self {
+                device,
+                ..Default::default()
+            };
+        }
+    }
 }
 
 impl WgpuRenderer {
@@ -34,13 +50,7 @@ impl WgpuRenderer {
         dual_source: bool,
     ) -> (Arc<WgpuBindGroupLayouts>, Arc<WgpuPipelines>) {
         let mut cache = context.pipeline_cache.lock().unwrap();
-        let device = Arc::downgrade(&context.device);
-        if !cache.device.ptr_eq(&device) {
-            *cache = PipelineCache {
-                device,
-                ..Default::default()
-            };
-        }
+        cache.set_device(&context.device);
         let layouts = cache.layouts.clone().unwrap_or_else(|| {
             let layouts = Arc::new(Self::create_bind_group_layouts(&context.device));
             cache.layouts = Some(layouts.clone());

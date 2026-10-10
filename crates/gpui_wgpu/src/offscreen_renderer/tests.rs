@@ -7,6 +7,78 @@ use std::borrow::Cow;
 
 #[test]
 #[ignore = "requires a GPU adapter"]
+fn rounded_subtree_pixels_survive_renderer_rebuilds() -> anyhow::Result<()> {
+    let context = WgpuContext::new_headless()?;
+    let bounds = bounds(0., 0., 64., 64.);
+    let mut content = Scene::default();
+    content.insert_primitive(gpui::Quad {
+        bounds,
+        content_mask: ContentMask { bounds },
+        background: rgba(0xff8033ff).into(),
+        ..Default::default()
+    });
+    content.finish();
+    let shader = gpui::EffectShader::wgsl_image(
+        r#"
+        fn effect(input: EffectInput, params: EffectParams) -> vec4<f32> {
+            let half_size = input.size * 0.5;
+            let radius = params.slots[0].x;
+            let q = abs((input.uv - vec2<f32>(0.5)) * input.size)
+                - half_size + vec2<f32>(radius);
+            let distance = length(max(q, vec2<f32>(0.0)))
+                + min(max(q.x, q.y), 0.0) - radius;
+            let color = sample_effect_image(input, input.uv);
+            return vec4<f32>(color.rgb, color.a * (1.0 - smoothstep(-0.5, 0.5, distance)));
+        }
+    "#,
+    );
+    let mut scene = Scene::default();
+    scene.insert_primitive(gpui::Primitive::SubtreeLayer(gpui::SubtreeLayer {
+        scene: std::rc::Rc::new(content),
+        second_scene: None,
+        scene3d: None,
+        intermediate_effects: Default::default(),
+        composite: gpui::EffectQuad {
+            order: 0,
+            bounds,
+            effect_bounds: bounds,
+            content_mask: ContentMask { bounds },
+            transformation: Default::default(),
+            corner_radii: Default::default(),
+            shader,
+            uniforms: gpui::EffectUniforms::new().with_slot(0, [16., 0., 0., 0.]),
+            time: 0.,
+            opacity: 1.,
+            image_tile: None,
+            second_image_tile: None,
+            third_image_tile: None,
+            fourth_image_tile: None,
+        },
+    }));
+    scene.finish();
+    let mut expected = None;
+    for _ in 0..2 {
+        let mut renderer = WgpuOffscreenRenderer::with_context(
+            context.clone(),
+            size(DevicePixels(64), DevicePixels(64)),
+        )?;
+        let pixels = renderer.render_rgba(&scene)?;
+        assert_eq!(&pixels[..3], [0, 0, 0], "rounded corner must be clipped");
+        assert!(
+            pixels[(32 * 64 + 32) * 4] > 200,
+            "center must remain visible"
+        );
+        if let Some(expected) = &expected {
+            assert_eq!(&pixels, expected);
+        } else {
+            expected = Some(pixels);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
 fn particle_and_fluid_simulations_render_and_replay() -> anyhow::Result<()> {
     use gpui_effects::{Fluid, FluidOptions, FluidSplat, ParticleSpawn, Particles};
     use std::time::Duration;

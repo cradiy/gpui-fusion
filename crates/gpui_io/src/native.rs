@@ -258,6 +258,11 @@ struct NativeLocation {
     executor: IoExecutor,
 }
 impl PlatformLocation for NativeLocation {
+    fn create_dir(&self, relative_path: String) -> LocalBoxFuture<'static, Result<()>> {
+        let path = self.path.join(relative_path);
+        self.executor
+            .run(move || Ok(std::fs::create_dir_all(path)?))
+    }
     fn open_file(&self, relative_path: PathBuf) -> LocalBoxFuture<'static, Result<FileHandle>> {
         let path = self.path.join(relative_path);
         let executor = self.executor.clone();

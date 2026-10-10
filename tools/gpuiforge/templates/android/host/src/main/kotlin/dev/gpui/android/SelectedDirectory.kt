@@ -91,20 +91,37 @@ internal class SelectedDirectory(
         }
     }
 
-    @Synchronized fun create(relativePath: String, mime: String): SelectedDocument {
-        val parts = parts(relativePath)
-        require(mime.matches(Regex("[^/\\s]+/[^/\\s]+")) && !mime.contains('*') && mime != Document.MIME_TYPE_DIR) { "A concrete file MIME type is required" }
+    private fun ensureDirectories(parts: List<String>): Uri {
         var parent = root
-        for (part in parts.dropLast(1)) {
+        for (part in parts) {
             val existing = child(parent, part)
             parent = if (existing != null) {
                 require(existing.second == Document.MIME_TYPE_DIR) { "Parent path is not a directory" }
                 existing.first
             } else {
-                DocumentsContract.createDocument(resolver, parent, Document.MIME_TYPE_DIR, part)
+                val created = DocumentsContract.createDocument(resolver, parent, Document.MIME_TYPE_DIR, part)
                     ?: throw IOException("Unable to create parent directory")
+                val cursor = resolver.query(created, arrayOf(Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE), null, null, null)
+                    ?: throw IOException("Created directory unavailable")
+                cursor.use {
+                    if (!it.moveToFirst() || it.getString(0) != part || it.getString(1) != Document.MIME_TYPE_DIR) {
+                        throw IOException("Provider did not create the requested directory: $part")
+                    }
+                }
+                created
             }
         }
+        return parent
+    }
+
+    @Synchronized fun createDirectory(relativePath: String) {
+        ensureDirectories(parts(relativePath))
+    }
+
+    @Synchronized fun create(relativePath: String, mime: String): SelectedDocument {
+        val parts = parts(relativePath)
+        require(mime.matches(Regex("[^/\\s]+/[^/\\s]+")) && !mime.contains('*') && mime != Document.MIME_TYPE_DIR) { "A concrete file MIME type is required" }
+        val parent = ensureDirectories(parts.dropLast(1))
         if (child(parent, parts.last()) != null) throw java.nio.file.FileAlreadyExistsException(relativePath)
         val uri = DocumentsContract.createDocument(resolver, parent, mime, parts.last())
             ?: throw IOException("Unable to create file")

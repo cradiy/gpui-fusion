@@ -107,7 +107,25 @@ replacement. They return `ErrorKind::Unsupported` without modifying contents.
 There is no automatic fallback to a truncating write. `write()` and `write_stream()`
 retain their ordinary truncating semantics.
 
-## Reading directories and opening existing files
+## Creating and reading directories
+
+`create_dir(relative_path)` creates a directory and any missing parents, including
+an empty leaf directory. Existing directories succeed without changes. A file at
+any component causes an error. Use `/` separators; empty paths, absolute paths,
+empty components, `.` and `..` are rejected before accessing storage. Native
+filesystem symlinks are followed normally. Creation is not transactional: a failure
+may leave parent directories that were already created.
+
+```rust,ignore
+location.create_dir("Cloude/DriveDownloads").await?;
+let entries = location.read_dir("Cloude").await?;
+```
+
+Native locations and Android directories granted through the directory picker
+support explicit directory creation. Android MediaStore collections cannot create
+standalone empty directories and return `ErrorKind::Unsupported`; select a directory
+with the system picker when empty folders are needed. Collection `create_file()`
+can still place a file at a nested relative path.
 
 `read_dir()` lists immediate children on an I/O worker. An empty relative path
 selects the location itself; a path such as `"Archive/2026"` selects a child

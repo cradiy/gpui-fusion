@@ -5,6 +5,7 @@
 # gpuiforge:endif
 # gpuiforge:if files
 -keep class dev.gpui.android.SelectedDocument { *; }
+-keep class dev.gpui.android.SelectedDirectory { *; }
 -keep class dev.gpui.android.DocumentOutput { *; }
 -keep class dev.gpui.android.FileStore { *; }
 # gpuiforge:endif

@@ -42,6 +42,21 @@ struct Directory {
 }
 
 impl PlatformLocation for Directory {
+    fn create_dir(&self, relative_path: String) -> LocalBoxFuture<'static, Result<()>> {
+        let document = self.document.clone();
+        self.executor.run(move || {
+            document.call(|env| {
+                let path = env.new_string(relative_path)?;
+                env.call_method(
+                    document.object.as_obj(),
+                    "createDirectory",
+                    "(Ljava/lang/String;)V",
+                    &[JValue::Object(path.as_ref())],
+                )?;
+                Ok(())
+            })
+        })
+    }
     fn open_file(&self, relative_path: PathBuf) -> LocalBoxFuture<'static, Result<FileHandle>> {
         let document = self.document.clone();
         let executor = self.executor.clone();

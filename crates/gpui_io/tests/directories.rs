@@ -2,6 +2,45 @@ use futures::executor::block_on;
 use gpui_io::{CreateOptions, DirectoryEntryKind, IoExecutor, LocationHandle};
 
 #[test]
+fn directory_creation_is_recursive_idempotent_and_preserves_conflicting_files() {
+    block_on(async {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("root");
+        let root = LocationHandle::from_path(
+            &path,
+            IoExecutor::new(|work| {
+                std::thread::spawn(work);
+            }),
+        );
+        for invalid in [
+            "",
+            "/absolute",
+            "../escape",
+            "a//b",
+            "a/./b",
+            "a/../b",
+            "a\\b",
+        ] {
+            assert!(root.create_dir(invalid).await.is_err());
+            assert!(!path.exists());
+        }
+        root.create_dir("资料/empty").await.unwrap();
+        assert!(root.read_dir("资料/empty").await.unwrap().is_empty());
+        let file = root
+            .create_file("资料/keep", CreateOptions::default())
+            .await
+            .unwrap();
+        file.write(b"preserved".to_vec()).await.unwrap();
+        root.create_dir("资料/empty").await.unwrap();
+        root.create_dir("资料").await.unwrap();
+        assert_eq!(root.read_dir("资料").await.unwrap().len(), 2);
+        assert!(root.create_dir("资料/keep").await.is_err());
+        assert!(root.create_dir("资料/keep/child").await.is_err());
+        assert_eq!(file.read().await.unwrap(), b"preserved");
+    });
+}
+
+#[test]
 fn listings_and_lookup_preserve_names_and_reject_missing_or_wrong_kind() {
     block_on(async {
         let temp = tempfile::tempdir().unwrap();

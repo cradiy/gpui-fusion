@@ -76,6 +76,11 @@ pub struct DirectoryEntry {
 
 /// A location can be a filesystem directory or a platform collection.
 pub trait PlatformLocation: Send + Sync {
+    /// Create a directory and missing parents at a validated slash-separated relative path.
+    /// Existing directories succeed; a file at any component must produce an error.
+    fn create_dir(&self, _relative_path: String) -> LocalBoxFuture<'static, Result<()>> {
+        Box::pin(async { Err(unsupported("location cannot create directories")) })
+    }
     fn open_file(&self, _relative_path: PathBuf) -> LocalBoxFuture<'static, Result<FileHandle>> {
         Box::pin(async { Err(unsupported("location cannot look up existing files")) })
     }
@@ -107,6 +112,13 @@ pub trait PlatformLocation: Send + Sync {
 #[derive(Clone)]
 pub struct LocationHandle(Arc<dyn PlatformLocation>);
 impl LocationHandle {
+    /// Create a directory and missing parents. An existing directory succeeds without changes.
+    /// Uses the same relative-path rules as `create_file`; failures may leave created parents.
+    pub async fn create_dir(&self, relative_path: impl Into<String>) -> Result<()> {
+        let relative_path = relative_path.into();
+        validate_relative_path(&relative_path)?;
+        self.0.create_dir(relative_path).await
+    }
     /// Look up an existing file without creating it. Access is checked again when reading/writing.
     pub async fn open_file(&self, relative_path: impl Into<PathBuf>) -> Result<FileHandle> {
         let relative_path = relative_path.into();

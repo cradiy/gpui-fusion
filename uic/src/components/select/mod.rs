@@ -15,7 +15,7 @@ use std::rc::Rc;
 /// Styles the dropdown option surface.
 #[derive(Clone)]
 pub struct SelectMenu {
-    style: StyleRefinement,
+    pub(super) style: StyleRefinement,
 }
 impl Default for SelectMenu {
     fn default() -> Self {

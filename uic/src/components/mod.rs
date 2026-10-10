@@ -11,6 +11,7 @@ pub mod bottom_sheet;
 pub mod calendar;
 pub mod collapsible;
 pub mod color_picker;
+pub mod command_palette;
 pub mod context_menu;
 pub mod dropdown;
 pub mod glass;

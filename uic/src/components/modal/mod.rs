@@ -13,6 +13,7 @@ pub use modal::{Modal, ModalPlacement};
 use super::input::Submit;
 
 const MODAL_PRIORITY: usize = 1_000;
+pub(crate) const SHEET_HANDLE_HEIGHT: gpui::Pixels = gpui::px(36.);
 
 struct ActiveModal {
     modal: Modal,
@@ -66,6 +67,8 @@ impl ModalLayer {
         }
         if let Some(previous_focus) = active.previous_focus {
             window.focus(&previous_focus, cx);
+        } else {
+            window.blur();
         }
         self.sheet_drag = None;
         self.sheet_offset = gpui::px(0.);
@@ -162,7 +165,7 @@ impl Render for ModalLayer {
                 div()
                     .id("bottom-sheet-handle")
                     .relative()
-                    .h(gpui::px(36.))
+                    .h(SHEET_HANDLE_HEIGHT)
                     .flex_shrink_0()
                     .flex()
                     .items_center()
@@ -417,7 +420,15 @@ impl Render for ModalLayer {
             );
 
         let backdrop = match placement {
-            ModalPlacement::Center => backdrop.items_center(),
+            ModalPlacement::Center => {
+                let safe = insets.effective();
+                backdrop
+                    .items_center()
+                    .pt(safe.top)
+                    .pb(safe.bottom)
+                    .pl(safe.left)
+                    .pr(safe.right)
+            }
             ModalPlacement::Top { offset } => backdrop.items_start().pt(offset),
             ModalPlacement::Bottom {
                 avoid_safe_area, ..

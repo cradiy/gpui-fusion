@@ -24,6 +24,8 @@ mod displacement_map;
 mod feedback;
 #[path = "../../../gpui_wgpu/tests/support/fluid.rs"]
 mod fluid;
+#[path = "../../../gpui_wgpu/tests/support/gradient_map.rs"]
+mod gradient_map;
 #[path = "../../../gpui_wgpu/tests/support/holographic.rs"]
 mod holographic;
 #[path = "../../../gpui_wgpu/tests/support/interaction_mapping.rs"]
@@ -40,6 +42,8 @@ mod particles;
 mod path_morph;
 #[path = "../../../gpui_wgpu/tests/support/path_motion.rs"]
 mod path_motion;
+#[path = "../../../gpui_wgpu/tests/support/pixelate.rs"]
+mod pixelate;
 #[path = "../../../gpui_wgpu/tests/support/sdf.rs"]
 mod sdf;
 #[path = "../../../gpui_wgpu/tests/support/shadows.rs"]
@@ -98,6 +102,7 @@ native_effect_test!(
     displacement_map,
     feedback,
     fluid,
+    gradient_map,
     holographic,
     interaction_mapping,
     motion_blur,
@@ -106,6 +111,7 @@ native_effect_test!(
     particles,
     path_morph,
     path_motion,
+    pixelate,
     sdf,
     shadows,
     subtree_transition

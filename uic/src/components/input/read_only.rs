@@ -176,11 +176,7 @@ mod tests {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string("unchanged".into()));
             });
             visual.simulate_click(gpui::point(px(50.), px(22.)), Default::default());
-            visual.simulate_keystrokes(if cfg!(target_os = "macos") {
-                "cmd-a cmd-c"
-            } else {
-                "ctrl-a ctrl-c"
-            });
+            visual.simulate_keystrokes(&gpui::platform_shortcut("ctrl-a ctrl-c"));
             visual.update(|_, cx| {
                 assert_eq!(
                     cx.read_from_clipboard()

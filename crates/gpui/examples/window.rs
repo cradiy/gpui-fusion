@@ -332,7 +332,11 @@ fn run_example() {
 
         cx.activate(true);
         cx.on_action(|_: &Quit, cx| cx.quit());
-        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        cx.bind_keys([KeyBinding::new(
+            &gpui::platform_shortcut("ctrl-q"),
+            Quit,
+            None,
+        )]);
     });
 }
 

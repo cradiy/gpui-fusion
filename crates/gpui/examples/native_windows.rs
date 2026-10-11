@@ -120,7 +120,7 @@ impl Render for NativeWindow {
 fn main() {
     application().run(|cx| {
         cx.bind_keys([
-            KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new(&gpui::platform_shortcut("ctrl-q"), Quit, None),
             KeyBinding::new("f2", OpenPopup, None),
         ]);
         cx.on_action(|_: &Quit, cx| cx.quit());

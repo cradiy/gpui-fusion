@@ -83,12 +83,11 @@ fn listings_and_lookup_preserve_names_and_reject_missing_or_wrong_kind() {
         assert!(root.read_dir("missing").await.is_err());
         assert!(!temp.path().join("missing").exists());
 
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "macos")))]
         {
-            use std::os::unix::{ffi::OsStringExt, fs::symlink};
+            use std::os::unix::ffi::OsStringExt;
             let name = std::ffi::OsString::from_vec(b"raw-\xff".to_vec());
             std::fs::write(temp.path().join(&name), b"raw").unwrap();
-            symlink("资料", temp.path().join("link")).unwrap();
             let entries = root.read_dir("").await.unwrap();
             let raw = entries.iter().find(|entry| entry.name == name).unwrap();
             assert_eq!(
@@ -100,6 +99,11 @@ fn listings_and_lookup_preserve_names_and_reject_missing_or_wrong_kind() {
                     .unwrap(),
                 b"raw"
             );
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("资料", temp.path().join("link")).unwrap();
+            let entries = root.read_dir("").await.unwrap();
             assert_eq!(
                 entries
                     .iter()

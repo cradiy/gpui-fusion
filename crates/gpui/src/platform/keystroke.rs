@@ -6,6 +6,7 @@ use std::{
 };
 
 use crate::PlatformKeyboardMapper;
+pub use gpui_util::platform_shortcut;
 
 /// This is a helper trait so that we can simplify the implementation of some functions
 pub trait AsKeystroke {

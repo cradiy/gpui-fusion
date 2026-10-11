@@ -78,7 +78,7 @@ fn navigation_selection_free_text_and_outside_dismissal(cx: &mut TestAppContext)
         assert!(matches!(&this.events[1], AutocompleteEvent::Selected(option) if option.id == "c"));
     })
     .unwrap();
-    visual.simulate_keystrokes("ctrl-a");
+    visual.simulate_keystrokes(&gpui::platform_shortcut("ctrl-a"));
     visual.simulate_input("custom");
     draw(&mut visual);
     visual.simulate_keystrokes("enter");
@@ -190,7 +190,7 @@ fn custom_shortcuts_navigate_and_confirm_without_stealing_editing(cx: &mut TestA
         assert!(this.state.focus_handle(cx).is_focused(window));
         assert!(matches!(this.events.last(), Some(AutocompleteEvent::Selected(option)) if option.id == "a"));
     }).unwrap();
-    visual.simulate_keystrokes("ctrl-a");
+    visual.simulate_keystrokes(&gpui::platform_shortcut("ctrl-a"));
     visual.simulate_input("Custom");
     draw(&mut visual);
     visual.simulate_keystrokes("tab");

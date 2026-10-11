@@ -427,7 +427,7 @@ fn effect(input: EffectInput, params: EffectParams) -> vec4<f32> {
 
         assert_eq!(
             shader_struct_span(&module, "Background") as usize,
-            std::mem::size_of::<gpui::Background>()
+            std::mem::size_of::<gpui::GpuBackground>()
         );
         assert_eq!(
             shader_struct_offsets(&module, "Quad"),

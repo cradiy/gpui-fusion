@@ -41,7 +41,11 @@ fn run_example() {
     application().run(|cx: &mut App| {
         let mut bounds = Bounds::centered(None, size(px(500.), px(500.0)), cx);
 
-        cx.bind_keys([KeyBinding::new("cmd-w", CloseWindow, None)]);
+        cx.bind_keys([KeyBinding::new(
+            &gpui::platform_shortcut("ctrl-w"),
+            CloseWindow,
+            None,
+        )]);
         cx.on_window_closed(|cx, _window_id| {
             if cx.windows().is_empty() {
                 cx.quit();

@@ -14,7 +14,7 @@ use std::{
 
 pub mod arc_cow;
 mod shortcuts;
-pub use shortcuts::uses_command_modifier;
+pub use shortcuts::{platform_shortcut, uses_command_modifier};
 
 #[cfg(target_os = "android")]
 pub mod android;

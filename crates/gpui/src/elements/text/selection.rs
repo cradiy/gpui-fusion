@@ -517,11 +517,7 @@ mod tests {
     }
 
     fn copy(visual: &mut VisualTestContext) -> Option<String> {
-        visual.simulate_keystrokes(if cfg!(target_os = "macos") {
-            "cmd-c"
-        } else {
-            "ctrl-c"
-        });
+        visual.simulate_keystrokes(&crate::platform_shortcut("ctrl-c"));
         visual.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))
     }
 
@@ -537,11 +533,7 @@ mod tests {
             .update(&mut visual.cx, |view, _, _| view.text[5..35].to_owned())
             .unwrap();
         assert_eq!(copy(&mut visual), Some(expected));
-        visual.simulate_keystrokes(if cfg!(target_os = "macos") {
-            "cmd-a"
-        } else {
-            "ctrl-a"
-        });
+        visual.simulate_keystrokes(&crate::platform_shortcut("ctrl-a"));
         let text = window
             .update(&mut visual.cx, |view, _, _| view.text.to_string())
             .unwrap();
@@ -567,11 +559,7 @@ mod tests {
             point(end.x + (link_end.x - end.x) * 0.8, end.y),
             Default::default(),
         );
-        visual.simulate_keystrokes(if cfg!(target_os = "macos") {
-            "cmd-a"
-        } else {
-            "ctrl-a"
-        });
+        visual.simulate_keystrokes(&crate::platform_shortcut("ctrl-a"));
         window
             .update(&mut visual.cx, |view, _, cx| {
                 assert_eq!(view.clicks, 1);
@@ -583,11 +571,7 @@ mod tests {
             window.draw(cx).clear();
         });
         assert_eq!(copy(&mut visual).as_deref(), Some("lin"));
-        visual.simulate_keystrokes(if cfg!(target_os = "macos") {
-            "cmd-a"
-        } else {
-            "ctrl-a"
-        });
+        visual.simulate_keystrokes(&crate::platform_shortcut("ctrl-a"));
         assert_eq!(copy(&mut visual).as_deref(), Some("link"));
     }
 
@@ -634,18 +618,10 @@ mod tests {
             })
             .unwrap();
         visual.simulate_click(pos, Default::default());
-        visual.simulate_keystrokes(if cfg!(target_os = "macos") {
-            "cmd-a"
-        } else {
-            "ctrl-a"
-        });
+        visual.simulate_keystrokes(&crate::platform_shortcut("ctrl-a"));
         assert_eq!(copy(&mut visual), Some(displayed));
         visual.simulate_click(point(px(380.), px(380.)), Default::default());
-        visual.simulate_keystrokes(if cfg!(target_os = "macos") {
-            "cmd-a"
-        } else {
-            "ctrl-a"
-        });
+        visual.simulate_keystrokes(&crate::platform_shortcut("ctrl-a"));
         visual.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string("unchanged".into())));
         assert_eq!(copy(&mut visual).as_deref(), Some("unchanged"));
     }

@@ -199,7 +199,7 @@ fn run_example() {
         cx.bind_keys([
             KeyBinding::new("tab", Tab, None),
             KeyBinding::new("shift-tab", TabPrev, None),
-            KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new(&gpui::platform_shortcut("ctrl-q"), Quit, None),
         ]);
 
         let bounds = Bounds::centered(None, size(px(800.), px(600.0)), cx);

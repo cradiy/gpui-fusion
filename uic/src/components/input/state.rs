@@ -2842,11 +2842,7 @@ mod tests {
         });
         let mut visual = draw_and_focus(&window, cx);
 
-        let select_all = if cfg!(target_os = "macos") {
-            "cmd-a"
-        } else {
-            "ctrl-a"
-        };
+        let select_all = &gpui::platform_shortcut("ctrl-a");
         visual.simulate_keystrokes(select_all);
         window
             .update(&mut visual.cx, |view, _, cx| {

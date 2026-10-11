@@ -143,7 +143,7 @@ fn run_example() {
             KeyBinding::new("home", Home, None),
             KeyBinding::new("end", End, None),
             KeyBinding::new("enter", Enter, None),
-            KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new(&gpui::platform_shortcut("ctrl-q"), Quit, None),
         ]);
 
         cx.open_window(

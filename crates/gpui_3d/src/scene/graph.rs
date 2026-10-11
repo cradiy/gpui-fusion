@@ -277,7 +277,7 @@ impl SceneGraph {
     pub fn new() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         let identity = NEXT
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
             .expect("scene graph identity exhausted");
         Self {
             identity,

@@ -325,6 +325,8 @@ fn core_video_surfaces_are_sampled_in_subtree_captures() -> anyhow::Result<()> {
         let mut renderer =
             MetalRenderer::new_headless(Arc::new(Mutex::new(InstanceBufferPool::default())));
         let region = bounds(0., 0., 16., 16.);
+        let mut wgpu_renderer =
+            gpui_wgpu::WgpuOffscreenRenderer::new(size(DevicePixels(16), DevicePixels(16)))?;
         let handle = SurfaceHandle::new();
         for sequence in 0..4 {
             let nv12 = sequence % 2 == 1;
@@ -415,6 +417,13 @@ fn core_video_surfaces_are_sampled_in_subtree_captures() -> anyhow::Result<()> {
             let pixels = renderer
                 .render_scene_to_image(&captured, size(DevicePixels(16), DevicePixels(16)))?;
             let center = pixels.get_pixel(8, 8).0;
+            if nv12 {
+                assert!(center[..3].iter().all(|c| *c >= 250), "{center:?}");
+            } else {
+                assert_eq!(center, [255, 0, 0, 255]);
+            }
+            let wgpu_pixels = wgpu_renderer.render_rgba(&captured)?;
+            let center = &wgpu_pixels[(8 * 16 + 8) * 4..][..4];
             if nv12 {
                 assert!(center[..3].iter().all(|c| *c >= 250), "{center:?}");
             } else {

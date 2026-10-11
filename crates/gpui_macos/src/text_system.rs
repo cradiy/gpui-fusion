@@ -265,7 +265,7 @@ impl MacTextSystemState {
                     };
                     let font = core_graphics::font::CGFont::from_data_provider(data_provider)
                         .map_err(|()| anyhow!("Could not load an embedded font."))?;
-                    let font = font_kit::loaders::core_text::Font::from_core_graphics_font(font);
+                    let font = crate::font_kit_bridge::from_graphics_font(font);
                     Ok(Handle::from_native(&font))
                 }
                 Cow::Owned(bytes) => Ok(Handle::from_memory(Arc::new(bytes), 0)),
@@ -406,10 +406,9 @@ impl MacTextSystemState {
                 .insert(postscript_name.clone(), font_id);
             self.postscript_names_by_font_id
                 .insert(font_id, postscript_name);
-            self.fonts
-                .push(font_kit::font::Font::from_core_graphics_font(
-                    requested_font.copy_to_CGFont(),
-                ));
+            self.fonts.push(crate::font_kit_bridge::from_graphics_font(
+                requested_font.copy_to_CGFont(),
+            ));
             font_id
         }
     }
@@ -510,8 +509,7 @@ impl MacTextSystemState {
             } else {
                 cx.set_gray_fill_color(0.0, 1.0);
             }
-            self.fonts[params.font_id.0]
-                .native_font()
+            crate::font_kit_bridge::native_font(&self.fonts[params.font_id.0])
                 .clone_with_font_size(f32::from(params.font_size) as CGFloat)
                 .draw_glyphs(
                     &[params.glyph_id.0 as CGGlyph],

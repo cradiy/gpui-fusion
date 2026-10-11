@@ -21,6 +21,7 @@ use image::RgbaImage;
 
 use core_foundation::base::TCFType;
 use core_video::{
+    image_buffer::TCVImageBuffer,
     metal_texture::{CVMetalTexture, CVMetalTextureGetTexture},
     metal_texture_cache::CVMetalTextureCache,
     pixel_buffer::CVPixelBuffer,
@@ -2129,7 +2130,7 @@ impl MetalRenderer {
         image_buffer: &CVPixelBuffer,
         format: SurfaceFormat,
     ) -> Result<CoreVideoTextures> {
-        let image = image_buffer.as_concrete_TypeRef();
+        let image = &image_buffer.as_image_buffer();
         match format {
             SurfaceFormat::Bgra8 | SurfaceFormat::Rgba8 => {
                 let pixel_format = match format {

@@ -1,5 +1,6 @@
 use super::*;
 use ::core_video::{
+    image_buffer::TCVImageBuffer,
     metal_texture::{CVMetalTexture, CVMetalTextureGetTexture},
     metal_texture_cache::CVMetalTextureCache,
     pixel_buffer::CVPixelBuffer,
@@ -193,7 +194,7 @@ fn import_plane(
 ) -> anyhow::Result<wgpu::Texture> {
     let texture = cache
         .create_texture_from_image(
-            image.as_concrete_TypeRef(),
+            &image.as_image_buffer(),
             None,
             metal_format,
             width,

@@ -62,13 +62,13 @@ pub fn apply_features_and_fallbacks(
         CFRelease(attrs as _);
         let new_descriptor = CTFontDescriptor::wrap_under_create_rule(new_descriptor);
         let new_font = CTFontCreateCopyWithAttributes(
-            font.native_font().as_concrete_TypeRef(),
+            crate::font_kit_bridge::native_font(font).as_concrete_TypeRef(),
             0.0,
             std::ptr::null(),
             new_descriptor.as_concrete_TypeRef(),
         );
         let new_font = CTFont::wrap_under_create_rule(new_font);
-        *font = font_kit::font::Font::from_native_font(&new_font);
+        *font = crate::font_kit_bridge::from_native_font(&new_font);
 
         Ok(())
     }
@@ -146,8 +146,8 @@ fn generate_fallback_array(fallbacks: &FontFallbacks, font: &mut FontKitFont) ->
             CFRelease(fallback_desc as _);
         }
 
-        let font_ref = font.native_font().as_concrete_TypeRef();
-        append_system_fallbacks(fallback_array, font_ref);
+        let native_font = crate::font_kit_bridge::native_font(font);
+        append_system_fallbacks(fallback_array, native_font.as_concrete_TypeRef());
         fallback_array
     }
 }

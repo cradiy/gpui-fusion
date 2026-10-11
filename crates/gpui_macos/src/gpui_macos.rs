@@ -19,6 +19,8 @@ mod shader_programs;
 use metal_renderer as renderer;
 
 #[cfg(feature = "font-kit")]
+mod font_kit_bridge;
+#[cfg(feature = "font-kit")]
 mod open_type;
 
 #[cfg(feature = "font-kit")]

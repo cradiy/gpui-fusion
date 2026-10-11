@@ -4,12 +4,12 @@ This is an independently maintained GPUI repository extracted from [Zed](https:/
 
 GPUI is a GPU-accelerated UI framework written in Rust. It provides core building blocks for element layout, text rendering, window management, input handling, state management, and asynchronous tasks. This repository retains the GPUI core, platform backends, and supporting crates while removing code specific to the Zed editor.
 
-It currently includes support for Linux, macOS, Windows, and the web, along with the WGPU rendering backend and Tokio integration.
+It currently includes support for Linux, macOS, Windows, Android, and the web, along with the WGPU rendering backend and Tokio integration.
 
 ## What This Fork Adds
 
 Development after the initial GPUI import focuses on embedded 3D rendering,
-reusable visual effects, media playback, UI components, and desktop integration.
+reusable visual effects, media playback, UI components, and desktop and mobile integration.
 
 ### `gpui_3d`
 
@@ -69,6 +69,18 @@ See the [glass guide](crates/gpui_effects/docs/glass.md) and the complete
 
 [`gpui_media`](crates/gpui_media) provides reusable video playback for GPUI
 applications. See its [documentation](crates/gpui_media/README.md) for usage.
+
+### Android
+
+[`gpui_android`](crates/gpui_android/docs/hosting.md) hosts Rust GPUI interfaces
+in an embeddable `GpuiView`, with a Kotlin host and WGPU rendering through Vulkan
+or OpenGL ES. It supports the `arm64-v8a` and `x86_64` Android ABIs.
+
+[`GPUiForge`](tools/gpuiforge/README.md) generates, builds, and runs Android
+projects from `gpuiforge.json`. Generated projects can also be exported for
+manual maintenance. See [Android hosting](crates/gpui_android/docs/hosting.md)
+for setup and embedding, and [GPUiForge configuration](tools/gpuiforge/docs/usage.md)
+for build options and optional host capabilities.
 
 ### Other Extensions
 

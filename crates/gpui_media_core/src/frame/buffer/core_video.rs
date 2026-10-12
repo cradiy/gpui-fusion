@@ -1,6 +1,8 @@
 use super::{FrameSize, PixelFormat};
 use crate::{MediaError, MediaResult};
-use core_video::pixel_buffer::CVPixelBuffer;
+use objc2_core_foundation::CFRetained;
+use objc2_core_video::*;
+type CVPixelBuffer = CFRetained<objc2_core_video::CVPixelBuffer>;
 use std::fmt;
 
 /// Retained, immutable CoreVideo pixel buffer.
@@ -24,17 +26,17 @@ impl CoreVideoHandle {
     }
 
     pub(super) fn validate(&self, size: FrameSize, format: PixelFormat) -> MediaResult<()> {
-        let code = self.pixel_buffer.get_pixel_format();
+        let code = CVPixelBufferGetPixelFormatType(&self.pixel_buffer);
         let matches_format = match format {
             PixelFormat::Bgra8 => code == u32::from_be_bytes(*b"BGRA"),
             PixelFormat::Rgba8 => code == u32::from_be_bytes(*b"RGBA"),
             PixelFormat::Nv12 => {
                 (code == u32::from_be_bytes(*b"420v") || code == u32::from_be_bytes(*b"420f"))
-                    && self.pixel_buffer.get_plane_count() == 2
+                    && CVPixelBufferGetPlaneCount(&self.pixel_buffer) == 2
             }
         };
-        if self.pixel_buffer.get_width() != size.width as usize
-            || self.pixel_buffer.get_height() != size.height as usize
+        if CVPixelBufferGetWidth(&self.pixel_buffer) != size.width as usize
+            || CVPixelBufferGetHeight(&self.pixel_buffer) != size.height as usize
             || !matches_format
         {
             return Err(MediaError::invalid_input(
@@ -48,8 +50,8 @@ impl CoreVideoHandle {
 impl fmt::Debug for CoreVideoHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CoreVideoHandle")
-            .field("width", &self.pixel_buffer.get_width())
-            .field("height", &self.pixel_buffer.get_height())
+            .field("width", &CVPixelBufferGetWidth(&self.pixel_buffer))
+            .field("height", &CVPixelBufferGetHeight(&self.pixel_buffer))
             .finish_non_exhaustive()
     }
 }

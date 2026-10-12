@@ -4,7 +4,11 @@ use crate::{
     ObjectFit, Pixels, Size, StyleRefinement, Styled, Window, px,
 };
 #[cfg(target_os = "macos")]
-use core_video::pixel_buffer::CVPixelBuffer;
+use objc2_core_foundation::CFRetained;
+#[cfg(target_os = "macos")]
+use objc2_core_video::*;
+#[cfg(target_os = "macos")]
+type CVPixelBuffer = CFRetained<objc2_core_video::CVPixelBuffer>;
 use smallvec::{SmallVec, smallvec};
 use std::{
     fmt,
@@ -784,9 +788,12 @@ impl fmt::Debug for CoreVideoHandle {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("CoreVideoHandle")
-            .field("width", &self.pixel_buffer.get_width())
-            .field("height", &self.pixel_buffer.get_height())
-            .field("pixel_format", &self.pixel_buffer.get_pixel_format())
+            .field("width", &CVPixelBufferGetWidth(&self.pixel_buffer))
+            .field("height", &CVPixelBufferGetHeight(&self.pixel_buffer))
+            .field(
+                "pixel_format",
+                &CVPixelBufferGetPixelFormatType(&self.pixel_buffer),
+            )
             .finish()
     }
 }
@@ -1090,11 +1097,11 @@ impl SurfaceFrame {
     ) -> Result<Self, SurfaceFrameError> {
         let coded_size = Size {
             width: DevicePixels(
-                i32::try_from(core_video.pixel_buffer.get_width())
+                i32::try_from(CVPixelBufferGetWidth(&core_video.pixel_buffer))
                     .map_err(|_| SurfaceFrameError::PlaneLayoutOverflow)?,
             ),
             height: DevicePixels(
-                i32::try_from(core_video.pixel_buffer.get_height())
+                i32::try_from(CVPixelBufferGetHeight(&core_video.pixel_buffer))
                     .map_err(|_| SurfaceFrameError::PlaneLayoutOverflow)?,
             ),
         };
@@ -1709,9 +1716,10 @@ impl SurfaceSource {
         match self {
             Self::Frame(frame) => frame.display_size(),
             #[cfg(target_os = "macos")]
-            Self::Surface(surface) => {
-                crate::size(surface.get_width().into(), surface.get_height().into())
-            }
+            Self::Surface(surface) => crate::size(
+                CVPixelBufferGetWidth(&surface).into(),
+                CVPixelBufferGetHeight(&surface).into(),
+            ),
         }
     }
 }
@@ -2084,9 +2092,21 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn accepts_core_video_backing() {
-        use core_video::pixel_buffer::kCVPixelFormatType_32BGRA;
-
-        let pixel_buffer = CVPixelBuffer::new(kCVPixelFormatType_32BGRA, 8, 4, None).unwrap();
+        let mut raw = std::ptr::null_mut();
+        let pixel_buffer = unsafe {
+            assert_eq!(
+                CVPixelBufferCreate(
+                    None,
+                    8,
+                    4,
+                    kCVPixelFormatType_32BGRA,
+                    None,
+                    std::ptr::NonNull::from(&mut raw)
+                ),
+                0
+            );
+            CFRetained::from_raw(std::ptr::NonNull::new(raw).unwrap())
+        };
         let frame = SurfaceFrame::from_core_video(
             SurfaceHandle::new(),
             9,

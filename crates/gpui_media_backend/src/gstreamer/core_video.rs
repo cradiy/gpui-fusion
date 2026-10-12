@@ -2,8 +2,10 @@
 
 use std::ffi::{c_char, c_void};
 
-use core_foundation::base::TCFType as _;
-use core_video::pixel_buffer::{CVPixelBuffer, CVPixelBufferRef};
+use objc2_core_foundation::CFRetained;
+use objc2_core_video::*;
+type CVPixelBuffer = CFRetained<objc2_core_video::CVPixelBuffer>;
+type CVPixelBufferRef = *mut objc2_core_video::CVPixelBuffer;
 use gpui_media_core::{CoreVideoHandle, FrameBacking, FrameBuffer, FrameHandle, PixelFormat};
 
 use gpui_media_core::MediaResult;
@@ -50,7 +52,7 @@ fn core_video_pixel_buffer(buffer: &gst::BufferRef) -> Option<CVPixelBuffer> {
         return None;
     }
 
-    Some(unsafe { CVPixelBuffer::wrap_under_get_rule(pixel_buffer) })
+    Some(unsafe { CFRetained::retain(std::ptr::NonNull::new(pixel_buffer)?) })
 }
 
 pub(super) fn sample_to_surface_frame(
@@ -76,11 +78,11 @@ pub(super) fn sample_to_surface_frame(
         gst_video::VideoFormat::Nv12 => PixelFormat::Nv12,
         _ => return Ok(None),
     };
-    if format == PixelFormat::Nv12 && pixel_buffer.get_plane_count() < 2 {
+    if format == PixelFormat::Nv12 && CVPixelBufferGetPlaneCount(&pixel_buffer) < 2 {
         return Ok(None);
     }
-    if pixel_buffer.get_width() != info.width() as usize
-        || pixel_buffer.get_height() != info.height() as usize
+    if CVPixelBufferGetWidth(&pixel_buffer) != info.width() as usize
+        || CVPixelBufferGetHeight(&pixel_buffer) != info.height() as usize
     {
         return Ok(None);
     }

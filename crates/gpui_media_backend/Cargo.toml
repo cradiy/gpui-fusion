@@ -30,7 +30,8 @@ gst-allocators = { package = "gstreamer-allocators", version = "0.25", optional 
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation.workspace = true
-core-video = { version = "0.6.1", default-features = false, features = ["link"] }
+objc2-core-video.workspace = true
+objc2-core-foundation.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { workspace = true, features = [

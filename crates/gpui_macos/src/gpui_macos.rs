@@ -9,8 +9,10 @@ mod display;
 mod display_link;
 mod events;
 mod keyboard;
+mod native;
 mod pasteboard;
 
+mod metal;
 mod metal_atlas;
 pub mod metal_renderer;
 mod metal_scene;
@@ -32,12 +34,11 @@ mod platform;
 mod window;
 mod window_appearance;
 
-use cocoa::{
-    base::{id, nil},
-    foundation::{NSAutoreleasePool, NSNotFound, NSString, NSUInteger},
-};
+use crate::native::*;
+use objc2::msg_send;
+use objc2_foundation::{NSNotFound, NSString, NSUInteger};
 
-use objc::runtime::{BOOL, NO, YES};
+use crate::native::{BOOL, NO, YES};
 use std::{
     ffi::{CStr, c_char},
     ops::Range,
@@ -73,7 +74,7 @@ trait NSStringExt {
 impl NSStringExt for id {
     unsafe fn to_str(&self) -> &str {
         unsafe {
-            let cstr = self.UTF8String();
+            let cstr: *const c_char = msg_send![*self, UTF8String];
             if cstr.is_null() {
                 ""
             } else {
@@ -104,8 +105,8 @@ impl NSRange {
 
     fn to_range(self) -> Option<Range<usize>> {
         if self.is_valid() {
-            let start = self.location as usize;
-            let end = start + self.length as usize;
+            let start = self.location;
+            let end = start + self.length;
             Some(start..end)
         } else {
             None
@@ -122,19 +123,15 @@ impl From<Range<usize>> for NSRange {
     }
 }
 
-unsafe impl objc::Encode for NSRange {
-    fn encode() -> objc::Encoding {
-        let encoding = format!(
-            "{{NSRange={}{}}}",
-            NSUInteger::encode().as_str(),
-            NSUInteger::encode().as_str()
-        );
-        unsafe { objc::Encoding::from_str(&encoding) }
-    }
+unsafe impl objc2::Encode for NSRange {
+    const ENCODING: objc2::encode::Encoding =
+        <objc2_foundation::NSRange as objc2::Encode>::ENCODING;
+}
+unsafe impl objc2::RefEncode for NSRange {
+    const ENCODING_REF: objc2::encode::Encoding =
+        objc2::encode::Encoding::Pointer(&<Self as objc2::Encode>::ENCODING);
 }
 
-/// Allow NSString::alloc use here because it sets autorelease
-#[allow(clippy::disallowed_methods)]
 unsafe fn ns_string(string: &str) -> id {
-    unsafe { NSString::alloc(nil).init_str(string).autorelease() }
+    objc2::rc::Retained::autorelease_ptr(NSString::from_str(string)).cast()
 }

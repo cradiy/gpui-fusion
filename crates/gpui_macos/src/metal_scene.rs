@@ -1,5 +1,8 @@
+use crate::metal::{self, *};
 use anyhow::{Context as _, Result};
-use foreign_types::ForeignTypeRef;
+use objc2::rc::Retained;
+use objc2_foundation::NSString;
+
 use gpui::{
     Bounds, ContentMask, DevicePixels, EffectQuad, EffectShader, Scene, Size, SubtreeLayer,
 };
@@ -49,7 +52,7 @@ impl MetalSceneRenderer {
                 .device
                 .as_hal::<wgpu::hal::api::Metal>()
                 .unwrap();
-            metal::DeviceRef::from_ptr((&**device.raw_device()) as *const _ as *mut _).to_owned()
+            device.raw_device().clone()
         }
     }
 
@@ -62,7 +65,7 @@ impl MetalSceneRenderer {
                 .queue
                 .as_hal::<wgpu::hal::api::Metal>()
                 .unwrap();
-            metal::CommandQueueRef::from_ptr(queue.as_raw() as *const _ as *mut _).to_owned()
+            Retained::retain(queue.as_raw() as *const _ as *mut metal::CommandQueueRef).unwrap()
         }
     }
 
@@ -157,23 +160,33 @@ pub(crate) fn metal_texture(texture: &wgpu::Texture) -> Result<metal::Texture> {
         let texture = texture
             .as_hal::<wgpu::hal::api::Metal>()
             .context("expected a Metal texture")?;
-        Ok(metal::TextureRef::from_ptr(texture.raw_handle() as *const _ as *mut _).to_owned())
+        Ok(Retained::retain(texture.raw_handle() as *const _ as *mut metal::TextureRef).unwrap())
     }
 }
 
-fn composite_pipeline_descriptor(library: &metal::LibraryRef) -> metal::RenderPipelineDescriptor {
+fn composite_pipeline_descriptor(
+    library: &metal::LibraryRef,
+) -> Retained<metal::RenderPipelineDescriptor> {
     let program = crate::shader_programs::ShaderProgram::Subtree.program();
     let descriptor = metal::RenderPipelineDescriptor::new();
-    descriptor.set_label(program.label);
-    descriptor.set_vertex_function(Some(&library.get_function(program.vertex, None).unwrap()));
-    descriptor.set_fragment_function(Some(&library.get_function(program.fragment, None).unwrap()));
-    let color = descriptor.color_attachments().object_at(0).unwrap();
-    color.set_pixel_format(metal::MTLPixelFormat::BGRA8Unorm);
-    color.set_blending_enabled(true);
-    color.set_source_rgb_blend_factor(metal::MTLBlendFactor::One);
-    color.set_source_alpha_blend_factor(metal::MTLBlendFactor::One);
-    color.set_destination_rgb_blend_factor(metal::MTLBlendFactor::OneMinusSourceAlpha);
-    color.set_destination_alpha_blend_factor(metal::MTLBlendFactor::OneMinusSourceAlpha);
+    descriptor.setLabel(Some(&NSString::from_str(program.label)));
+    descriptor.setVertexFunction(Some(
+        &library
+            .newFunctionWithName(&NSString::from_str(program.vertex))
+            .unwrap(),
+    ));
+    descriptor.setFragmentFunction(Some(
+        &library
+            .newFunctionWithName(&NSString::from_str(program.fragment))
+            .unwrap(),
+    ));
+    let color = unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) };
+    color.setPixelFormat(metal::MTLPixelFormat::BGRA8Unorm);
+    color.setBlendingEnabled(true);
+    color.setSourceRGBBlendFactor(metal::MTLBlendFactor::One);
+    color.setSourceAlphaBlendFactor(metal::MTLBlendFactor::One);
+    color.setDestinationRGBBlendFactor(metal::MTLBlendFactor::OneMinusSourceAlpha);
+    color.setDestinationAlphaBlendFactor(metal::MTLBlendFactor::OneMinusSourceAlpha);
     descriptor
 }
 
@@ -182,7 +195,7 @@ pub(crate) fn composite_pipeline(
     library: &metal::LibraryRef,
 ) -> metal::RenderPipelineState {
     device
-        .new_render_pipeline_state(&composite_pipeline_descriptor(library))
+        .newRenderPipelineStateWithDescriptor_error(&composite_pipeline_descriptor(library))
         .expect("failed to create Metal subtree composite pipeline")
 }
 

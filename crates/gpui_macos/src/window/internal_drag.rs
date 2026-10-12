@@ -29,18 +29,18 @@ impl Drop for Drag {
 
 pub(super) fn register(decl: &mut ClassDecl) {
     unsafe {
-        decl.add_protocol(Protocol::get("NSDraggingSource").unwrap());
+        decl.add_protocol(Protocol::get(c"NSDraggingSource").unwrap());
         decl.add_method(
             sel!(draggingSession:sourceOperationMaskForDraggingContext:),
-            operations as extern "C" fn(&Object, Sel, id, NSInteger) -> NSDragOperation,
+            operations as extern "C" fn(*mut Object, Sel, id, NSInteger) -> NSDragOperation,
         );
         decl.add_method(
             sel!(draggingSession:endedAtPoint:operation:),
-            ended as extern "C" fn(&Object, Sel, id, NSPoint, NSDragOperation),
+            ended as extern "C" fn(*mut Object, Sel, id, NSPoint, NSDragOperation),
         );
         decl.add_method(
             sel!(ignoreModifierKeysForDraggingSession:),
-            ignore_modifiers as extern "C" fn(&Object, Sel, id) -> BOOL,
+            ignore_modifiers as extern "C" fn(*mut Object, Sel, id) -> BOOL,
         );
     }
 }
@@ -105,7 +105,7 @@ pub(super) fn update(
         image.write_to(&mut bytes, image::ImageFormat::Png)?;
         let bytes = bytes.into_inner();
         unsafe {
-            let data: id = msg_send![class!(NSData), dataWithBytes: bytes.as_ptr() length: bytes.len()];
+            let data: id = msg_send![class!(NSData), dataWithBytes: bytes.as_ptr() , length: bytes.len()];
             let image: id = msg_send![class!(NSImage), alloc];
             let image: id = msg_send![image, initWithData: data];
             anyhow::ensure!(!image.is_null(), "failed to create drag image");
@@ -115,7 +115,7 @@ pub(super) fn update(
             if !drag.item.is_null() {
                 let frame: NSRect = msg_send![drag.item, draggingFrame];
                 let rect = updated_image_frame(frame, drag.hotspot, logical_size, hotspot);
-                let _: () = msg_send![drag.item, setDraggingFrame: rect contents: image];
+                let _: () = msg_send![drag.item, setDraggingFrame: rect , contents: image];
             }
             drag.logical_size = logical_size;
             drag.hotspot = hotspot;
@@ -174,14 +174,14 @@ pub(super) fn start(
         anyhow::ensure!(drag.session.is_null(), "drag session already started");
         unsafe {
             let writer: id = msg_send![class!(NSPasteboardItem), new];
-            let _: BOOL = msg_send![writer, setString: ns_string(&session_id.as_u64().to_string()) forType: ns_string(PASTEBOARD_TYPE)];
+            let _: BOOL = msg_send![writer, setString: ns_string(&session_id.as_u64().to_string()) , forType: ns_string(PASTEBOARD_TYPE)];
             let item: id = msg_send![class!(NSDraggingItem), alloc];
             let item: id = msg_send![item, initWithPasteboardWriter: writer];
             let _: () = msg_send![writer, release];
             let location: NSPoint = msg_send![event, locationInWindow];
-            let location: NSPoint = msg_send![view, convertPoint: location fromView: nil];
+            let location: NSPoint = msg_send![view, convertPoint: location , fromView: nil];
             let rect = NSRect::new(NSPoint::new(location.x - drag.hotspot.x.to_f64(), location.y - drag.logical_size.height.to_f64() + drag.hotspot.y.to_f64()), NSSize::new(drag.logical_size.width.to_f64(), drag.logical_size.height.to_f64()));
-            let _: () = msg_send![item, setDraggingFrame: rect contents: drag.image];
+            let _: () = msg_send![item, setDraggingFrame: rect , contents: drag.image];
             drag.item = item;
             Ok(item)
         }
@@ -189,9 +189,9 @@ pub(super) fn start(
     // AppKit can synchronously call NSDraggingSource while starting the session.
     // Never hold the process-local registry borrow or window mutex across this call.
     unsafe {
-        let items = NSArray::arrayWithObject(nil, item);
+        let items: id = msg_send![class!(NSArray), arrayWithObject: item];
         let session: id =
-            msg_send![view, beginDraggingSessionWithItems: items event: event source: view];
+            msg_send![view, beginDraggingSessionWithItems: items , event: event , source: view];
         if session.is_null() {
             destroy(session_id);
             anyhow::bail!("AppKit refused the drag session");
@@ -199,7 +199,7 @@ pub(super) fn start(
         let _: () = msg_send![session, setAnimatesToStartingPositionsOnCancelOrFail: NO];
         DRAG.with(|slot| {
             if let Some(drag) = slot.borrow_mut().as_mut().filter(|d| d.id == session_id) {
-                let _: () = msg_send![session, retain];
+                retain_native(session);
                 drag.session = session;
             }
         });
@@ -240,10 +240,10 @@ pub(super) fn cancel(session_id: DragSessionId) {
         lock.foreground_executor.spawn(async move {
             if !DRAG.with(|slot| slot.borrow().as_ref().is_some_and(|d| d.id == session_id && d.cancelled && !d.session.is_null())) { return; }
             if_window_not_closed(closed, || unsafe {
-            let app = NSApplication::sharedApplication(nil);
+            let app: id = msg_send![class!(NSApplication), sharedApplication];
             let number: NSInteger = msg_send![window, windowNumber];
-            let event: id = msg_send![class!(NSEvent), keyEventWithType: 10u64 location: NSPoint::new(0.,0.) modifierFlags: 0u64 timestamp: 0f64 windowNumber: number context: nil characters: ns_string("\u{1b}") charactersIgnoringModifiers: ns_string("\u{1b}") isARepeat: NO keyCode: 53u16];
-            let _: () = msg_send![app, postEvent: event atStart: YES];
+            let event: id = msg_send![class!(NSEvent), keyEventWithType: 10u64 , location: NSPoint::new(0.,0.) , modifierFlags: 0u64 , timestamp: 0f64 , windowNumber: number , context: nil , characters: ns_string("\u{1b}") , charactersIgnoringModifiers: ns_string("\u{1b}") , isARepeat: NO , keyCode: 53u16];
+            let _: () = msg_send![app, postEvent: event , atStart: YES];
         }); }).detach();
     } else {
         destroy(session_id);
@@ -299,17 +299,17 @@ pub(super) fn dropped(
     accepted.to_objc()
 }
 
-extern "C" fn operations(_: &Object, _: Sel, _: id, context: NSInteger) -> NSDragOperation {
+extern "C" fn operations(_: *mut Object, _: Sel, _: id, context: NSInteger) -> NSDragOperation {
     if context == 1 && DRAG.with(|slot| slot.borrow().as_ref().is_some_and(|d| !d.cancelled)) {
         MOVE
     } else {
         NSDragOperationNone
     }
 }
-extern "C" fn ignore_modifiers(_: &Object, _: Sel, _: id) -> BOOL {
+extern "C" fn ignore_modifiers(_: *mut Object, _: Sel, _: id) -> BOOL {
     YES
 }
-extern "C" fn ended(_: &Object, _: Sel, _: id, _: NSPoint, operation: NSDragOperation) {
+extern "C" fn ended(_: *mut Object, _: Sel, _: id, _: NSPoint, operation: NSDragOperation) {
     let drag = DRAG.with(|slot| slot.borrow_mut().take());
     if let Some(drag) = drag {
         if let Some(source) = drag.source.upgrade() {

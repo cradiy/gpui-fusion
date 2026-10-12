@@ -131,7 +131,7 @@ fn scene(layer: SubtreeLayer) -> Scene {
 
 #[test]
 fn metal_scene3d_composites_depth_clipping_opacity_and_native_paint_order() -> anyhow::Result<()> {
-    objc::rc::autoreleasepool(|| {
+    objc2::rc::autoreleasepool(|_| {
         let mut renderer =
             MetalRenderer::new_headless(Arc::new(Mutex::new(InstanceBufferPool::default())));
         assert!(renderer.scene3d_support().is_supported());
@@ -176,7 +176,7 @@ fn metal_scene3d_composites_depth_clipping_opacity_and_native_paint_order() -> a
 fn metal_scene3d_shares_atlas_captures_picking_and_cache_lifecycle() -> anyhow::Result<()> {
     use gpui::{PlatformAtlas, Scene3dPickCapture};
     use gpui_wgpu::{WgpuContext, WgpuScene3dPickFrame};
-    objc::rc::autoreleasepool(|| {
+    objc2::rc::autoreleasepool(|_| {
         let pool = Arc::new(Mutex::new(InstanceBufferPool::default()));
         let mut renderer = MetalRenderer::new_headless(pool.clone());
         let atlas = renderer.sprite_atlas().clone();
@@ -250,7 +250,7 @@ fn metal_scene3d_shares_atlas_captures_picking_and_cache_lifecycle() -> anyhow::
 #[test]
 fn metal_scene3d_atlas_uploads_reach_native_sprites_and_transparent_meshes() -> anyhow::Result<()> {
     use gpui::{PlatformAtlas, PolychromeSprite};
-    objc::rc::autoreleasepool(|| {
+    objc2::rc::autoreleasepool(|_| {
         let mut renderer =
             MetalRenderer::new_headless(Arc::new(Mutex::new(InstanceBufferPool::default())));
         renderer.update_transparency(true);
@@ -309,19 +309,17 @@ fn metal_scene3d_atlas_uploads_reach_native_sprites_and_transparent_meshes() -> 
 
 #[test]
 fn core_video_surfaces_are_sampled_in_subtree_captures() -> anyhow::Result<()> {
-    use core_foundation::{base::TCFType, dictionary::CFDictionary, string::CFString};
-    use core_video::pixel_buffer::{
-        CVPixelBuffer, kCVPixelBufferIOSurfacePropertiesKey, kCVPixelFormatType_32BGRA,
-        kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-    };
     use gpui::{
         CoreVideoHandle, PaintSurface, SurfaceColorInfo, SurfaceFormat, SurfaceFrame, SurfaceHandle,
     };
-    objc::rc::autoreleasepool(|| {
-        let attributes = CFDictionary::from_CFType_pairs(&[(
-            unsafe { CFString::wrap_under_get_rule(kCVPixelBufferIOSurfacePropertiesKey) },
-            CFDictionary::<CFString, CFString>::from_CFType_pairs(&[]).as_CFType(),
-        )]);
+    use objc2_core_foundation::{CFDictionary, CFRetained, CFType};
+    use objc2_core_video::*;
+    use std::ptr::NonNull;
+    objc2::rc::autoreleasepool(|_| {
+        let attributes: CFRetained<CFDictionary<CFType, CFType>> = CFDictionary::from_slices(
+            &[unsafe { kCVPixelBufferIOSurfacePropertiesKey }.as_ref()],
+            &[CFDictionary::<CFType, CFType>::empty().as_ref()],
+        );
         let mut renderer =
             MetalRenderer::new_headless(Arc::new(Mutex::new(InstanceBufferPool::default())));
         let region = bounds(0., 0., 16., 16.);
@@ -330,36 +328,45 @@ fn core_video_surfaces_are_sampled_in_subtree_captures() -> anyhow::Result<()> {
         let handle = SurfaceHandle::new();
         for sequence in 0..4 {
             let nv12 = sequence % 2 == 1;
-            let buffer = CVPixelBuffer::new(
-                if nv12 {
-                    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-                } else {
-                    kCVPixelFormatType_32BGRA
-                },
-                8,
-                8,
-                Some(&attributes),
-            )
-            .unwrap();
-            assert_eq!(buffer.lock_base_address(0), 0);
+            let mut raw = std::ptr::null_mut();
+            let buffer = unsafe {
+                assert_eq!(
+                    CVPixelBufferCreate(
+                        None,
+                        8,
+                        8,
+                        if nv12 {
+                            kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+                        } else {
+                            kCVPixelFormatType_32BGRA
+                        },
+                        Some(attributes.as_opaque()),
+                        NonNull::from(&mut raw)
+                    ),
+                    0
+                );
+                CFRetained::from_raw(NonNull::new(raw).unwrap())
+            };
+            assert_eq!(
+                unsafe { CVPixelBufferLockBaseAddress(&buffer, CVPixelBufferLockFlags::empty()) },
+                0
+            );
             unsafe {
                 if nv12 {
                     for row in 0..8 {
                         std::ptr::write_bytes(
-                            buffer
-                                .get_base_address_of_plane(0)
+                            CVPixelBufferGetBaseAddressOfPlane(&buffer, 0)
                                 .cast::<u8>()
-                                .add(row * buffer.get_bytes_per_row_of_plane(0)),
+                                .add(row * CVPixelBufferGetBytesPerRowOfPlane(&buffer, 0)),
                             235,
                             8,
                         );
                     }
                     for row in 0..4 {
                         std::ptr::write_bytes(
-                            buffer
-                                .get_base_address_of_plane(1)
+                            CVPixelBufferGetBaseAddressOfPlane(&buffer, 1)
                                 .cast::<u8>()
-                                .add(row * buffer.get_bytes_per_row_of_plane(1)),
+                                .add(row * CVPixelBufferGetBytesPerRowOfPlane(&buffer, 1)),
                             128,
                             8,
                         );
@@ -374,17 +381,19 @@ fn core_video_surfaces_are_sampled_in_subtree_captures() -> anyhow::Result<()> {
                             };
                             std::ptr::copy_nonoverlapping(
                                 color.as_ptr(),
-                                buffer
-                                    .get_base_address()
+                                CVPixelBufferGetBaseAddress(&buffer)
                                     .cast::<u8>()
-                                    .add(y * buffer.get_bytes_per_row() + x * 4),
+                                    .add(y * CVPixelBufferGetBytesPerRow(&buffer) + x * 4),
                                 4,
                             );
                         }
                     }
                 }
             }
-            assert_eq!(buffer.unlock_base_address(0), 0);
+            assert_eq!(
+                unsafe { CVPixelBufferUnlockBaseAddress(&buffer, CVPixelBufferLockFlags::empty()) },
+                0
+            );
             let frame = SurfaceFrame::from_core_video(
                 handle.clone(),
                 sequence,
@@ -455,7 +464,7 @@ fn core_video_surfaces_are_sampled_in_subtree_captures() -> anyhow::Result<()> {
 
 #[test]
 fn captured_backdrop_blur_samples_preceding_content() -> anyhow::Result<()> {
-    objc::rc::autoreleasepool(|| {
+    objc2::rc::autoreleasepool(|_| {
         let mut renderer =
             MetalRenderer::new_headless(Arc::new(Mutex::new(InstanceBufferPool::default())));
         let region = bounds(0., 0., 64., 32.);

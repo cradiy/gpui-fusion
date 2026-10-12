@@ -1,3 +1,4 @@
+use crate::native::{BOOL, YES};
 use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, DispatchTime, GlobalQueueIdentifier};
 use gpui::{PlatformDispatcher, Priority, RunnableMeta, RunnableVariant};
 use gpui_util::ResultExt;
@@ -13,11 +14,7 @@ use mach2::{
 };
 
 use async_task::Runnable;
-use objc::{
-    class, msg_send,
-    runtime::{BOOL, YES},
-    sel, sel_impl,
-};
+use objc2::{class, msg_send};
 use std::{ffi::c_void, ptr::NonNull, time::Duration};
 
 pub(crate) struct MacDispatcher;

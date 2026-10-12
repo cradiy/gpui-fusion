@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+pub mod core_video;
 mod cosmic_text_system;
 #[cfg(not(target_family = "wasm"))]
 mod id_remap;

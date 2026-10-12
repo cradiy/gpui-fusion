@@ -1,3 +1,5 @@
+use crate::metal::Device;
+use crate::metal::{self, *};
 use anyhow::{Context as _, Result};
 use collections::FxHashMap;
 use derive_more::{Deref, DerefMut};
@@ -6,7 +8,6 @@ use gpui::{
     AtlasKey, AtlasTextureId, AtlasTextureKind, AtlasTextureList, AtlasTile, Bounds, DevicePixels,
     PlatformAtlas, Point, Size,
 };
-use metal::Device;
 use parking_lot::Mutex;
 use std::{borrow::Cow, sync::Arc};
 
@@ -183,8 +184,8 @@ impl MetalAtlasState {
         };
         let size = min_size.min(&MAX_ATLAS_SIZE).max(&DEFAULT_ATLAS_SIZE);
         let texture_descriptor = metal::TextureDescriptor::new();
-        texture_descriptor.set_width(size.width.into());
-        texture_descriptor.set_height(size.height.into());
+        unsafe { texture_descriptor.setWidth(size.width.into()) };
+        unsafe { texture_descriptor.setHeight(size.height.into()) };
         let pixel_format;
         let usage;
         match kind {
@@ -200,16 +201,19 @@ impl MetalAtlasState {
             }
             AtlasTextureKind::Subpixel => unreachable!(),
         }
-        texture_descriptor.set_pixel_format(pixel_format);
-        texture_descriptor.set_usage(usage);
+        texture_descriptor.setPixelFormat(pixel_format);
+        texture_descriptor.setUsage(usage);
         // Shared memory mode can be used only on Apple GPU families
         // https://developer.apple.com/documentation/metal/mtlresourceoptions/storagemodeshared
-        texture_descriptor.set_storage_mode(if self.is_apple_gpu {
+        texture_descriptor.setStorageMode(if self.is_apple_gpu {
             metal::MTLStorageMode::Shared
         } else {
             metal::MTLStorageMode::Managed
         });
-        let metal_texture = self.device.new_texture(&texture_descriptor);
+        let metal_texture = self
+            .device
+            .newTextureWithDescriptor(&texture_descriptor)
+            .expect("Metal newTextureWithDescriptor failed");
 
         let texture_list = match kind {
             AtlasTextureKind::Monochrome => &mut self.monochrome_textures,
@@ -275,25 +279,28 @@ impl MetalAtlasTexture {
     }
 
     fn upload(&self, bounds: Bounds<DevicePixels>, bytes: &[u8]) {
-        let region = metal::MTLRegion::new_2d(
+        let region = metal::region_2d(
             bounds.origin.x.into(),
             bounds.origin.y.into(),
             bounds.size.width.into(),
             bounds.size.height.into(),
         );
-        self.metal_texture.replace_region(
-            region,
-            0,
-            bytes.as_ptr() as *const _,
-            bounds.size.width.to_bytes(self.bytes_per_pixel()) as u64,
-        );
+        unsafe {
+            self.metal_texture
+                .replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+                    region,
+                    0,
+                    std::ptr::NonNull::new(bytes.as_ptr().cast_mut().cast()).unwrap(),
+                    bounds.size.width.to_bytes(self.bytes_per_pixel()) as usize,
+                )
+        };
     }
 
     fn bytes_per_pixel(&self) -> u8 {
-        use metal::MTLPixelFormat::*;
-        match self.metal_texture.pixel_format() {
-            A8Unorm | R8Unorm => 1,
-            RGBA8Unorm | BGRA8Unorm => 4,
+        use crate::metal::MTLPixelFormat;
+        match self.metal_texture.pixelFormat() {
+            MTLPixelFormat::A8Unorm | MTLPixelFormat::R8Unorm => 1,
+            MTLPixelFormat::RGBA8Unorm | MTLPixelFormat::BGRA8Unorm => 4,
             _ => unimplemented!(),
         }
     }
@@ -330,7 +337,7 @@ mod tests {
     use std::borrow::Cow;
 
     fn create_atlas() -> Option<MetalAtlas> {
-        let device = metal::Device::system_default()?;
+        let device = metal::MTLCreateSystemDefaultDevice()?;
         Some(MetalAtlas::new(device, true))
     }
 

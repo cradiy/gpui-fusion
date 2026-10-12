@@ -22,10 +22,13 @@ impl Drop for PopupState {
 
 pub(super) fn parent(options: &PopupOptions) -> anyhow::Result<Arc<Mutex<MacWindowState>>> {
     unsafe {
-        let app = NSApplication::sharedApplication(nil);
+        let app: id = msg_send![class!(NSApplication), sharedApplication];
         let windows: id = msg_send![app, windows];
-        for ix in 0..NSArray::count(windows) {
-            let window = NSArray::objectAtIndex(windows, ix);
+        for ix in 0..({
+            let value: NSUInteger = msg_send![windows, count];
+            value
+        }) {
+            let window: id = msg_send![windows, objectAtIndex: ix];
             if msg_send![window, isKindOfClass: WINDOW_CLASS]
                 || msg_send![window, isKindOfClass: PANEL_CLASS]
             {
@@ -116,11 +119,14 @@ pub(super) fn frame(parent: &MacWindowState, options: &PopupOptions, size: NSSiz
                 anchor_rect.size.height.to_f64(),
             ),
         );
-        let rect: NSRect = msg_send![view, convertRect: rect toView: nil];
+        let rect: NSRect = msg_send![view, convertRect: rect , toView: nil];
         let rect: NSRect = msg_send![parent.native_window, convertRectToScreen: rect];
         let screen: id = msg_send![parent.native_window, screen];
         let screen = if screen.is_null() {
-            NSScreen::mainScreen(nil)
+            {
+                let value: id = msg_send![class!(NSScreen), mainScreen];
+                value
+            }
         } else {
             screen
         };
@@ -168,16 +174,16 @@ pub(super) fn attach(
     let parent_native = parent.lock().native_window;
     let weak = Arc::downgrade(&window.0);
     unsafe {
-        let _: () = msg_send![parent_native, addChildWindow: native ordered: NSWindowOrderingMode::NSWindowAbove];
-        let block = ConcreteBlock::new(move |_: id| {
+        let _: () =
+            msg_send![parent_native, addChildWindow: native , ordered: NSWindowOrderingMode::Above];
+        let block = RcBlock::new(move |_: id| {
             if let Some(state) = weak.upgrade() {
                 dismiss(&state);
             }
-        })
-        .copy();
+        });
         let center: id = msg_send![class!(NSNotificationCenter), defaultCenter];
         let observer: id = if options.grab {
-            msg_send![center, addObserverForName: ns_string("NSApplicationDidResignActiveNotification") object: nil queue: nil usingBlock: &*block]
+            msg_send![center, addObserverForName: ns_string("NSApplicationDidResignActiveNotification") , object: nil , queue: nil , usingBlock: &*block]
         } else {
             nil
         };
@@ -186,7 +192,17 @@ pub(super) fn attach(
             options,
             parent: Arc::downgrade(&parent),
             observer,
-            requested_size: NSView::bounds(native.contentView()).size,
+            requested_size: ({
+                let value: NSRect = msg_send![
+                    ({
+                        let value: id = msg_send![native, contentView];
+                        value
+                    }),
+                    bounds
+                ];
+                value
+            })
+            .size,
         });
     }
 }
@@ -203,7 +219,7 @@ pub(super) fn reposition(state: &Arc<Mutex<MacWindowState>>) {
     let rect = frame(&parent.lock(), &popup.options, popup.requested_size);
     drop(lock);
     unsafe {
-        let _: () = msg_send![native, setFrame: rect display: YES];
+        let _: () = msg_send![native, setFrame: rect , display: YES];
     }
 }
 
@@ -235,8 +251,11 @@ pub(super) fn reposition_children(state: &Arc<Mutex<MacWindowState>>) {
                     return;
                 }
                 let children: id = msg_send![children, copy];
-                for ix in 0..NSArray::count(children) {
-                    let child = NSArray::objectAtIndex(children, ix);
+                for ix in 0..({
+                    let value: NSUInteger = msg_send![children, count];
+                    value
+                }) {
+                    let child: id = msg_send![children, objectAtIndex: ix];
                     if msg_send![child, isKindOfClass: PANEL_CLASS] {
                         reposition(&get_window_state(&*child));
                     }
@@ -264,7 +283,7 @@ pub(super) fn dismiss(state: &Arc<Mutex<MacWindowState>>) {
                 let native = lock.native_window;
                 drop(lock);
                 unsafe {
-                    native.close();
+                    let _: () = msg_send![native, close];
                 }
             }
         })

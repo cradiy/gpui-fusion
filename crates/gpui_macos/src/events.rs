@@ -5,29 +5,90 @@ use gpui::{
     ScrollWheelEvent, TouchPhase, point, px,
 };
 
+use crate::native::*;
 use crate::{
-    LMGetKbdType, NSStringExt, TISCopyCurrentKeyboardLayoutInputSource, TISGetInputSourceProperty,
+    LMGetKbdType, TISCopyCurrentKeyboardLayoutInputSource, TISGetInputSourceProperty,
     UCKeyTranslate, kTISPropertyUnicodeKeyLayoutData,
-};
-use cocoa::{
-    appkit::{NSEvent, NSEventModifierFlags, NSEventPhase, NSEventType},
-    base::{YES, id},
 };
 use core_foundation::data::{CFDataGetBytePtr, CFDataRef};
 use core_graphics::event::CGKeyCode;
-use objc::{msg_send, sel, sel_impl};
+use objc2::msg_send;
+use objc2_app_kit::*;
 use std::{borrow::Cow, ffi::c_void};
 
-const BACKSPACE_KEY: u16 = 0x7f;
-const SPACE_KEY: u16 = b' ' as u16;
-const ENTER_KEY: u16 = 0x0d;
-const NUMPAD_ENTER_KEY: u16 = 0x03;
-pub(crate) const ESCAPE_KEY: u16 = 0x1b;
-const TAB_KEY: u16 = 0x09;
-const SHIFT_TAB_KEY: u16 = 0x19;
+const BACKSPACE_KEY: u32 = 0x7f;
+const SPACE_KEY: u32 = b' ' as u32;
+const ENTER_KEY: u32 = 0x0d;
+const NUMPAD_ENTER_KEY: u32 = 0x03;
+pub(crate) const ESCAPE_KEY: u32 = 0x1b;
+const TAB_KEY: u32 = 0x09;
+const SHIFT_TAB_KEY: u32 = 0x19;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use objc2::{class, rc::Retained};
+    use objc2_foundation::{NSPoint, NSString};
+
+    unsafe fn key_event(kind: NSEventType, flags: NSEventModifierFlags) -> Retained<NSEvent> {
+        let characters = NSString::from_str("\u{f700}");
+        unsafe {
+            msg_send![class!(NSEvent),
+                keyEventWithType: kind,
+                location: NSPoint::new(0., 0.),
+                modifierFlags: flags,
+                timestamp: 0.0f64,
+                windowNumber: 0isize,
+                context: nil,
+                characters: &*characters,
+                charactersIgnoringModifiers: &*characters,
+                isARepeat: true,
+                keyCode: 126u16,
+            ]
+        }
+    }
+
+    #[test]
+    fn native_arrow_key_preserves_command_and_repeat() {
+        objc2::rc::autoreleasepool(|_| unsafe {
+            let event = key_event(
+                NSEventType::KeyDown,
+                NSEventModifierFlags::Command | NSEventModifierFlags::Function,
+            );
+            let event = Retained::as_ptr(&event).cast_mut().cast();
+            let Some(PlatformInput::KeyDown(event)) = platform_input_from_native(event, None)
+            else {
+                panic!("expected a key-down event");
+            };
+            assert_eq!(event.keystroke.key, "up");
+            assert!(event.keystroke.modifiers.platform);
+            assert!(!event.keystroke.modifiers.function);
+            assert!(event.is_held);
+        });
+    }
+
+    #[test]
+    fn native_modifier_event_preserves_caps_lock_and_control() {
+        objc2::rc::autoreleasepool(|_| unsafe {
+            let event = key_event(
+                NSEventType::FlagsChanged,
+                NSEventModifierFlags::CapsLock | NSEventModifierFlags::Control,
+            );
+            let event = Retained::as_ptr(&event).cast_mut().cast();
+            let Some(PlatformInput::ModifiersChanged(event)) =
+                platform_input_from_native(event, None)
+            else {
+                panic!("expected a modifier-change event");
+            };
+            assert!(event.capslock.on);
+            assert!(event.modifiers.control);
+            assert!(!event.modifiers.platform);
+        });
+    }
+}
 
 pub fn key_to_native(key: &str) -> Cow<'_, str> {
-    use cocoa::appkit::*;
+    use objc2_app_kit::*;
     let code = match key {
         "space" => SPACE_KEY,
         "backspace" => BACKSPACE_KEY,
@@ -79,17 +140,17 @@ pub fn key_to_native(key: &str) -> Cow<'_, str> {
         "f35" => NSF35FunctionKey,
         _ => return Cow::Borrowed(key),
     };
-    Cow::Owned(String::from_utf16(&[code]).unwrap())
+    Cow::Owned(char::from_u32(code).unwrap().to_string())
 }
 
 unsafe fn read_modifiers(native_event: id) -> Modifiers {
     unsafe {
-        let modifiers = native_event.modifierFlags();
-        let control = modifiers.contains(NSEventModifierFlags::NSControlKeyMask);
-        let alt = modifiers.contains(NSEventModifierFlags::NSAlternateKeyMask);
-        let shift = modifiers.contains(NSEventModifierFlags::NSShiftKeyMask);
-        let command = modifiers.contains(NSEventModifierFlags::NSCommandKeyMask);
-        let function = modifiers.contains(NSEventModifierFlags::NSFunctionKeyMask);
+        let modifiers = (&*native_event.cast::<NSEvent>()).modifierFlags();
+        let control = modifiers.contains(NSEventModifierFlags::Control);
+        let alt = modifiers.contains(NSEventModifierFlags::Option);
+        let shift = modifiers.contains(NSEventModifierFlags::Shift);
+        let command = modifiers.contains(NSEventModifierFlags::Command);
+        let function = modifiers.contains(NSEventModifierFlags::Function);
 
         Modifiers {
             control,
@@ -106,40 +167,32 @@ pub(crate) unsafe fn platform_input_from_native(
     window_height: Option<Pixels>,
 ) -> Option<PlatformInput> {
     unsafe {
-        let event_type = native_event.eventType();
-
-        // Filter out event types that aren't in the NSEventType enum.
-        // See https://github.com/servo/cocoa-rs/issues/155#issuecomment-323482792 for details.
-        match event_type as u64 {
-            0 | 21 | 32 | 33 | 35 | 36 | 37 => {
-                return None;
-            }
-            _ => {}
-        }
+        let event = &*native_event.cast::<NSEvent>();
+        let event_type = event.r#type();
 
         match event_type {
-            NSEventType::NSFlagsChanged => {
+            NSEventType::FlagsChanged => {
                 Some(PlatformInput::ModifiersChanged(ModifiersChangedEvent {
                     modifiers: read_modifiers(native_event),
                     capslock: Capslock {
-                        on: native_event
+                        on: event
                             .modifierFlags()
-                            .contains(NSEventModifierFlags::NSAlphaShiftKeyMask),
+                            .contains(NSEventModifierFlags::CapsLock),
                     },
                 }))
             }
-            NSEventType::NSKeyDown => Some(PlatformInput::KeyDown(KeyDownEvent {
+            NSEventType::KeyDown => Some(PlatformInput::KeyDown(KeyDownEvent {
                 keystroke: parse_keystroke(native_event),
-                is_held: native_event.isARepeat() == YES,
+                is_held: event.isARepeat(),
                 prefer_character_input: false,
             })),
-            NSEventType::NSKeyUp => Some(PlatformInput::KeyUp(KeyUpEvent {
+            NSEventType::KeyUp => Some(PlatformInput::KeyUp(KeyUpEvent {
                 keystroke: parse_keystroke(native_event),
             })),
-            NSEventType::NSLeftMouseDown
-            | NSEventType::NSRightMouseDown
-            | NSEventType::NSOtherMouseDown => {
-                let button = match native_event.buttonNumber() {
+            NSEventType::LeftMouseDown
+            | NSEventType::RightMouseDown
+            | NSEventType::OtherMouseDown => {
+                let button = match event.buttonNumber() {
                     0 => MouseButton::Left,
                     1 => MouseButton::Right,
                     2 => MouseButton::Middle,
@@ -152,20 +205,18 @@ pub(crate) unsafe fn platform_input_from_native(
                     PlatformInput::MouseDown(MouseDownEvent {
                         button,
                         position: point(
-                            px(native_event.locationInWindow().x as f32),
+                            px(event.locationInWindow().x as f32),
                             // MacOS screen coordinates are relative to bottom left
-                            window_height - px(native_event.locationInWindow().y as f32),
+                            window_height - px(event.locationInWindow().y as f32),
                         ),
                         modifiers: read_modifiers(native_event),
-                        click_count: native_event.clickCount() as usize,
+                        click_count: event.clickCount() as usize,
                         first_mouse: false,
                     })
                 })
             }
-            NSEventType::NSLeftMouseUp
-            | NSEventType::NSRightMouseUp
-            | NSEventType::NSOtherMouseUp => {
-                let button = match native_event.buttonNumber() {
+            NSEventType::LeftMouseUp | NSEventType::RightMouseUp | NSEventType::OtherMouseUp => {
+                let button = match event.buttonNumber() {
                     0 => MouseButton::Left,
                     1 => MouseButton::Right,
                     2 => MouseButton::Middle,
@@ -179,17 +230,17 @@ pub(crate) unsafe fn platform_input_from_native(
                     PlatformInput::MouseUp(MouseUpEvent {
                         button,
                         position: point(
-                            px(native_event.locationInWindow().x as f32),
-                            window_height - px(native_event.locationInWindow().y as f32),
+                            px(event.locationInWindow().x as f32),
+                            window_height - px(event.locationInWindow().y as f32),
                         ),
                         modifiers: read_modifiers(native_event),
-                        click_count: native_event.clickCount() as usize,
+                        click_count: event.clickCount() as usize,
                     })
                 })
             }
-            NSEventType::NSEventTypePressure => {
-                let stage = native_event.stage();
-                let pressure = native_event.pressure();
+            NSEventType::Pressure => {
+                let stage = event.stage();
+                let pressure = event.pressure();
 
                 window_height.map(|window_height| {
                     PlatformInput::MousePressure(MousePressureEvent {
@@ -201,16 +252,16 @@ pub(crate) unsafe fn platform_input_from_native(
                         pressure,
                         modifiers: read_modifiers(native_event),
                         position: point(
-                            px(native_event.locationInWindow().x as f32),
-                            window_height - px(native_event.locationInWindow().y as f32),
+                            px(event.locationInWindow().x as f32),
+                            window_height - px(event.locationInWindow().y as f32),
                         ),
                     })
                 })
             }
             // Some mice (like Logitech MX Master) send navigation buttons as swipe events
-            NSEventType::NSEventTypeSwipe => {
-                let navigation_direction = match native_event.phase() {
-                    NSEventPhase::NSEventPhaseEnded => match native_event.deltaX() {
+            NSEventType::Swipe => {
+                let navigation_direction = match event.phase() {
+                    NSEventPhase::Ended => match event.deltaX() {
                         x if x > 0.0 => Some(NavigationDirection::Back),
                         x if x < 0.0 => Some(NavigationDirection::Forward),
                         _ => return None,
@@ -223,8 +274,8 @@ pub(crate) unsafe fn platform_input_from_native(
                         PlatformInput::MouseDown(MouseDownEvent {
                             button: MouseButton::Navigate(direction),
                             position: point(
-                                px(native_event.locationInWindow().x as f32),
-                                window_height - px(native_event.locationInWindow().y as f32),
+                                px(event.locationInWindow().x as f32),
+                                window_height - px(event.locationInWindow().y as f32),
                             ),
                             modifiers: read_modifiers(native_event),
                             click_count: 1,
@@ -234,42 +285,38 @@ pub(crate) unsafe fn platform_input_from_native(
                     _ => None,
                 }
             }
-            NSEventType::NSEventTypeMagnify => window_height.map(|window_height| {
-                let phase = match native_event.phase() {
-                    NSEventPhase::NSEventPhaseMayBegin | NSEventPhase::NSEventPhaseBegan => {
-                        TouchPhase::Started
-                    }
-                    NSEventPhase::NSEventPhaseEnded => TouchPhase::Ended,
+            NSEventType::Magnify => window_height.map(|window_height| {
+                let phase = match event.phase() {
+                    NSEventPhase::MayBegin | NSEventPhase::Began => TouchPhase::Started,
+                    NSEventPhase::Ended => TouchPhase::Ended,
                     _ => TouchPhase::Moved,
                 };
 
-                let magnification = native_event.magnification() as f32;
+                let magnification = event.magnification() as f32;
 
                 PlatformInput::Pinch(PinchEvent {
                     position: point(
-                        px(native_event.locationInWindow().x as f32),
-                        window_height - px(native_event.locationInWindow().y as f32),
+                        px(event.locationInWindow().x as f32),
+                        window_height - px(event.locationInWindow().y as f32),
                     ),
                     delta: magnification,
                     modifiers: read_modifiers(native_event),
                     phase,
                 })
             }),
-            NSEventType::NSScrollWheel => window_height.map(|window_height| {
-                let phase = match native_event.phase() {
-                    NSEventPhase::NSEventPhaseMayBegin | NSEventPhase::NSEventPhaseBegan => {
-                        TouchPhase::Started
-                    }
-                    NSEventPhase::NSEventPhaseEnded => TouchPhase::Ended,
+            NSEventType::ScrollWheel => window_height.map(|window_height| {
+                let phase = match event.phase() {
+                    NSEventPhase::MayBegin | NSEventPhase::Began => TouchPhase::Started,
+                    NSEventPhase::Ended => TouchPhase::Ended,
                     _ => TouchPhase::Moved,
                 };
 
                 let raw_data = point(
-                    native_event.scrollingDeltaX() as f32,
-                    native_event.scrollingDeltaY() as f32,
+                    event.scrollingDeltaX() as f32,
+                    event.scrollingDeltaY() as f32,
                 );
 
-                let delta = if native_event.hasPreciseScrollingDeltas() == YES {
+                let delta = if event.hasPreciseScrollingDeltas() {
                     ScrollDelta::Pixels(raw_data.map(px))
                 } else {
                     ScrollDelta::Lines(raw_data)
@@ -277,18 +324,18 @@ pub(crate) unsafe fn platform_input_from_native(
 
                 PlatformInput::ScrollWheel(ScrollWheelEvent {
                     position: point(
-                        px(native_event.locationInWindow().x as f32),
-                        window_height - px(native_event.locationInWindow().y as f32),
+                        px(event.locationInWindow().x as f32),
+                        window_height - px(event.locationInWindow().y as f32),
                     ),
                     delta,
                     touch_phase: phase,
                     modifiers: read_modifiers(native_event),
                 })
             }),
-            NSEventType::NSLeftMouseDragged
-            | NSEventType::NSRightMouseDragged
-            | NSEventType::NSOtherMouseDragged => {
-                let pressed_button = match native_event.buttonNumber() {
+            NSEventType::LeftMouseDragged
+            | NSEventType::RightMouseDragged
+            | NSEventType::OtherMouseDragged => {
+                let pressed_button = match event.buttonNumber() {
                     0 => MouseButton::Left,
                     1 => MouseButton::Right,
                     2 => MouseButton::Middle,
@@ -302,28 +349,28 @@ pub(crate) unsafe fn platform_input_from_native(
                     PlatformInput::MouseMove(MouseMoveEvent {
                         pressed_button: Some(pressed_button),
                         position: point(
-                            px(native_event.locationInWindow().x as f32),
-                            window_height - px(native_event.locationInWindow().y as f32),
+                            px(event.locationInWindow().x as f32),
+                            window_height - px(event.locationInWindow().y as f32),
                         ),
                         modifiers: read_modifiers(native_event),
                     })
                 })
             }
-            NSEventType::NSMouseMoved => window_height.map(|window_height| {
+            NSEventType::MouseMoved => window_height.map(|window_height| {
                 PlatformInput::MouseMove(MouseMoveEvent {
                     position: point(
-                        px(native_event.locationInWindow().x as f32),
-                        window_height - px(native_event.locationInWindow().y as f32),
+                        px(event.locationInWindow().x as f32),
+                        window_height - px(event.locationInWindow().y as f32),
                     ),
                     pressed_button: None,
                     modifiers: read_modifiers(native_event),
                 })
             }),
-            NSEventType::NSMouseExited => window_height.map(|window_height| {
+            NSEventType::MouseExited => window_height.map(|window_height| {
                 PlatformInput::MouseExited(MouseExitEvent {
                     position: point(
-                        px(native_event.locationInWindow().x as f32),
-                        window_height - px(native_event.locationInWindow().y as f32),
+                        px(event.locationInWindow().x as f32),
+                        window_height - px(event.locationInWindow().y as f32),
                     ),
 
                     pressed_button: None,
@@ -337,21 +384,22 @@ pub(crate) unsafe fn platform_input_from_native(
 
 unsafe fn parse_keystroke(native_event: id) -> Keystroke {
     unsafe {
-        use cocoa::appkit::*;
+        use objc2_app_kit::*;
 
-        let characters = native_event
+        let event = &*native_event.cast::<NSEvent>();
+        let characters = event
             .charactersIgnoringModifiers()
-            .to_str()
-            .to_string();
+            .map(|s| s.to_string())
+            .unwrap_or_default();
         let mut key_char = None;
-        let first_char = characters.chars().next().map(|ch| ch as u16);
-        let modifiers = native_event.modifierFlags();
+        let first_char = characters.chars().next().map(|ch| ch as u32);
+        let modifiers = event.modifierFlags();
 
-        let control = modifiers.contains(NSEventModifierFlags::NSControlKeyMask);
-        let alt = modifiers.contains(NSEventModifierFlags::NSAlternateKeyMask);
-        let mut shift = modifiers.contains(NSEventModifierFlags::NSShiftKeyMask);
-        let command = modifiers.contains(NSEventModifierFlags::NSCommandKeyMask);
-        let function = modifiers.contains(NSEventModifierFlags::NSFunctionKeyMask)
+        let control = modifiers.contains(NSEventModifierFlags::Control);
+        let alt = modifiers.contains(NSEventModifierFlags::Option);
+        let mut shift = modifiers.contains(NSEventModifierFlags::Shift);
+        let command = modifiers.contains(NSEventModifierFlags::Command);
+        let function = modifiers.contains(NSEventModifierFlags::Function)
             && first_char
                 .is_none_or(|ch| !(NSUpArrowFunctionKey..=NSModeSwitchFunctionKey).contains(&ch));
 
@@ -430,17 +478,15 @@ unsafe fn parse_keystroke(native_event: id) -> Keystroke {
                 // * Russian          7 | 7    | cmd-7 | cmd-&        (shift-7 is . but when cmd is down, should use cmd layout)
                 // * German QWERTZ    ; | ö    | cmd-ö | cmd-Ö        (Zed's shift special case only applies to a-z)
                 //
-                let mut chars_ignoring_modifiers =
-                    chars_for_modified_key(native_event.keyCode(), NO_MOD);
-                let mut chars_with_shift =
-                    chars_for_modified_key(native_event.keyCode(), SHIFT_MOD);
+                let mut chars_ignoring_modifiers = chars_for_modified_key(event.keyCode(), NO_MOD);
+                let mut chars_with_shift = chars_for_modified_key(event.keyCode(), SHIFT_MOD);
                 let always_use_cmd_layout = always_use_command_layout();
 
                 // Handle Dvorak+QWERTY / Russian / Armenian
                 if command || always_use_cmd_layout {
-                    let chars_with_cmd = chars_for_modified_key(native_event.keyCode(), CMD_MOD);
+                    let chars_with_cmd = chars_for_modified_key(event.keyCode(), CMD_MOD);
                     let chars_with_both =
-                        chars_for_modified_key(native_event.keyCode(), CMD_MOD | SHIFT_MOD);
+                        chars_for_modified_key(event.keyCode(), CMD_MOD | SHIFT_MOD);
 
                     // We don't do this in the case that the shifted command key generates
                     // the same character as the unshifted command key (Norwegian, e.g.)
@@ -464,7 +510,7 @@ unsafe fn parse_keystroke(native_event: id) -> Keystroke {
                         mods |= OPTION_MOD;
                     }
 
-                    key_char = Some(chars_for_modified_key(native_event.keyCode(), mods));
+                    key_char = Some(chars_for_modified_key(event.keyCode(), mods));
                 }
 
                 if shift

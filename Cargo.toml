@@ -125,11 +125,11 @@ bevy_mikktspace = { version = "1.0.0", features = [
 bitflags = "2.6.0"
 bytes = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-cocoa = "=0.26.0"
-cocoa-foundation = "=0.2.0"
 core-foundation = "0.10.1"
 core-foundation-sys = "0.8.6"
-core-video = { version = "0.6.1", features = ["metal"] }
+objc2-core-video = "0.3.2"
+objc2-core-foundation = "0.3.2"
+objc2-metal = "0.3.2"
 cpal = "0.17"
 criterion = { version = "0.5", features = ["html_reports"] }
 ctor = "1.0.13"
@@ -165,11 +165,18 @@ ksni = { version = "0.3.6", default-features = false, features = ["async-io"] }
 libc = "0.2"
 log = { version = "0.4.16", features = ["kv_unstable_serde", "serde"] }
 mach2 = "0.6"
-metal = "0.33"
-objc = "0.2"
 objc2 = "0.6.5"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+  "NSAppearance",
+  "NSApplication",
+  "NSRunningApplication",
+  "NSEvent",
+  "NSMenu",
+  "NSPasteboard",
+  "NSScreen",
+  "NSVisualEffectView",
   "NSButton",
+  "NSCell",
   "NSControl",
   "NSGraphics",
   "NSResponder",
@@ -198,6 +205,7 @@ objc2-foundation = { version = "=0.3.2", default-features = false, features = [
   "NSString",
   "NSURL",
   "NSUndoManager",
+  "NSUserDefaults",
   "NSValue",
   "objc2-core-foundation",
   "std",
@@ -232,7 +240,7 @@ rustc-hash = "2.1.0"
 rustls = { version = "0.23.26" }
 rustls-platform-verifier = "0.7.1"
 # WARNING: If you change this, you must also publish a new version of gpui-scap to crates.io
-scap = { git = "https://github.com/cradiy/scap.git", rev = "f92d7af8757e9b32caf3bba945fcf7f2163b5d44", default-features = false, package = "gpui-scap", version = "0.0.9-gpui" }
+scap = { git = "https://github.com/cradiy/scap.git", rev = "c94020e8542415fe676e4cfb804f4b5edcb1fe3d", default-features = false, package = "gpui-scap", version = "0.0.9-gpui" }
 schemars = { version = "1.0", features = ["indexmap2"] }
 semver = { version = "1.0", features = ["serde"] }
 serde = { version = "1.0.221", features = ["derive", "rc"] }

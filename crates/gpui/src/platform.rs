@@ -44,7 +44,8 @@ pub(crate) type PlatformScreenCaptureFrame = scap::frame::Frame;
 #[cfg(not(feature = "screen-capture"))]
 pub(crate) type PlatformScreenCaptureFrame = ();
 #[cfg(all(target_os = "macos", feature = "screen-capture"))]
-pub(crate) type PlatformScreenCaptureFrame = core_video::pixel_buffer::CVPixelBuffer;
+pub(crate) type PlatformScreenCaptureFrame =
+    objc2_core_foundation::CFRetained<objc2_core_video::CVPixelBuffer>;
 
 use crate::{
     Action, AnyWindowHandle, App, AsyncWindowContext, BackgroundExecutor, Bounds,

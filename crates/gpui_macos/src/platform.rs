@@ -1,21 +1,11 @@
+use crate::native::*;
 use crate::{
     BoolExt, MacDispatcher, MacDisplay, MacKeyboardLayout, MacKeyboardMapper, MacTray, MacWindow,
     events::key_to_native, ns_string, pasteboard::Pasteboard, renderer,
     set_active_window_cursor_style,
 };
 use anyhow::{Context as _, anyhow};
-use block::ConcreteBlock;
-use cocoa::{
-    appkit::{
-        NSApplication, NSApplicationActivationPolicy::NSApplicationActivationPolicyRegular,
-        NSControl as _, NSEventModifierFlags, NSMenu, NSMenuItem, NSModalResponse, NSOpenPanel,
-        NSSavePanel, NSVisualEffectState, NSVisualEffectView, NSWindow,
-    },
-    base::{BOOL, NO, YES, id, nil, selector},
-    foundation::{
-        NSArray, NSAutoreleasePool, NSBundle, NSInteger, NSProcessInfo, NSString, NSUInteger, NSURL,
-    },
-};
+use block2::RcBlock;
 use core_foundation::{
     base::{CFRelease, CFType, CFTypeRef, OSStatus, TCFType},
     boolean::CFBoolean,
@@ -36,13 +26,17 @@ use gpui::{
 };
 use gpui_util::{ResultExt, new_std_command};
 use itertools::Itertools;
-use objc::{
-    class,
-    declare::ClassDecl,
-    msg_send,
-    runtime::{Class, Object, Sel},
-    sel, sel_impl,
+use objc2::{
+    class, msg_send,
+    runtime::ClassBuilder as ClassDecl,
+    runtime::{AnyClass as Class, AnyObject as Object, Sel},
+    sel,
 };
+use objc2_app_kit::{
+    NSApplicationActivationPolicy, NSControlStateValueOn, NSEventModifierFlags, NSModalResponse,
+    NSModalResponseOK,
+};
+use objc2_foundation::{NSArray, NSInteger, NSOperatingSystemVersion, NSUInteger, NSURL};
 use parking_lot::Mutex;
 use ptr::null_mut;
 use semver::Version;
@@ -64,7 +58,7 @@ use std::{
 #[allow(non_upper_case_globals)]
 const NSUTF8StringEncoding: NSUInteger = 4;
 
-const MAC_PLATFORM_IVAR: &str = "platform";
+const MAC_PLATFORM_IVAR: &CStr = c"platform";
 static mut APP_CLASS: *const Class = ptr::null();
 static mut APP_DELEGATE_CLASS: *const Class = ptr::null();
 
@@ -72,90 +66,90 @@ static mut APP_DELEGATE_CLASS: *const Class = ptr::null();
 unsafe fn build_classes() {
     unsafe {
         APP_CLASS = {
-            let mut decl = ClassDecl::new("GPUIApplication", class!(NSApplication)).unwrap();
+            let mut decl = ClassDecl::new(c"GPUIApplication", class!(NSApplication)).unwrap();
             decl.add_ivar::<*mut c_void>(MAC_PLATFORM_IVAR);
             decl.register()
         }
     };
     unsafe {
         APP_DELEGATE_CLASS = {
-            let mut decl = ClassDecl::new("GPUIApplicationDelegate", class!(NSResponder)).unwrap();
+            let mut decl = ClassDecl::new(c"GPUIApplicationDelegate", class!(NSResponder)).unwrap();
             decl.add_ivar::<*mut c_void>(MAC_PLATFORM_IVAR);
             decl.add_method(
                 sel!(applicationWillFinishLaunching:),
-                will_finish_launching as extern "C" fn(&mut Object, Sel, id),
+                will_finish_launching as extern "C" fn(*mut Object, Sel, id),
             );
             decl.add_method(
                 sel!(applicationDidFinishLaunching:),
-                did_finish_launching as extern "C" fn(&mut Object, Sel, id),
+                did_finish_launching as extern "C" fn(*mut Object, Sel, id),
             );
             decl.add_method(
                 sel!(applicationShouldHandleReopen:hasVisibleWindows:),
-                should_handle_reopen as extern "C" fn(&mut Object, Sel, id, bool),
+                should_handle_reopen as extern "C" fn(*mut Object, Sel, id, BOOL) -> BOOL,
             );
             decl.add_method(
                 sel!(applicationWillTerminate:),
-                will_terminate as extern "C" fn(&mut Object, Sel, id),
+                will_terminate as extern "C" fn(*mut Object, Sel, id),
             );
             decl.add_method(
                 sel!(handleGPUIMenuItem:),
-                handle_menu_item as extern "C" fn(&mut Object, Sel, id),
+                handle_menu_item as extern "C" fn(*mut Object, Sel, id),
             );
             // Add menu item handlers so that OS save panels have the correct key commands
             decl.add_method(
                 sel!(cut:),
-                handle_menu_item as extern "C" fn(&mut Object, Sel, id),
+                handle_menu_item as extern "C" fn(*mut Object, Sel, id),
             );
             decl.add_method(
                 sel!(copy:),
-                handle_menu_item as extern "C" fn(&mut Object, Sel, id),
+                handle_menu_item as extern "C" fn(*mut Object, Sel, id),
             );
             decl.add_method(
                 sel!(paste:),
-                handle_menu_item as extern "C" fn(&mut Object, Sel, id),
+                handle_menu_item as extern "C" fn(*mut Object, Sel, id),
             );
             decl.add_method(
                 sel!(selectAll:),
-                handle_menu_item as extern "C" fn(&mut Object, Sel, id),
+                handle_menu_item as extern "C" fn(*mut Object, Sel, id),
             );
             decl.add_method(
                 sel!(undo:),
-                handle_menu_item as extern "C" fn(&mut Object, Sel, id),
+                handle_menu_item as extern "C" fn(*mut Object, Sel, id),
             );
             decl.add_method(
                 sel!(redo:),
-                handle_menu_item as extern "C" fn(&mut Object, Sel, id),
+                handle_menu_item as extern "C" fn(*mut Object, Sel, id),
             );
             decl.add_method(
                 sel!(validateMenuItem:),
-                validate_menu_item as extern "C" fn(&mut Object, Sel, id) -> bool,
+                validate_menu_item as extern "C" fn(*mut Object, Sel, id) -> BOOL,
             );
             decl.add_method(
                 sel!(menuWillOpen:),
-                menu_will_open as extern "C" fn(&mut Object, Sel, id),
+                menu_will_open as extern "C" fn(*mut Object, Sel, id),
             );
             decl.add_method(
                 sel!(applicationDockMenu:),
-                handle_dock_menu as extern "C" fn(&mut Object, Sel, id) -> id,
+                handle_dock_menu as extern "C" fn(*mut Object, Sel, id) -> id,
             );
             decl.add_method(
                 sel!(application:openURLs:),
-                open_urls as extern "C" fn(&mut Object, Sel, id, id),
+                open_urls as extern "C" fn(*mut Object, Sel, id, id),
             );
 
             decl.add_method(
                 sel!(onKeyboardLayoutChange:),
-                on_keyboard_layout_change as extern "C" fn(&mut Object, Sel, id),
+                on_keyboard_layout_change as extern "C" fn(*mut Object, Sel, id),
             );
 
             decl.add_method(
                 sel!(onThermalStateChange:),
-                on_thermal_state_change as extern "C" fn(&mut Object, Sel, id),
+                on_thermal_state_change as extern "C" fn(*mut Object, Sel, id),
             );
 
             decl.add_method(
                 sel!(onSystemWake:),
-                on_system_wake as extern "C" fn(&mut Object, Sel, id),
+                on_system_wake as extern "C" fn(*mut Object, Sel, id),
             );
 
             decl.register()
@@ -251,32 +245,44 @@ impl MacPlatform {
         keymap: &Keymap,
     ) -> id {
         unsafe {
-            let application_menu = NSMenu::new(nil).autorelease();
-            application_menu.setDelegate_(delegate);
+            let application_menu = ({
+                let value: id = msg_send![class!(NSMenu), new];
+                value
+            })
+            .autorelease();
+            let _: () = msg_send![application_menu, setDelegate: delegate];
 
             for menu_config in menus {
-                let menu = NSMenu::new(nil).autorelease();
+                let menu = ({
+                    let value: id = msg_send![class!(NSMenu), new];
+                    value
+                })
+                .autorelease();
                 let menu_title = ns_string(&menu_config.name);
-                menu.setTitle_(menu_title);
-                menu.setDelegate_(delegate);
+                let _: () = msg_send![menu, setTitle: menu_title];
+                let _: () = msg_send![menu, setDelegate: delegate];
 
                 for item_config in &menu_config.items {
-                    menu.addItem_(Self::create_menu_item(
+                    let _: () = msg_send![menu, addItem: Self::create_menu_item(
                         item_config,
                         delegate,
                         actions,
                         keymap,
-                    ));
+                    )];
                 }
 
-                let menu_item = NSMenuItem::new(nil).autorelease();
-                menu_item.setTitle_(menu_title);
-                menu_item.setSubmenu_(menu);
-                application_menu.addItem_(menu_item);
+                let menu_item = ({
+                    let value: id = msg_send![class!(NSMenuItem), new];
+                    value
+                })
+                .autorelease();
+                let _: () = msg_send![menu_item, setTitle: menu_title];
+                let _: () = msg_send![menu_item, setSubmenu: menu];
+                let _: () = msg_send![application_menu, addItem: menu_item];
 
                 if menu_config.name == "Window" {
                     let app: id = msg_send![APP_CLASS, sharedApplication];
-                    app.setWindowsMenu_(menu);
+                    let _: () = msg_send![app, setWindowsMenu: menu];
                 }
             }
 
@@ -292,15 +298,15 @@ impl MacPlatform {
         keymap: &Keymap,
     ) -> id {
         unsafe {
-            let dock_menu = NSMenu::new(nil);
-            dock_menu.setDelegate_(delegate);
+            let dock_menu: id = msg_send![class!(NSMenu), new];
+            let _: () = msg_send![dock_menu, setDelegate: delegate];
             for item_config in menu_items {
-                dock_menu.addItem_(Self::create_menu_item(
+                let _: () = msg_send![dock_menu, addItem: Self::create_menu_item(
                     &item_config,
                     delegate,
                     actions,
                     keymap,
-                ));
+                )];
             }
 
             dock_menu
@@ -317,11 +323,18 @@ impl MacPlatform {
 
         unsafe {
             match item {
-                MenuItem::Separator => NSMenuItem::separatorItem(nil),
+                MenuItem::Separator => {
+                    let value: id = msg_send![class!(NSMenuItem), separatorItem];
+                    value
+                }
                 MenuItem::Label(name) => {
-                    let item = NSMenuItem::new(nil).autorelease();
-                    item.setTitle_(ns_string(name));
-                    item.setEnabled_(NO);
+                    let item = ({
+                        let value: id = msg_send![class!(NSMenuItem), new];
+                        value
+                    })
+                    .autorelease();
+                    let _: () = msg_send![item, setTitle: ns_string(name)];
+                    let _: () = msg_send![item, setEnabled: NO];
                     item
                 }
                 MenuItem::Action {
@@ -356,15 +369,15 @@ impl MacPlatform {
                         .map(|binding| binding.keystrokes());
 
                     let selector = match os_action {
-                        Some(gpui::OsAction::Cut) => selector("cut:"),
-                        Some(gpui::OsAction::Copy) => selector("copy:"),
-                        Some(gpui::OsAction::Paste) => selector("paste:"),
-                        Some(gpui::OsAction::SelectAll) => selector("selectAll:"),
+                        Some(gpui::OsAction::Cut) => sel!(cut:),
+                        Some(gpui::OsAction::Copy) => sel!(copy:),
+                        Some(gpui::OsAction::Paste) => sel!(paste:),
+                        Some(gpui::OsAction::SelectAll) => sel!(selectAll:),
                         // "undo:" and "redo:" are always disabled in our case, as
                         // we don't have a NSTextView/NSTextField to enable them on.
-                        Some(gpui::OsAction::Undo) => selector("handleGPUIMenuItem:"),
-                        Some(gpui::OsAction::Redo) => selector("handleGPUIMenuItem:"),
-                        None => selector("handleGPUIMenuItem:"),
+                        Some(gpui::OsAction::Undo) => sel!(handleGPUIMenuItem:),
+                        Some(gpui::OsAction::Redo) => sel!(handleGPUIMenuItem:),
+                        None => sel!(handleGPUIMenuItem:),
                     };
 
                     let item;
@@ -375,60 +388,36 @@ impl MacPlatform {
                             for (modifier, flag) in &[
                                 (
                                     keystroke.modifiers().platform,
-                                    NSEventModifierFlags::NSCommandKeyMask,
+                                    NSEventModifierFlags::Command,
                                 ),
-                                (
-                                    keystroke.modifiers().control,
-                                    NSEventModifierFlags::NSControlKeyMask,
-                                ),
-                                (
-                                    keystroke.modifiers().alt,
-                                    NSEventModifierFlags::NSAlternateKeyMask,
-                                ),
-                                (
-                                    keystroke.modifiers().shift,
-                                    NSEventModifierFlags::NSShiftKeyMask,
-                                ),
+                                (keystroke.modifiers().control, NSEventModifierFlags::Control),
+                                (keystroke.modifiers().alt, NSEventModifierFlags::Option),
+                                (keystroke.modifiers().shift, NSEventModifierFlags::Shift),
                             ] {
                                 if *modifier {
                                     mask |= *flag;
                                 }
                             }
 
-                            item = NSMenuItem::alloc(nil)
-                                .initWithTitle_action_keyEquivalent_(
-                                    ns_string(name),
-                                    selector,
-                                    ns_string(key_to_native(keystroke.key()).as_ref()),
-                                )
+                            item = ({ let value: id = msg_send![({ let value: id = msg_send![class!(NSMenuItem), alloc]; value }), initWithTitle: ns_string(name), action: selector, keyEquivalent: ns_string(key_to_native(keystroke.key()).as_ref())]; value })
                                 .autorelease();
                             if Self::os_version() >= Version::new(12, 0, 0) {
                                 let _: () = msg_send![item, setAllowsAutomaticKeyEquivalentLocalization: NO];
                             }
-                            item.setKeyEquivalentModifierMask_(mask);
+                            let _: () = msg_send![item, setKeyEquivalentModifierMask: mask];
                         } else {
-                            item = NSMenuItem::alloc(nil)
-                                .initWithTitle_action_keyEquivalent_(
-                                    ns_string(name),
-                                    selector,
-                                    ns_string(""),
-                                )
+                            item = ({ let value: id = msg_send![({ let value: id = msg_send![class!(NSMenuItem), alloc]; value }), initWithTitle: ns_string(name), action: selector, keyEquivalent: ns_string("")]; value })
                                 .autorelease();
                         }
                     } else {
-                        item = NSMenuItem::alloc(nil)
-                            .initWithTitle_action_keyEquivalent_(
-                                ns_string(name),
-                                selector,
-                                ns_string(""),
-                            )
+                        item = ({ let value: id = msg_send![({ let value: id = msg_send![class!(NSMenuItem), alloc]; value }), initWithTitle: ns_string(name), action: selector, keyEquivalent: ns_string("")]; value })
                             .autorelease();
                     }
 
                     if *checked {
-                        item.setState_(NSVisualEffectState::Active);
+                        let _: () = msg_send![item, setState: NSControlStateValueOn];
                     }
-                    item.setEnabled_(if *disabled { NO } else { YES });
+                    let _: () = msg_send![item, setEnabled: if *disabled { NO } else { YES }];
 
                     let tag = actions.len() as NSInteger;
                     let _: () = msg_send![item, setTag: tag];
@@ -440,28 +429,44 @@ impl MacPlatform {
                     items,
                     disabled,
                 }) => {
-                    let item = NSMenuItem::new(nil).autorelease();
-                    let submenu = NSMenu::new(nil).autorelease();
-                    submenu.setDelegate_(delegate);
+                    let item = ({
+                        let value: id = msg_send![class!(NSMenuItem), new];
+                        value
+                    })
+                    .autorelease();
+                    let submenu = ({
+                        let value: id = msg_send![class!(NSMenu), new];
+                        value
+                    })
+                    .autorelease();
+                    let _: () = msg_send![submenu, setDelegate: delegate];
                     for item in items {
-                        submenu.addItem_(Self::create_menu_item(item, delegate, actions, keymap));
+                        let _: () = msg_send![submenu, addItem: Self::create_menu_item(item, delegate, actions, keymap)];
                     }
-                    item.setSubmenu_(submenu);
-                    item.setEnabled_(if *disabled { NO } else { YES });
-                    item.setTitle_(ns_string(name));
+                    let _: () = msg_send![item, setSubmenu: submenu];
+                    let _: () = msg_send![item, setEnabled: if *disabled { NO } else { YES }];
+                    let _: () = msg_send![item, setTitle: ns_string(name)];
                     item
                 }
                 MenuItem::SystemMenu(OsMenu { name, menu_type }) => {
-                    let item = NSMenuItem::new(nil).autorelease();
-                    let submenu = NSMenu::new(nil).autorelease();
-                    submenu.setDelegate_(delegate);
-                    item.setSubmenu_(submenu);
-                    item.setTitle_(ns_string(name));
+                    let item = ({
+                        let value: id = msg_send![class!(NSMenuItem), new];
+                        value
+                    })
+                    .autorelease();
+                    let submenu = ({
+                        let value: id = msg_send![class!(NSMenu), new];
+                        value
+                    })
+                    .autorelease();
+                    let _: () = msg_send![submenu, setDelegate: delegate];
+                    let _: () = msg_send![item, setSubmenu: submenu];
+                    let _: () = msg_send![item, setTitle: ns_string(name)];
 
                     match menu_type {
                         SystemMenuType::Services => {
                             let app: id = msg_send![APP_CLASS, sharedApplication];
-                            app.setServicesMenu_(item);
+                            let _: () = msg_send![app, setServicesMenu: item];
                         }
                     }
 
@@ -533,13 +538,17 @@ impl MacPlatform {
 
     fn os_version() -> Version {
         let version = unsafe {
-            let process_info = NSProcessInfo::processInfo(nil);
-            process_info.operatingSystemVersion()
+            let process_info: id = msg_send![class!(NSProcessInfo), processInfo];
+            {
+                let value: NSOperatingSystemVersion =
+                    msg_send![process_info, operatingSystemVersion];
+                value
+            }
         };
         Version::new(
-            version.majorVersion,
-            version.minorVersion,
-            version.patchVersion,
+            version.majorVersion as u64,
+            version.minorVersion as u64,
+            version.patchVersion as u64,
         )
     }
 }
@@ -571,18 +580,22 @@ impl Platform for MacPlatform {
         unsafe {
             let app: id = msg_send![APP_CLASS, sharedApplication];
             let app_delegate: id = msg_send![APP_DELEGATE_CLASS, new];
-            app.setDelegate_(app_delegate);
+            let _: () = msg_send![app, setDelegate: app_delegate];
 
             let self_ptr = self as *const Self as *const c_void;
-            (*app).set_ivar(MAC_PLATFORM_IVAR, self_ptr);
-            (*app_delegate).set_ivar(MAC_PLATFORM_IVAR, self_ptr);
+            (*app).write_ivar(MAC_PLATFORM_IVAR, self_ptr);
+            (*app_delegate).write_ivar(MAC_PLATFORM_IVAR, self_ptr);
 
-            let pool = NSAutoreleasePool::new(nil);
-            app.run();
-            pool.drain();
+            objc2::rc::autoreleasepool(|_| {
+                let _: () = msg_send![app, run];
+            });
 
-            (*app).set_ivar(MAC_PLATFORM_IVAR, null_mut::<c_void>());
-            (*NSWindow::delegate(app)).set_ivar(MAC_PLATFORM_IVAR, null_mut::<c_void>());
+            (*app).write_ivar(MAC_PLATFORM_IVAR, null_mut::<c_void>());
+            (*({
+                let value: id = msg_send![app, delegate];
+                value
+            }))
+            .write_ivar(MAC_PLATFORM_IVAR, null_mut::<c_void>());
         }
     }
 
@@ -600,7 +613,7 @@ impl Platform for MacPlatform {
 
         extern "C" fn quit(_: *mut c_void) {
             unsafe {
-                let app = NSApplication::sharedApplication(nil);
+                let app: id = msg_send![class!(NSApplication), sharedApplication];
                 let _: () = msg_send![app, terminate: nil];
             }
         }
@@ -649,28 +662,28 @@ impl Platform for MacPlatform {
 
     fn activate(&self, ignoring_other_apps: bool) {
         unsafe {
-            let app = NSApplication::sharedApplication(nil);
-            app.activateIgnoringOtherApps_(ignoring_other_apps.to_objc());
+            let app: id = msg_send![class!(NSApplication), sharedApplication];
+            let _: () = msg_send![app, activateIgnoringOtherApps: ignoring_other_apps.to_objc()];
         }
     }
 
     fn hide(&self) {
         unsafe {
-            let app = NSApplication::sharedApplication(nil);
+            let app: id = msg_send![class!(NSApplication), sharedApplication];
             let _: () = msg_send![app, hide: nil];
         }
     }
 
     fn hide_other_apps(&self) {
         unsafe {
-            let app = NSApplication::sharedApplication(nil);
+            let app: id = msg_send![class!(NSApplication), sharedApplication];
             let _: () = msg_send![app, hideOtherApplications: nil];
         }
     }
 
     fn unhide_other_apps(&self) {
         unsafe {
-            let app = NSApplication::sharedApplication(nil);
+            let app: id = msg_send![class!(NSApplication), sharedApplication];
             let _: () = msg_send![app, unhideAllApplications: nil];
         }
     }
@@ -687,7 +700,11 @@ impl Platform for MacPlatform {
 
     #[cfg(feature = "screen-capture")]
     fn is_screen_capture_supported(&self) -> bool {
-        let min_version = cocoa::foundation::NSOperatingSystemVersion::new(12, 3, 0);
+        let min_version = objc2_foundation::NSOperatingSystemVersion {
+            majorVersion: 12,
+            minorVersion: 3,
+            patchVersion: 0,
+        };
         crate::is_macos_version_at_least(min_version)
     }
 
@@ -735,7 +752,7 @@ impl Platform for MacPlatform {
 
     fn window_appearance(&self) -> WindowAppearance {
         unsafe {
-            let app = NSApplication::sharedApplication(nil);
+            let app: id = msg_send![class!(NSApplication), sharedApplication];
             let appearance: id = msg_send![app, effectiveAppearance];
             crate::window_appearance::window_appearance_from_native(appearance)
         }
@@ -743,14 +760,14 @@ impl Platform for MacPlatform {
 
     fn open_url(&self, url: &str) {
         unsafe {
-            let ns_url = NSURL::alloc(nil).initWithString_(ns_string(url));
+            let ns_url: id = msg_send![({ let value: id = msg_send![class!(NSURL), alloc]; value }), initWithString: ns_string(url)];
             if ns_url.is_null() {
                 log::error!("Failed to create NSURL from string: {}", url);
                 return;
             }
             let url = ns_url.autorelease();
             let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
-            msg_send![workspace, openURL: url]
+            let _: BOOL = msg_send![workspace, openURL: url];
         }
     }
 
@@ -783,7 +800,7 @@ impl Platform for MacPlatform {
                 )));
             }
             let done_tx = Cell::new(Some(done_tx));
-            let block = ConcreteBlock::new(move |error: id| {
+            let block = RcBlock::new(move |error: id| {
                 let result = if error == nil {
                     Ok(())
                 } else {
@@ -796,7 +813,7 @@ impl Platform for MacPlatform {
                 }
             });
             let block = block.copy();
-            let _: () = msg_send![workspace, setDefaultApplicationAtURL: app toOpenURLsWithScheme: scheme completionHandler: block];
+            let _: () = msg_send![workspace, setDefaultApplicationAtURL: app , toOpenURLsWithScheme: scheme , completionHandler: &*block];
         }
 
         self.background_executor()
@@ -811,7 +828,7 @@ impl Platform for MacPlatform {
         let (tx, rx) = oneshot::channel();
         self.foreground_executor()
             .spawn(async move {
-                let Some(class) = Class::get("NSColorSampler") else {
+                let Some(class) = Class::get(c"NSColorSampler") else {
                     let _ = tx.send(Err(anyhow!(
                         "NSColorSampler is unavailable on this macOS version"
                     )));
@@ -825,7 +842,7 @@ impl Platform for MacPlatform {
                 }
                 let (selection_tx, selection_rx) = oneshot::channel();
                 let selection_tx = Cell::new(Some(selection_tx));
-                let block = ConcreteBlock::new(move |color: id| {
+                let block = RcBlock::new(move |color: id| {
                     let result = unsafe {
                         if color == nil {
                             Ok(None)
@@ -854,8 +871,7 @@ impl Platform for MacPlatform {
                     if let Some(tx) = selection_tx.take() {
                         let _ = tx.send(result);
                     }
-                })
-                .copy();
+                });
                 unsafe {
                     let _: () = msg_send![sampler, showSamplerWithSelectionHandler: &*block];
                 }
@@ -894,30 +910,35 @@ impl Platform for MacPlatform {
         self.foreground_executor()
             .spawn(async move {
                 unsafe {
-                    let panel = NSOpenPanel::openPanel(nil);
-                    panel.setCanChooseDirectories_(options.directories.to_objc());
-                    panel.setCanChooseFiles_(options.files.to_objc());
-                    panel.setAllowsMultipleSelection_(options.multiple.to_objc());
+                    let panel: id = msg_send![class!(NSOpenPanel), openPanel];
+                    let _: () =
+                        msg_send![panel, setCanChooseDirectories: options.directories.to_objc()];
+                    let _: () = msg_send![panel, setCanChooseFiles: options.files.to_objc()];
+                    let _: () =
+                        msg_send![panel, setAllowsMultipleSelection: options.multiple.to_objc()];
                     if !extensions.is_empty() {
                         let strings = extensions
                             .iter()
                             .map(|extension| ns_string(extension))
                             .collect::<Vec<_>>();
-                        let types = NSArray::arrayWithObjects(nil, &strings);
+                        let types = crate::native::ns_array(&strings);
                         let _: () = msg_send![panel, setAllowedFileTypes: types];
                         let _: () = msg_send![panel, setAllowsOtherFileTypes: NO];
                     }
 
-                    panel.setCanCreateDirectories(true.to_objc());
-                    panel.setResolvesAliases_(false.to_objc());
+                    let _: () = msg_send![panel, setCanCreateDirectories: true.to_objc()];
+                    let _: () = msg_send![panel, setResolvesAliases: false.to_objc()];
                     let done_tx = Cell::new(Some(done_tx));
-                    let block = ConcreteBlock::new(move |response: NSModalResponse| {
-                        let result = if response == NSModalResponse::NSModalResponseOk {
+                    let block = RcBlock::new(move |response: NSModalResponse| {
+                        let result = if response == NSModalResponseOK {
                             let mut result = Vec::new();
-                            let urls = panel.URLs();
-                            for i in 0..urls.count() {
-                                let url = urls.objectAtIndex(i);
-                                if url.isFileURL() == YES
+                            let urls: id = msg_send![panel, URLs];
+                            for i in 0..(&*urls.cast::<NSArray>()).count() {
+                                let url: id = msg_send![urls, objectAtIndex: i];
+                                if ({
+                                    let value: BOOL = msg_send![url, isFileURL];
+                                    value
+                                }) == YES
                                     && let Ok(path) = ns_url_to_path(url)
                                 {
                                     result.push(path)
@@ -938,7 +959,7 @@ impl Platform for MacPlatform {
                         let _: () = msg_send![panel, setPrompt: ns_string(&prompt)];
                     }
 
-                    let _: () = msg_send![panel, beginWithCompletionHandler: block];
+                    let _: () = msg_send![panel, beginWithCompletionHandler: &*block];
                 }
             })
             .detach();
@@ -956,10 +977,10 @@ impl Platform for MacPlatform {
         self.foreground_executor()
             .spawn(async move {
                 unsafe {
-                    let panel = NSSavePanel::savePanel(nil);
+                    let panel: id = msg_send![class!(NSSavePanel), savePanel];
                     let path = ns_string(directory.to_string_lossy().as_ref());
-                    let url = NSURL::fileURLWithPath_isDirectory_(nil, path, true.to_objc());
-                    panel.setDirectoryURL(url);
+                    let url: id = msg_send![class!(NSURL), fileURLWithPath: path, isDirectory: true.to_objc()];
+                    let _: () = msg_send![panel, setDirectoryURL: url];
 
                     if let Some(suggested_name) = suggested_name {
                         let name_string = ns_string(&suggested_name);
@@ -967,12 +988,12 @@ impl Platform for MacPlatform {
                     }
 
                     let done_tx = Cell::new(Some(done_tx));
-                    let block = ConcreteBlock::new(move |response: NSModalResponse| {
+                    let block = RcBlock::new(move |response: NSModalResponse| {
                         let mut result = None;
-                        if response == NSModalResponse::NSModalResponseOk {
-                            let url = panel.URL();
-                            if url.isFileURL() == YES {
-                                result = ns_url_to_path(panel.URL()).ok().map(|mut result| {
+                        if response == NSModalResponseOK {
+                            let url: id = msg_send![panel, URL];
+                            if ({ let value: BOOL = msg_send![url, isFileURL]; value }) == YES {
+                                result = ns_url_to_path({ let value: id = msg_send![panel, URL]; value }).ok().map(|mut result| {
                                     let Some(filename) = result.file_name() else {
                                         return result;
                                     };
@@ -1009,7 +1030,7 @@ impl Platform for MacPlatform {
                         }
                     });
                     let block = block.copy();
-                    let _: () = msg_send![panel, beginWithCompletionHandler: block];
+                    let _: () = msg_send![panel, beginWithCompletionHandler: &*block];
                 }
             })
             .detach();
@@ -1034,7 +1055,7 @@ impl Platform for MacPlatform {
                     let _: BOOL = msg_send![
                         workspace,
                         selectFile: full_path
-                        inFileViewerRootedAtPath: root_full_path
+                        , inFileViewerRootedAtPath: root_full_path
                     ];
                 })
                 .detach();
@@ -1160,7 +1181,7 @@ impl Platform for MacPlatform {
 
     fn app_path(&self) -> Result<PathBuf> {
         unsafe {
-            let bundle: id = NSBundle::mainBundle();
+            let bundle: id = msg_send![class!(NSBundle), mainBundle];
             anyhow::ensure!(!bundle.is_null(), "app is not running inside a bundle");
             Ok(path_from_objc(msg_send![bundle, bundlePath]))
         }
@@ -1171,9 +1192,17 @@ impl Platform for MacPlatform {
             let app: id = msg_send![APP_CLASS, sharedApplication];
             let mut state = self.0.lock();
             let actions = &mut state.menu_actions;
-            let menu = self.create_menu_bar(&menus, NSWindow::delegate(app), actions, keymap);
+            let menu = self.create_menu_bar(
+                &menus,
+                {
+                    let value: id = msg_send![app, delegate];
+                    value
+                },
+                actions,
+                keymap,
+            );
             drop(state);
-            app.setMainMenu_(menu);
+            let _: () = msg_send![app, setMainMenu: menu];
         }
         self.0.lock().menus = Some(menus.into_iter().map(|menu| menu.owned()).collect());
     }
@@ -1187,7 +1216,15 @@ impl Platform for MacPlatform {
             let app: id = msg_send![APP_CLASS, sharedApplication];
             let mut state = self.0.lock();
             let actions = &mut state.menu_actions;
-            let new = self.create_dock_menu(menu, NSWindow::delegate(app), actions, keymap);
+            let new = self.create_dock_menu(
+                menu,
+                {
+                    let value: id = msg_send![app, delegate];
+                    value
+                },
+                actions,
+                keymap,
+            );
             if let Some(old) = state.dock_menu.replace(new) {
                 CFRelease(old as _)
             }
@@ -1199,7 +1236,7 @@ impl Platform for MacPlatform {
             unsafe {
                 let document_controller: id =
                     msg_send![class!(NSDocumentController), sharedDocumentController];
-                let url: id = NSURL::fileURLWithPath_(nil, ns_string(path_str));
+                let url: id = msg_send![class!(NSURL), fileURLWithPath: ns_string(path_str)];
                 let _: () = msg_send![document_controller, noteNewRecentDocumentURL:url];
             }
         }
@@ -1207,7 +1244,7 @@ impl Platform for MacPlatform {
 
     fn path_for_auxiliary_executable(&self, name: &str) -> Result<PathBuf> {
         unsafe {
-            let bundle: id = NSBundle::mainBundle();
+            let bundle: id = msg_send![class!(NSBundle), mainBundle];
             anyhow::ensure!(!bundle.is_null(), "app is not running inside a bundle");
             let name = ns_string(name);
             let url: id = msg_send![bundle, URLForAuxiliaryExecutable: name];
@@ -1376,20 +1413,26 @@ impl Platform for MacPlatform {
 
 unsafe fn path_from_objc(path: id) -> PathBuf {
     let len = msg_send![path, lengthOfBytesUsingEncoding: NSUTF8StringEncoding];
-    let bytes = unsafe { path.UTF8String() as *const u8 };
+    let bytes = unsafe {
+        ({
+            let value: *const libc::c_char = msg_send![path, UTF8String];
+            value
+        }) as *const u8
+    };
     let path = str::from_utf8(unsafe { slice::from_raw_parts(bytes, len) }).unwrap();
     PathBuf::from(path)
 }
 
 unsafe fn get_mac_platform(object: &mut Object) -> &MacPlatform {
     unsafe {
-        let platform_ptr: *mut c_void = *object.get_ivar(MAC_PLATFORM_IVAR);
+        let platform_ptr: *mut c_void = *object.read_ivar(MAC_PLATFORM_IVAR);
         assert!(!platform_ptr.is_null());
         &*(platform_ptr as *const MacPlatform)
     }
 }
 
-extern "C" fn will_finish_launching(_this: &mut Object, _: Sel, _: id) {
+extern "C" fn will_finish_launching(_this: *mut Object, _: Sel, _: id) {
+    let _this = unsafe { &mut *_this };
     unsafe {
         let user_defaults: id = msg_send![class!(NSUserDefaults), standardUserDefaults];
 
@@ -1401,31 +1444,32 @@ extern "C" fn will_finish_launching(_this: &mut Object, _: Sel, _: id) {
         let existing_value: id = msg_send![user_defaults, objectForKey: name];
         if existing_value == nil {
             let false_value: id = msg_send![class!(NSNumber), numberWithBool:false];
-            let _: () = msg_send![user_defaults, setObject: false_value forKey: name];
+            let _: () = msg_send![user_defaults, setObject: false_value , forKey: name];
         }
     }
 }
 
-extern "C" fn did_finish_launching(this: &mut Object, _: Sel, _: id) {
+extern "C" fn did_finish_launching(this: *mut Object, _: Sel, _: id) {
+    let this = unsafe { &mut *this };
     unsafe {
         let app: id = msg_send![APP_CLASS, sharedApplication];
-        app.setActivationPolicy_(NSApplicationActivationPolicyRegular);
+        let _: BOOL = msg_send![app, setActivationPolicy: NSApplicationActivationPolicy::Regular];
 
         let notification_center: *mut Object =
             msg_send![class!(NSNotificationCenter), defaultCenter];
         let name = ns_string("NSTextInputContextKeyboardSelectionDidChangeNotification");
         let _: () = msg_send![notification_center, addObserver: this as id
-            selector: sel!(onKeyboardLayoutChange:)
-            name: name
-            object: nil
+            , selector: sel!(onKeyboardLayoutChange:)
+            , name: name
+            , object: nil
         ];
 
         let thermal_name = ns_string("NSProcessInfoThermalStateDidChangeNotification");
         let process_info: id = msg_send![class!(NSProcessInfo), processInfo];
         let _: () = msg_send![notification_center, addObserver: this as id
-            selector: sel!(onThermalStateChange:)
-            name: thermal_name
-            object: process_info
+            , selector: sel!(onThermalStateChange:)
+            , name: thermal_name
+            , object: process_info
         ];
 
         let observer = this as *mut Object as id;
@@ -1451,15 +1495,21 @@ unsafe fn register_system_wake_observer(observer: id) {
         let workspace_center: *mut Object = msg_send![workspace, notificationCenter];
         let wake_name = ns_string("NSWorkspaceDidWakeNotification");
         let _: () = msg_send![workspace_center, addObserver: observer
-            selector: sel!(onSystemWake:)
-            name: wake_name
-            object: nil
+            , selector: sel!(onSystemWake:)
+            , name: wake_name
+            , object: nil
         ];
     }
 }
 
-extern "C" fn should_handle_reopen(this: &mut Object, _: Sel, _: id, has_open_windows: bool) {
-    if !has_open_windows {
+extern "C" fn should_handle_reopen(
+    this: *mut Object,
+    _: Sel,
+    _: id,
+    has_open_windows: BOOL,
+) -> BOOL {
+    let this = unsafe { &mut *this };
+    if !has_open_windows.as_bool() {
         let platform = unsafe { get_mac_platform(this) };
         let mut lock = platform.0.lock();
         if let Some(mut callback) = lock.reopen.take() {
@@ -1468,9 +1518,11 @@ extern "C" fn should_handle_reopen(this: &mut Object, _: Sel, _: id, has_open_wi
             platform.0.lock().reopen.get_or_insert(callback);
         }
     }
+    YES
 }
 
-extern "C" fn will_terminate(this: &mut Object, _: Sel, _: id) {
+extern "C" fn will_terminate(this: *mut Object, _: Sel, _: id) {
+    let this = unsafe { &mut *this };
     let platform = unsafe { get_mac_platform(this) };
     let mut lock = platform.0.lock();
     if let Some(mut callback) = lock.quit.take() {
@@ -1480,7 +1532,8 @@ extern "C" fn will_terminate(this: &mut Object, _: Sel, _: id) {
     }
 }
 
-extern "C" fn on_keyboard_layout_change(this: &mut Object, _: Sel, _: id) {
+extern "C" fn on_keyboard_layout_change(this: *mut Object, _: Sel, _: id) {
+    let this = unsafe { &mut *this };
     let platform = unsafe { get_mac_platform(this) };
     let mut lock = platform.0.lock();
     let keyboard_layout = MacKeyboardLayout::new();
@@ -1496,7 +1549,8 @@ extern "C" fn on_keyboard_layout_change(this: &mut Object, _: Sel, _: id) {
     }
 }
 
-extern "C" fn on_thermal_state_change(this: &mut Object, _: Sel, _: id) {
+extern "C" fn on_thermal_state_change(this: *mut Object, _: Sel, _: id) {
+    let this = unsafe { &mut *this };
     // Defer to the next run loop iteration to avoid re-entrant borrows of the App RefCell,
     // as NSNotificationCenter delivers this notification synchronously and it may fire while
     // the App is already borrowed (same pattern as quit() above).
@@ -1521,7 +1575,8 @@ extern "C" fn on_thermal_state_change(this: &mut Object, _: Sel, _: id) {
     }
 }
 
-extern "C" fn on_system_wake(this: &mut Object, _: Sel, _: id) {
+extern "C" fn on_system_wake(this: *mut Object, _: Sel, _: id) {
+    let this = unsafe { &mut *this };
     // SAFETY: this is the registered app delegate carrying MAC_PLATFORM_IVAR.
     let platform = unsafe { get_mac_platform(this) };
     let platform_ptr = platform as *const MacPlatform as *mut c_void;
@@ -1542,12 +1597,26 @@ extern "C" fn on_system_wake(this: &mut Object, _: Sel, _: id) {
     }
 }
 
-extern "C" fn open_urls(this: &mut Object, _: Sel, _: id, urls: id) {
+extern "C" fn open_urls(this: *mut Object, _: Sel, _: id, urls: id) {
+    let this = unsafe { &mut *this };
     let urls = unsafe {
-        (0..urls.count())
+        (0..(&*urls.cast::<NSArray>()).count())
             .filter_map(|i| {
-                let url = urls.objectAtIndex(i);
-                match CStr::from_ptr(url.absoluteString().UTF8String() as *mut c_char).to_str() {
+                let url: id = msg_send![urls, objectAtIndex: i];
+                match CStr::from_ptr(
+                    ({
+                        let value: *const libc::c_char = msg_send![
+                            ({
+                                let value: id = msg_send![url, absoluteString];
+                                value
+                            }),
+                            UTF8String
+                        ];
+                        value
+                    }) as *mut c_char,
+                )
+                .to_str()
+                {
                     Ok(string) => Some(string.to_string()),
                     Err(err) => {
                         log::error!("error converting path to string: {}", err);
@@ -1566,7 +1635,8 @@ extern "C" fn open_urls(this: &mut Object, _: Sel, _: id, urls: id) {
     }
 }
 
-extern "C" fn handle_menu_item(this: &mut Object, _: Sel, item: id) {
+extern "C" fn handle_menu_item(this: *mut Object, _: Sel, item: id) {
+    let this = unsafe { &mut *this };
     unsafe {
         let platform = get_mac_platform(this);
         let mut lock = platform.0.lock();
@@ -1583,7 +1653,8 @@ extern "C" fn handle_menu_item(this: &mut Object, _: Sel, item: id) {
     }
 }
 
-extern "C" fn validate_menu_item(this: &mut Object, _: Sel, item: id) -> bool {
+extern "C" fn validate_menu_item(this: *mut Object, _: Sel, item: id) -> BOOL {
+    let this = unsafe { &mut *this };
     unsafe {
         let mut result = false;
         let platform = get_mac_platform(this);
@@ -1602,11 +1673,12 @@ extern "C" fn validate_menu_item(this: &mut Object, _: Sel, item: id) -> bool {
                 .validate_menu_command
                 .get_or_insert(callback);
         }
-        result
+        BOOL::new(result)
     }
 }
 
-extern "C" fn menu_will_open(this: &mut Object, _: Sel, _: id) {
+extern "C" fn menu_will_open(this: *mut Object, _: Sel, _: id) {
+    let this = unsafe { &mut *this };
     unsafe {
         let platform = get_mac_platform(this);
         let mut lock = platform.0.lock();
@@ -1618,7 +1690,8 @@ extern "C" fn menu_will_open(this: &mut Object, _: Sel, _: id) {
     }
 }
 
-extern "C" fn handle_dock_menu(this: &mut Object, _: Sel, _: id) -> id {
+extern "C" fn handle_dock_menu(this: *mut Object, _: Sel, _: id) -> id {
+    let this = unsafe { &mut *this };
     unsafe {
         let platform = get_mac_platform(this);
         let state = platform.0.lock();
@@ -1633,7 +1706,10 @@ extern "C" fn handle_dock_menu(this: &mut Object, _: Sel, _: id) -> id {
 unsafe fn ns_url_to_path(url: id) -> Result<PathBuf> {
     let path: *mut c_char = msg_send![url, fileSystemRepresentation];
     anyhow::ensure!(!path.is_null(), "url is not a file path: {}", unsafe {
-        CStr::from_ptr(url.absoluteString().UTF8String()).to_string_lossy()
+        (&*url.cast::<NSURL>())
+            .absoluteString()
+            .map(|s| s.to_string())
+            .unwrap_or_default()
     });
     Ok(PathBuf::from(OsStr::from_bytes(unsafe {
         CStr::from_ptr(path).to_bytes()

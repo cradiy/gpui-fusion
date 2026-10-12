@@ -300,11 +300,11 @@ mod example {
         let pixel_buffer = frame.0;
         let frame_size = size(
             DevicePixels(
-                i32::try_from(pixel_buffer.get_width())
+                i32::try_from(objc2_core_video::CVPixelBufferGetWidth(&pixel_buffer))
                     .map_err(|_| "screen width does not fit in DevicePixels".to_string())?,
             ),
             DevicePixels(
-                i32::try_from(pixel_buffer.get_height())
+                i32::try_from(objc2_core_video::CVPixelBufferGetHeight(&pixel_buffer))
                     .map_err(|_| "screen height does not fit in DevicePixels".to_string())?,
             ),
         );

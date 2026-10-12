@@ -292,8 +292,8 @@ fn display_size(display: &scap::Display) -> Size<DevicePixels> {
 #[cfg(target_os = "macos")]
 fn frame_size(frame: &ScreenCaptureFrame) -> Size<DevicePixels> {
     size(
-        DevicePixels(frame.0.get_width() as i32),
-        DevicePixels(frame.0.get_height() as i32),
+        DevicePixels(objc2_core_video::CVPixelBufferGetWidth(&frame.0) as i32),
+        DevicePixels(objc2_core_video::CVPixelBufferGetHeight(&frame.0) as i32),
     )
 }
 

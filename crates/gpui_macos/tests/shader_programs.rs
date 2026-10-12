@@ -100,13 +100,19 @@ include!(concat!(env!("OUT_DIR"), "/shader_libraries.rs"));
 #[test]
 #[cfg(target_os = "macos")]
 fn metal_libraries_expose_catalogued_functions() {
-    let device = metal::Device::system_default().expect("Metal device is required");
+    use objc2_foundation::NSString;
+    use objc2_metal::{MTLDevice, MTLLibrary};
+    let device = objc2_metal::MTLCreateSystemDefaultDevice().expect("Metal device is required");
     for &shader in ShaderLibrary::ALL {
         #[cfg(feature = "runtime_shaders")]
-        let library =
-            device.new_library_with_source(shader.source(), &metal::CompileOptions::new());
+        let library = device.newLibraryWithSource_options_error(
+            &NSString::from_str(shader.source()),
+            Some(&objc2_metal::MTLCompileOptions::new()),
+        );
         #[cfg(not(feature = "runtime_shaders"))]
-        let library = device.new_library_with_data(compiled_library_bytes(shader));
+        let library = device.newLibraryWithData_error(&dispatch2::DispatchData::from_bytes(
+            compiled_library_bytes(shader),
+        ));
         let library = library.unwrap_or_else(|error| panic!("{}: {error}", shader.name()));
         for program in ShaderProgram::ALL
             .iter()
@@ -115,8 +121,8 @@ fn metal_libraries_expose_catalogued_functions() {
         {
             for entry in [program.vertex, program.fragment] {
                 library
-                    .get_function(entry, None)
-                    .unwrap_or_else(|error| panic!("{entry}: {error}"));
+                    .newFunctionWithName(&NSString::from_str(entry))
+                    .unwrap_or_else(|| panic!("missing entry point: {entry}"));
             }
         }
     }

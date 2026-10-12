@@ -86,7 +86,7 @@ macro_rules! native_effect_test {
     ($($name:ident),* $(,)?) => {$(
         #[test]
         fn $name() -> anyhow::Result<()> {
-            objc::rc::autoreleasepool(|| {
+            objc2::rc::autoreleasepool(|_| {
                 let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(64), DevicePixels(48)))?;
                 $name::check(&mut renderer)
             })

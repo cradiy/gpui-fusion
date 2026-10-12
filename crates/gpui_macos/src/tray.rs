@@ -1,42 +1,39 @@
+use crate::native::*;
 use crate::{MacPlatform, ns_string};
 use anyhow::{Context as _, Result, anyhow};
-use cocoa::{
-    appkit::{
-        NSControl as _, NSEventType, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem,
-        NSVisualEffectState, NSVisualEffectView,
-    },
-    base::{NO, YES, id, nil},
-    foundation::{NSAutoreleasePool, NSData, NSInteger, NSUInteger},
-};
 use ctor::ctor;
 use gpui::{Action, Menu, MenuItem, TrayId, TrayOptions};
 use image::{ExtendedColorType, ImageEncoder as _, codecs::png::PngEncoder};
-use objc::{
-    class,
-    declare::ClassDecl,
-    msg_send,
-    runtime::{Class, Object, Sel},
-    sel, sel_impl,
+use objc2::{
+    class, msg_send,
+    runtime::ClassBuilder as ClassDecl,
+    runtime::{AnyClass as Class, AnyObject as Object, Sel},
+    sel,
 };
-use std::{ffi::c_void, ptr};
+use objc2_app_kit::{NSControlStateValueOn, NSEventType};
+use objc2_foundation::{NSInteger, NSUInteger};
+use std::{
+    ffi::{CStr, c_void},
+    ptr,
+};
 
-const PLATFORM_IVAR: &str = "platform";
-const TRAY_ID_IVAR: &str = "trayId";
+const PLATFORM_IVAR: &CStr = c"platform";
+const TRAY_ID_IVAR: &CStr = c"trayId";
 static mut TRAY_TARGET_CLASS: *const Class = ptr::null();
 
 #[ctor(unsafe)]
 unsafe fn build_tray_target_class() {
     unsafe {
-        let mut decl = ClassDecl::new("GPUITrayTarget", class!(NSObject)).unwrap();
+        let mut decl = ClassDecl::new(c"GPUITrayTarget", class!(NSObject)).unwrap();
         decl.add_ivar::<*mut c_void>(PLATFORM_IVAR);
         decl.add_ivar::<u32>(TRAY_ID_IVAR);
         decl.add_method(
             sel!(handleGPUITrayActivate:),
-            handle_tray_activate as extern "C" fn(&mut Object, Sel, id),
+            handle_tray_activate as extern "C" fn(*mut Object, Sel, id),
         );
         decl.add_method(
             sel!(handleGPUITrayMenuItem:),
-            handle_tray_menu_item as extern "C" fn(&mut Object, Sel, id),
+            handle_tray_menu_item as extern "C" fn(*mut Object, Sel, id),
         );
         TRAY_TARGET_CLASS = decl.register();
     }
@@ -58,18 +55,18 @@ impl MacTray {
     ) -> Result<Self> {
         unsafe {
             let image = create_image(&options)?;
-            let status_bar = NSStatusBar::systemStatusBar(nil);
-            let status_item = status_bar.statusItemWithLength_(-1.0);
+            let status_bar: id = msg_send![class!(NSStatusBar), systemStatusBar];
+            let status_item: id = msg_send![status_bar, statusItemWithLength: -1.0];
             if status_item.is_null() {
                 let _: () = msg_send![image, release];
                 anyhow::bail!("creating NSStatusItem failed");
             }
 
             let target: id = msg_send![TRAY_TARGET_CLASS, new];
-            (*target).set_ivar(PLATFORM_IVAR, platform as *mut c_void);
-            (*target).set_ivar(TRAY_ID_IVAR, id.as_u32());
+            (*target).write_ivar(PLATFORM_IVAR, platform as *mut c_void);
+            (*target).write_ivar(TRAY_ID_IVAR, id.as_u32());
 
-            let button = status_item.button();
+            let button: id = msg_send![status_item, button];
             let _: () = msg_send![button, setImage: image];
             let _: () = msg_send![image, release];
             if let Some(tooltip) = &options.tooltip {
@@ -108,8 +105,8 @@ impl MacTray {
 impl Drop for MacTray {
     fn drop(&mut self) {
         unsafe {
-            let status_bar = NSStatusBar::systemStatusBar(nil);
-            status_bar.removeStatusItem_(self.status_item);
+            let status_bar: id = msg_send![class!(NSStatusBar), systemStatusBar];
+            let _: () = msg_send![status_bar, removeStatusItem: self.status_item];
             let _: () = msg_send![self.menu, release];
             let _: () = msg_send![self.target, release];
         }
@@ -133,7 +130,7 @@ unsafe fn create_image(options: &TrayOptions) -> Result<id> {
         )
         .context("encoding tray icon")?;
     unsafe {
-        let data = NSData::dataWithBytes_length_(nil, png.as_ptr().cast(), png.len() as NSUInteger);
+        let data: id = msg_send![class!(NSData), dataWithBytes: png.as_ptr().cast::<c_void>(), length: png.len() as NSUInteger];
         let native_image: id = msg_send![class!(NSImage), alloc];
         let native_image: id = msg_send![native_image, initWithData: data];
         anyhow::ensure!(
@@ -148,15 +145,22 @@ unsafe fn create_image(options: &TrayOptions) -> Result<id> {
 
 unsafe fn create_menu(items: &[MenuItem], target: id, actions: &mut Vec<Box<dyn Action>>) -> id {
     unsafe {
-        let menu = NSMenu::new(nil);
+        let menu: id = msg_send![class!(NSMenu), new];
         for item in items {
             match item {
-                MenuItem::Separator => menu.addItem_(NSMenuItem::separatorItem(nil)),
+                MenuItem::Separator => {
+                    let value: () = msg_send![menu, addItem: ({ let value: id = msg_send![class!(NSMenuItem), separatorItem]; value })];
+                    value
+                }
                 MenuItem::Label(label) => {
-                    let item = NSMenuItem::new(nil).autorelease();
+                    let item = ({
+                        let value: id = msg_send![class!(NSMenuItem), new];
+                        value
+                    })
+                    .autorelease();
                     let _: () = msg_send![item, setTitle: ns_string(label)];
-                    item.setEnabled_(NO);
-                    menu.addItem_(item);
+                    let _: () = msg_send![item, setEnabled: NO];
+                    let _: () = msg_send![menu, addItem: item];
                 }
                 MenuItem::Action {
                     name,
@@ -168,30 +172,34 @@ unsafe fn create_menu(items: &[MenuItem], target: id, actions: &mut Vec<Box<dyn 
                     let item: id = msg_send![class!(NSMenuItem), alloc];
                     let item: id = msg_send![item,
                         initWithTitle: ns_string(name)
-                        action: sel!(handleGPUITrayMenuItem:)
-                        keyEquivalent: ns_string("")
+                        , action: sel!(handleGPUITrayMenuItem:)
+                        , keyEquivalent: ns_string("")
                     ];
                     let _: () = msg_send![item, setTarget: target];
                     let tag = actions.len() as NSInteger;
                     let _: () = msg_send![item, setTag: tag];
-                    item.setEnabled_(if *disabled { NO } else { YES });
+                    let _: () = msg_send![item, setEnabled: if *disabled { NO } else { YES }];
                     if *checked {
-                        item.setState_(NSVisualEffectState::Active);
+                        let _: () = msg_send![item, setState: NSControlStateValueOn];
                     }
                     actions.push(action.boxed_clone());
-                    menu.addItem_(item.autorelease());
+                    let _: () = msg_send![menu, addItem: item.autorelease()];
                 }
                 MenuItem::Submenu(Menu {
                     name,
                     items,
                     disabled,
                 }) => {
-                    let item = NSMenuItem::new(nil).autorelease();
+                    let item = ({
+                        let value: id = msg_send![class!(NSMenuItem), new];
+                        value
+                    })
+                    .autorelease();
                     let _: () = msg_send![item, setTitle: ns_string(name)];
-                    item.setEnabled_(if *disabled { NO } else { YES });
+                    let _: () = msg_send![item, setEnabled: if *disabled { NO } else { YES }];
                     let submenu = create_menu(items, target, actions).autorelease();
-                    item.setSubmenu_(submenu);
-                    menu.addItem_(item);
+                    let _: () = msg_send![item, setSubmenu: submenu];
+                    let _: () = msg_send![menu, addItem: item];
                 }
                 MenuItem::SystemMenu(_) => {}
             }
@@ -200,7 +208,8 @@ unsafe fn create_menu(items: &[MenuItem], target: id, actions: &mut Vec<Box<dyn 
     }
 }
 
-extern "C" fn handle_tray_activate(this: &mut Object, _: Sel, _: id) {
+extern "C" fn handle_tray_activate(this: *mut Object, _: Sel, _: id) {
+    let this = unsafe { &mut *this };
     unsafe {
         let platform = platform_from_target(this);
         let app: id = msg_send![class!(NSApplication), sharedApplication];
@@ -208,12 +217,13 @@ extern "C" fn handle_tray_activate(this: &mut Object, _: Sel, _: id) {
         let event_type: NSEventType = msg_send![event, type];
         platform.handle_tray_activation(
             tray_id_from_target(this),
-            event_type == NSEventType::NSRightMouseUp,
+            event_type == NSEventType::RightMouseUp,
         );
     }
 }
 
-extern "C" fn handle_tray_menu_item(this: &mut Object, _: Sel, item: id) {
+extern "C" fn handle_tray_menu_item(this: *mut Object, _: Sel, item: id) {
+    let this = unsafe { &mut *this };
     unsafe {
         let tag: NSInteger = msg_send![item, tag];
         platform_from_target(this).handle_tray_menu_action(tray_id_from_target(this), tag as usize);
@@ -222,12 +232,12 @@ extern "C" fn handle_tray_menu_item(this: &mut Object, _: Sel, item: id) {
 
 unsafe fn platform_from_target(target: &Object) -> &MacPlatform {
     unsafe {
-        let pointer: *mut c_void = *target.get_ivar(PLATFORM_IVAR);
+        let pointer: *mut c_void = *target.read_ivar(PLATFORM_IVAR);
         assert!(!pointer.is_null());
         &*(pointer as *const MacPlatform)
     }
 }
 
 unsafe fn tray_id_from_target(target: &Object) -> TrayId {
-    unsafe { TrayId::from_u32(*target.get_ivar::<u32>(TRAY_ID_IVAR)) }
+    unsafe { TrayId::from_u32(*target.read_ivar::<u32>(TRAY_ID_IVAR)) }
 }

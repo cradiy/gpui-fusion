@@ -128,7 +128,7 @@ core-foundation-sys = "0.8.6"
 objc2-core-video = "0.3.2"
 objc2-core-foundation = "0.3.2"
 objc2-metal = "0.3.2"
-cpal = "0.17"
+cpal = "0.18.2"
 criterion = { version = "0.5", features = ["html_reports"] }
 ctor = "1.0.13"
 derive_more = { version = "2.1.1", features = [

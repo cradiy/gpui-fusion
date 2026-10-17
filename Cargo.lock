@@ -1318,17 +1318,18 @@ dependencies = [
 
 [[package]]
 name = "cpal"
-version = "0.17.3"
+version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8942da362c0f0d895d7cac616263f2f9424edc5687364dfd1d25ef7eba506d7"
+checksum = "6f02e8d0327b42d3e2e4ab2119af397344eb9fc54a34bf0ddeaa1277af8681f1"
 dependencies = [
  "alsa",
+ "block2 0.6.2",
  "coreaudio-rs",
  "dasp_sample",
- "jni 0.21.1",
+ "jni 0.22.4",
  "js-sys",
  "libc",
- "mach2 0.5.0",
+ "mach2",
  "ndk",
  "ndk-context",
  "num-derive",
@@ -1340,10 +1341,9 @@ dependencies = [
  "objc2-core-audio-types",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
- "wasm-bindgen",
- "wasm-bindgen-futures",
  "web-sys",
  "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -1573,7 +1573,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1786,7 +1786,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2261,7 +2261,7 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2477,7 +2477,7 @@ dependencies = [
  "libc",
  "log",
  "lyon",
- "mach2 0.6.0",
+ "mach2",
  "mime_guess",
  "moxcms",
  "num_cpus",
@@ -2762,7 +2762,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "log",
- "mach2 0.6.0",
+ "mach2",
  "naga",
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
@@ -4218,15 +4218,6 @@ dependencies = [
 
 [[package]]
 name = "mach2"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a1b95cd5421ec55b445b5ae102f5ea0e768de1f82bd3001e11f426c269c3aea"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "mach2"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
@@ -4692,6 +4683,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13a380031deed8e99db00065c45937da434ca987c034e13b87e4441f9e4090be"
 dependencies = [
+ "bitflags 2.10.0",
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
 ]
@@ -6106,7 +6098,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6590,7 +6582,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6636,7 +6628,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7159,7 +7151,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8364,7 +8356,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

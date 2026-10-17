@@ -8,7 +8,7 @@ use std::{
 };
 
 use cpal::{
-    FromSample, Sample, SampleFormat, SizedSample, Stream, StreamConfig, StreamError,
+    Error, ErrorKind, FromSample, Sample, SampleFormat, SizedSample, Stream, StreamConfig,
     SupportedStreamConfig,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
@@ -405,19 +405,22 @@ where
     T: SizedSample + FromSample<f32>,
 {
     let error_state = shared.clone();
+    let mut failure_reported = false;
     device
         .build_output_stream(
-            config,
+            *config,
             move |output: &mut [T], _| shared.write(output),
             move |error| {
+                if failure_reported {
+                    return;
+                }
                 let message = error.to_string();
                 let failure = match classify_stream_error(error) {
-                    // CPAL's ALSA backend prepares or recovers the PCM stream after reporting an
-                    // xrun. Rebuilding it here loses buffered PCM and forces a decoder seek,
-                    // which is both unnecessary and harmful for codecs such as MP3 that need
-                    // preceding bit-reservoir frames.
+                    // These notifications leave the stream usable. CPAL recovers ALSA xruns;
+                    // rebuilding here would discard buffered PCM and force a decoder seek,
+                    // which can lose the preceding bit-reservoir frames required by MP3.
                     None => {
-                        log::warn!("audio output xrun recovered by the backend: {message}");
+                        log::debug!("audio output backend notification: {message}");
                         return;
                     }
                     Some(OutputFailure::Interrupted) => {
@@ -429,6 +432,7 @@ where
                         OutputFailure::Fatal(error)
                     }
                 };
+                failure_reported = true;
                 *error_state
                     .stream_error
                     .lock()
@@ -464,13 +468,13 @@ enum OutputFailure {
     Fatal(String),
 }
 
-fn classify_stream_error(error: StreamError) -> Option<OutputFailure> {
-    match error {
-        StreamError::BufferUnderrun => None,
-        StreamError::DeviceNotAvailable | StreamError::StreamInvalidated => {
-            Some(OutputFailure::Interrupted)
-        }
-        StreamError::BackendSpecific { .. } => Some(OutputFailure::Fatal(error.to_string())),
+fn classify_stream_error(error: Error) -> Option<OutputFailure> {
+    match error.kind() {
+        ErrorKind::Xrun | ErrorKind::DeviceChanged | ErrorKind::RealtimeDenied => None,
+        ErrorKind::DeviceNotAvailable
+        | ErrorKind::HostUnavailable
+        | ErrorKind::StreamInvalidated => Some(OutputFailure::Interrupted),
+        _ => Some(OutputFailure::Fatal(error.to_string())),
     }
 }
 
@@ -485,7 +489,7 @@ fn audio_output_message(
 mod tests {
     use std::{sync::atomic::Ordering, time::Duration};
 
-    use cpal::StreamError;
+    use cpal::{Error, ErrorKind};
 
     use super::{AudioQueue, InterleavedResampler, OutputFailure, classify_stream_error};
 
@@ -513,13 +517,13 @@ mod tests {
 
     #[test]
     fn recovered_xrun_does_not_invalidate_the_output_stream() {
-        assert!(classify_stream_error(StreamError::BufferUnderrun).is_none());
+        assert!(classify_stream_error(Error::new(ErrorKind::Xrun)).is_none());
         assert!(matches!(
-            classify_stream_error(StreamError::DeviceNotAvailable),
+            classify_stream_error(Error::new(ErrorKind::DeviceNotAvailable)),
             Some(OutputFailure::Interrupted)
         ));
         assert!(matches!(
-            classify_stream_error(StreamError::StreamInvalidated),
+            classify_stream_error(Error::new(ErrorKind::StreamInvalidated)),
             Some(OutputFailure::Interrupted)
         ));
     }

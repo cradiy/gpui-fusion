@@ -1,4 +1,4 @@
-use std::{borrow::Cow, ops::Range, time::Duration};
+use std::{borrow::Cow, ops::Range, rc::Rc, time::Duration};
 
 use gpui::{
     App, Bounds, CaretAffinity, ClipboardItem, Context, CursorStyle, DispatchPhase,
@@ -13,11 +13,21 @@ use super::{
 };
 use crate::components::scrollbar::ScrollbarState;
 
+#[derive(Clone)]
 pub(super) struct TextLayout {
-    pub(super) lines: Vec<WrappedLine>,
+    pub(super) lines: Rc<Vec<Rc<WrappedLine>>>,
     pub(super) line_starts: Vec<usize>,
     pub(super) line_height: Pixels,
     pub(super) shaping_run: Option<gpui::TextRun>,
+    shape_key: Option<TextShapeKey>,
+}
+
+#[derive(Clone, PartialEq)]
+struct TextShapeKey {
+    text: SharedString,
+    font_size: Pixels,
+    runs: Vec<gpui::TextRun>,
+    wrap_width: Option<Pixels>,
 }
 
 fn preedit_offset_from_utf16(text: &str, offset: usize) -> usize {
@@ -32,16 +42,118 @@ fn preedit_offset_from_utf16(text: &str, offset: usize) -> usize {
 }
 
 impl TextLayout {
+    #[cfg(test)]
     pub(super) fn new(
         lines: Vec<WrappedLine>,
         line_starts: Vec<usize>,
         line_height: Pixels,
     ) -> Self {
         Self {
-            lines,
+            lines: Rc::new(lines.into_iter().map(Rc::new).collect()),
             line_starts,
             line_height,
             shaping_run: None,
+            shape_key: None,
+        }
+    }
+
+    pub(super) fn shape(
+        text: SharedString,
+        font_size: Pixels,
+        runs: Vec<gpui::TextRun>,
+        wrap_width: Option<Pixels>,
+        line_height: Pixels,
+        shaper: &gpui::WindowTextSystem,
+        previous: Option<&Self>,
+    ) -> Self {
+        let key = TextShapeKey {
+            text,
+            font_size,
+            runs,
+            wrap_width,
+        };
+        if let Some(previous) = previous.filter(|layout| layout.shape_key.as_ref() == Some(&key)) {
+            let mut layout = previous.clone();
+            layout.line_height = line_height;
+            return layout;
+        }
+        let starts: Vec<_> = std::iter::once(0)
+            .chain(key.text.match_indices('\n').map(|(offset, _)| offset + 1))
+            .collect();
+        let reusable = previous.filter(|layout| {
+            let Some(old) = &layout.shape_key else {
+                return false;
+            };
+            if old.font_size != font_size || old.wrap_width != wrap_width {
+                return false;
+            }
+            match (old.runs.as_slice(), key.runs.as_slice()) {
+                ([old], [new]) => {
+                    let mut old = old.clone();
+                    old.len = new.len;
+                    old == *new
+                }
+                _ => false,
+            }
+        });
+        let lines = if let Some(previous) = reusable {
+            let paragraphs: Vec<_> = key.text.split('\n').collect();
+            let prefix = previous
+                .lines
+                .iter()
+                .zip(&paragraphs)
+                .take_while(|(line, text)| line.text.as_ref() == **text)
+                .count();
+            let suffix = previous.lines[prefix..]
+                .iter()
+                .rev()
+                .zip(paragraphs[prefix..].iter().rev())
+                .take_while(|(line, text)| line.text.as_ref() == **text)
+                .count();
+            let mut lines = Vec::with_capacity(paragraphs.len());
+            lines.extend(previous.lines[..prefix].iter().cloned());
+            let changed_end = paragraphs.len() - suffix;
+            if prefix < changed_end {
+                let start = starts[prefix];
+                let end = starts[changed_end - 1] + paragraphs[changed_end - 1].len();
+                let mut run = key.runs[0].clone();
+                run.len = end - start;
+                lines.extend(
+                    shaper
+                        .shape_text(
+                            key.text[start..end].to_owned().into(),
+                            font_size,
+                            &[run],
+                            wrap_width,
+                            None,
+                        )
+                        .expect("failed to shape input text")
+                        .into_iter()
+                        .map(Rc::new),
+                );
+            }
+            lines.extend(
+                previous.lines[previous.lines.len() - suffix..]
+                    .iter()
+                    .cloned(),
+            );
+            Rc::new(lines)
+        } else {
+            Rc::new(
+                shaper
+                    .shape_text(key.text.clone(), font_size, &key.runs, wrap_width, None)
+                    .expect("failed to shape input text")
+                    .into_iter()
+                    .map(Rc::new)
+                    .collect(),
+            )
+        };
+        Self {
+            lines,
+            line_starts: starts,
+            line_height,
+            shaping_run: None,
+            shape_key: Some(key),
         }
     }
 
@@ -62,7 +174,7 @@ impl TextLayout {
         let line_start = self.line_starts.get(line_ix).copied().unwrap_or(0);
         let local_offset = offset
             .saturating_sub(line_start)
-            .min(self.lines.get(line_ix).map_or(0, WrappedLine::len));
+            .min(self.lines.get(line_ix).map_or(0, |line| line.len()));
         (line_ix, local_offset)
     }
 
@@ -118,7 +230,7 @@ impl TextLayout {
         }
 
         (self.line_starts.last().copied().unwrap_or(0)
-            + self.lines.last().map_or(0, WrappedLine::len))
+            + self.lines.last().map_or(0, |line| line.len()))
         .into()
     }
 
@@ -136,7 +248,7 @@ impl TextLayout {
 
     fn matches_content(&self, content: &str) -> bool {
         self.line_starts.last().copied().unwrap_or(0)
-            + self.lines.last().map_or(0, WrappedLine::len)
+            + self.lines.last().map_or(0, |line| line.len())
             == content.len()
             && self
                 .lines
@@ -165,7 +277,8 @@ impl TextLayout {
             first.wrap_width,
             None,
         ) {
-            self.lines = lines.into_vec();
+            self.lines = Rc::new(lines.into_iter().map(Rc::new).collect());
+            self.shape_key = None;
             self.line_starts = std::iter::once(0)
                 .chain(content.match_indices('\n').map(|(i, _)| i + 1))
                 .collect();
@@ -2177,6 +2290,127 @@ mod tests {
         rows: Option<usize>,
         changes: Rc<RefCell<Vec<SharedString>>>,
         _subscription: Subscription,
+    }
+
+    #[test]
+    fn layout_cache_tracks_content_width_font_and_preedit_style() {
+        use std::sync::Arc;
+        let shaper = gpui::WindowTextSystem::new(Arc::new(gpui::TextSystem::new(Arc::new(
+            gpui::NoopTextSystem,
+        ))));
+        let text: SharedString = (0..96)
+            .map(|i| char::from(b'a' + i % 26))
+            .collect::<String>()
+            .into();
+        let run = gpui::TextRun {
+            len: text.len(),
+            ..Default::default()
+        };
+        let original = TextLayout::shape(
+            text.clone(),
+            px(16.),
+            vec![run.clone()],
+            Some(px(120.)),
+            px(20.),
+            &shaper,
+            None,
+        );
+        let cached = TextLayout::shape(
+            text.clone(),
+            px(16.),
+            vec![run.clone()],
+            Some(px(120.)),
+            px(28.),
+            &shaper,
+            Some(&original),
+        );
+        assert!(Rc::ptr_eq(&original.lines, &cached.lines));
+        assert_eq!(
+            cached.position_for_offset(text.len()).y / px(28.),
+            original.position_for_offset(text.len()).y / px(20.)
+        );
+        let narrow = TextLayout::shape(
+            text.clone(),
+            px(16.),
+            vec![run.clone()],
+            Some(px(60.)),
+            px(20.),
+            &shaper,
+            Some(&original),
+        );
+        assert!(narrow.visual_row_count() > original.visual_row_count());
+        let larger = TextLayout::shape(
+            text.clone(),
+            px(24.),
+            vec![run.clone()],
+            Some(px(120.)),
+            px(20.),
+            &shaper,
+            Some(&original),
+        );
+        assert_eq!(larger.lines[0].font_size(), px(24.));
+        let mut marked_run = run.clone();
+        marked_run.underline = Some(gpui::UnderlineStyle {
+            thickness: px(1.),
+            ..Default::default()
+        });
+        let marked = TextLayout::shape(
+            text.clone(),
+            px(16.),
+            vec![marked_run],
+            Some(px(120.)),
+            px(20.),
+            &shaper,
+            Some(&original),
+        );
+        assert!(!Rc::ptr_eq(&original.lines, &marked.lines));
+        let replacement: SharedString = text.to_uppercase().into();
+        let edited = TextLayout::shape(
+            replacement.clone(),
+            px(16.),
+            vec![run],
+            Some(px(120.)),
+            px(20.),
+            &shaper,
+            Some(&original),
+        );
+        assert_eq!(edited.lines[0].text, replacement);
+
+        let mut text = (0..8)
+            .map(|i| char::from(b'a' + i).to_string().repeat(64))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let shape = |text: &str, previous| {
+            TextLayout::shape(
+                text.to_owned().into(),
+                px(16.),
+                vec![gpui::TextRun {
+                    len: text.len(),
+                    ..Default::default()
+                }],
+                Some(px(120.)),
+                px(20.),
+                &shaper,
+                previous,
+            )
+        };
+        let original = shape(&text, None);
+        text.insert(original.line_starts[3] + 12, '\n');
+        let inserted = shape(&text, Some(&original));
+        assert!(Rc::ptr_eq(&inserted.lines[2], &original.lines[2]));
+        assert!(Rc::ptr_eq(&inserted.lines[5], &original.lines[4]));
+        let fresh = shape(&text, None);
+        for (offset, _) in text.char_indices() {
+            assert_eq!(
+                inserted.position_for_offset(offset),
+                fresh.position_for_offset(offset)
+            );
+        }
+        text.replace_range(inserted.line_starts[3]..inserted.line_starts[5], "");
+        let deleted = shape(&text, Some(&inserted));
+        assert!(Rc::ptr_eq(&deleted.lines[3], &original.lines[4]));
+        assert!(deleted.matches_content(&text));
+        assert_eq!(deleted.line_starts.len(), 7);
     }
 
     impl Render for TestInput {

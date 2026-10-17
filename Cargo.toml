@@ -365,6 +365,19 @@ proc-macro2 = { opt-level = 3 }
 taffy = { opt-level = 3 }
 resvg = { opt-level = 3 }
 serde_json = { opt-level = 3 }
+# Text shaping and font fallback run on the input frame's critical path.
+cosmic-text = { opt-level = 3 }
+harfrust = { opt-level = 3 }
+skrifa = { opt-level = 3 }
+read-fonts = { opt-level = 3 }
+font-types = { opt-level = 3 }
+swash = { opt-level = 3 }
+fontdb = { opt-level = 3 }
+unicode-bidi = { opt-level = 3 }
+unicode-linebreak = { opt-level = 3 }
+unicode-segmentation = { opt-level = 3 }
+rangemap = { opt-level = 3 }
+smol_str = { opt-level = 3 }
 # UI interaction paths need modest optimization even in debug builds. This keeps
 # debug assertions and symbols while avoiding frame stalls in pointer-driven controls.
 gpui = { opt-level = 1 }

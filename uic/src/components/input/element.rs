@@ -141,18 +141,15 @@ impl Element for TextElement {
 
         let font_size = style.font_size.to_pixels(window.rem_size());
         let wrap_width = multiline.then_some(bounds.size.width);
-        let lines = window
-            .text_system()
-            .shape_text(display_text.clone(), font_size, &runs, wrap_width, None)
-            .expect("failed to shape input text")
-            .into_vec();
-        let mut line_starts = vec![0];
-        line_starts.extend(
-            display_text
-                .match_indices('\n')
-                .map(|(offset, _)| offset + 1),
+        let mut layout = TextLayout::shape(
+            display_text,
+            font_size,
+            runs,
+            wrap_width,
+            window.line_height(),
+            window.text_system(),
+            input.last_layout.as_ref(),
         );
-        let mut layout = TextLayout::new(lines, line_starts, window.line_height());
         layout.shaping_run = Some(shaping_run);
 
         let cursor_position = layout.position_for_caret(cursor_offset, caret_affinity);
@@ -308,11 +305,18 @@ impl Element for TextElement {
 
         let layout = prepaint.layout.take().expect("input layout must exist");
         let mut rows_before = 0;
-        for line in &layout.lines {
+        let clip = window.content_mask().bounds;
+        for line in layout.lines.iter() {
             let origin = point(
                 prepaint.text_bounds.left(),
                 bounds.top() + layout.line_height * rows_before as f32,
             );
+            let height = layout.line_height * (line.wrap_boundaries().len() + 1);
+            rows_before += line.wrap_boundaries().len() + 1;
+            let overhang = line.font_size().max(line.ascent() + line.descent());
+            if origin.y + height + overhang < clip.top() || origin.y - overhang > clip.bottom() {
+                continue;
+            }
             line.paint(
                 origin,
                 layout.line_height,
@@ -322,7 +326,6 @@ impl Element for TextElement {
                 cx,
             )
             .expect("failed to paint input text");
-            rows_before += line.wrap_boundaries().len() + 1;
         }
 
         if !disabled

@@ -3422,16 +3422,7 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_json",
- "serde_urlencoded",
  "url",
-]
-
-[[package]]
-name = "http_client_tls"
-version = "0.1.0"
-dependencies = [
- "rustls",
- "rustls-platform-verifier",
 ]
 
 [[package]]
@@ -5966,10 +5957,11 @@ dependencies = [
  "futures",
  "gpui_util",
  "http_client",
- "http_client_tls",
  "log",
  "regex",
  "reqwest",
+ "rustls",
+ "rustls-platform-verifier",
  "serde",
  "tokio",
 ]
@@ -6443,18 +6435,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26"
 dependencies = [
  "serde_core",
-]
-
-[[package]]
-name = "serde_urlencoded"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3491c14715ca2294c4d6a88f15e84739788c1d030eed8c110436aafdaa2f3fd"
-dependencies = [
- "form_urlencoded",
- "itoa",
- "ryu",
- "serde",
 ]
 
 [[package]]

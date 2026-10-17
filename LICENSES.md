@@ -23,7 +23,6 @@ attribution. See [LICENSE-APACHE](LICENSE-APACHE).
 | `gpui_wgpu` | `crates/gpui_wgpu` |
 | `gpui_windows` | `crates/gpui_windows` |
 | `http_client` | `crates/http_client` |
-| `http_client_tls` | `crates/http_client_tls` |
 | `refineable` | `crates/refineable` |
 | `derive_refineable` | `crates/refineable/derive_refineable` |
 | `reqwest_client` | `crates/reqwest_client` |

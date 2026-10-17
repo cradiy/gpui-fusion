@@ -5,7 +5,7 @@ use rustls_platform_verifier::ConfigVerifierExt;
 
 static TLS_CONFIG: OnceLock<Result<ClientConfig, rustls::Error>> = OnceLock::new();
 
-pub fn tls_config() -> Result<ClientConfig, rustls::Error> {
+pub(super) fn tls_config() -> Result<ClientConfig, rustls::Error> {
     TLS_CONFIG
         .get_or_init(|| {
             // rustls uses the `aws_lc_rs` provider by default

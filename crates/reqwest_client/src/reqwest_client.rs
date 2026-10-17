@@ -1,3 +1,6 @@
+#[cfg(not(target_family = "wasm"))]
+mod tls;
+
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Mutex;
@@ -73,7 +76,7 @@ impl ReqwestClient {
             builder = builder.proxy(proxy.no_proxy(reqwest::NoProxy::from_env()));
         }
         if self.use_preconfigured_tls {
-            builder = builder.use_preconfigured_tls(http_client_tls::tls_config()?);
+            builder = builder.use_preconfigured_tls(tls::tls_config()?);
         }
 
         let client = builder.build()?;
@@ -132,9 +135,7 @@ impl ReqwestClient {
             client_has_proxy = false;
         };
 
-        let client = client
-            .use_preconfigured_tls(http_client_tls::tls_config()?)
-            .build()?;
+        let client = client.use_preconfigured_tls(tls::tls_config()?).build()?;
         let mut client: ReqwestClient = client.into();
         client.proxy = client_has_proxy.then_some(proxy).flatten();
         client.user_agent = Some(user_agent);

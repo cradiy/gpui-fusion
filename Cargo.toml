@@ -30,7 +30,6 @@ members = [
   "crates/sum_tree",
   "crates/gpui_windows",
   "crates/http_client",
-  "crates/http_client_tls",
   "crates/util_macros",
   "crates/refineable",
   "crates/refineable/derive_refineable",
@@ -83,7 +82,6 @@ gpui_util = { path = "crates/gpui_util" }
 http_client = { path = "crates/http_client" }
 scheduler = { path = "crates/scheduler" }
 sum_tree = { path = "crates/sum_tree" }
-http_client_tls = { path = "crates/http_client_tls" }
 naga = { version = "30.0.0", features = ["wgsl-in", "msl-out", "hlsl-out"] }
 util_macros = { path = "crates/util_macros" }
 uic_macros = { package = "uic-macros", path = "uic/macros", version = "0.1.0" }
@@ -245,7 +243,6 @@ schemars = { version = "1.0", features = ["indexmap2"] }
 semver = { version = "1.0", features = ["serde"] }
 serde = { version = "1.0.221", features = ["derive", "rc"] }
 serde_json = { version = "1.0.144", features = ["preserve_order", "raw_value"] }
-serde_urlencoded = "0.7"
 sha2 = "0.10"
 slotmap = "1.0.6"
 smallvec = { version = "1.6", features = ["union", "const_new"] }

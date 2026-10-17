@@ -3,7 +3,8 @@ name = "gpui_render"
 version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
-license = "Apache-2.0"
+license = "MIT"
+authors = ["cradiy <cradiy.rs@gmail.com>"]
 
 [lints]
 workspace = true

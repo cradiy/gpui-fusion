@@ -1,4 +1,6 @@
 [package]
+license = "MIT"
+authors = ["cradiy <cradiy.rs@gmail.com>"]
 name = "notifications"
 version = "0.1.0"
 edition.workspace = true

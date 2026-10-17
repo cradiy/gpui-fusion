@@ -3,6 +3,7 @@ name = "uic"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+authors = ["cradiy <cradiy.rs@gmail.com>"]
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }

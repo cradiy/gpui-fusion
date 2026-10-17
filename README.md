@@ -76,10 +76,10 @@ applications. See its [documentation](crates/gpui_media/README.md) for usage.
 in an embeddable `GpuiView`, with a Kotlin host and WGPU rendering through Vulkan
 or OpenGL ES. It supports the `arm64-v8a` and `x86_64` Android ABIs.
 
-[`GPUiForge`](tools/gpuiforge/README.md) generates, builds, and runs Android
+[`GPUiForge`](https://github.com/cradiy/gpuiforge) generates, builds, and runs Android
 projects from `gpuiforge.json`. Generated projects can also be exported for
 manual maintenance. See [Android hosting](crates/gpui_android/docs/hosting.md)
-for setup and embedding, and [GPUiForge configuration](tools/gpuiforge/docs/usage.md)
+for setup and embedding, and [GPUiForge configuration](https://github.com/cradiy/gpuiforge/blob/main/docs/usage.md)
 for build options and optional host capabilities.
 
 ### Other Extensions
@@ -135,9 +135,9 @@ This is a mixed-license repository:
 
 - GPUI-related code derived from Zed remains licensed under the Apache License
   2.0. See [LICENSE-APACHE](LICENSE-APACHE).
-- The independently developed `gpui_3d`, `gpui_3d_gltf`, `gpui_effects`,
-  `gpui_media`, `uic`, and `uic-macros` crates declare the MIT License in their
-  package metadata. See each crate's `Cargo.toml` and included license files.
+- Packages authored by cradiy use the [MIT License](LICENSE-MIT).
+  See [LICENSES.md](LICENSES.md)
+  for the package boundary and each package's `Cargo.toml` and `LICENSE`.
 - Third-party assets retain their original licenses. In particular, the Lucide
   icons bundled by `uic` retain the Lucide ISC and Feather MIT license text in
   [`uic/assets/icons/LICENSE`](uic/assets/icons/LICENSE).

@@ -1,6 +1,8 @@
 [workspace]
 
 [package]
+license = "MIT"
+authors = ["cradiy <cradiy.rs@gmail.com>"]
 name = "autofill_web"
 version = "0.1.0"
 edition = "2024"

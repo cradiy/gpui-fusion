@@ -10,8 +10,8 @@ Requirements:
 - The Rust targets for the selected Android ABIs (listed below).
 - Android 8.0/API 26 or newer with a compatible Vulkan or OpenGL ES driver.
 
-Install GPUiForge from the repository root with
-`cargo install --path tools/gpuiforge`. Set `ANDROID_HOME` to the SDK
+Clone [GPUiForge](https://github.com/cradiy/gpuiforge) and install it from its
+repository root with `cargo install --path .`. Set `ANDROID_HOME` to the SDK
 and `ANDROID_NDK_HOME` to the NDK. From
 `crates/gpui_android/examples/hello_android`:
 
@@ -40,7 +40,7 @@ Enable optional host capabilities with `features`, for example
 general and media notifications use `"notifications"` and `"media-notifications"`.
 Omitted modules are not generated. Use `"icon": "assets/app.png"` for the application
 icon and `gpuiforge sync` to regenerate the managed project without building.
-See [host features and icons](../../../tools/gpuiforge/docs/usage.md#android-host-features-and-icons)
+See [host features and icons](https://github.com/cradiy/gpuiforge/blob/main/docs/usage.md#android-host-features-and-icons)
 for available modules and resource configuration.
 
 The platform menu offers desktop and Android. Android run prompts for a device
@@ -55,7 +55,7 @@ Kotlin host and Gradle application under
 Use `gpuiforge platform eject android` to export the generated application to
 `platforms/android` and switch the JSON configuration to manual management.
 Subsequent builds preserve user-owned Kotlin, Manifest, and Gradle files.
-See [GPUiForge configuration](../../../tools/gpuiforge/docs/usage.md) for recipes,
+See [GPUiForge configuration](https://github.com/cradiy/gpuiforge/blob/main/docs/usage.md) for recipes,
 template variables, and ownership rules.
 
 The application is a Cargo binary package with `src/main.rs`. The Android build
@@ -118,7 +118,7 @@ For HTTP endpoints used by Android networking components, set
 `"cleartext-traffic": true` alongside `features` in `platforms.android`, then
 rebuild the APK. This permits HTTP to all destinations without disabling HTTPS
 certificate verification. To allow specific hosts instead, use
-`"cleartext-domains": ["cloud.example.com", "192.168.1.10"]`. See [HTTP configuration](../../../tools/gpuiforge/docs/usage.md#android-host-features-and-icons).
+`"cleartext-domains": ["cloud.example.com", "192.168.1.10"]`. See [HTTP configuration](https://github.com/cradiy/gpuiforge/blob/main/docs/usage.md#android-host-features-and-icons).
 
 With the Rust feature and host module disabled, the verifier initialization and
 its dedicated dependencies are omitted. Other dependencies, such as reqwest,

@@ -6,6 +6,16 @@ These rules apply throughout the repository.
 
 - Write all skills and AGENTS.md files in English.
 
+## Line endings
+
+- Use Unix (LF) line endings for all text files, including source code, scripts, configuration, documentation, templates, and generated text. Do not introduce CRLF line endings.
+
+## License ownership
+
+- Follow the package license assignments in [LICENSES.md](LICENSES.md).
+- Use MIT for new first-party packages, include a package-local `LICENSE`, and set the Cargo author to `cradiy <cradiy.rs@gmail.com>`.
+- Preserve existing copyright attribution and third-party license notices when moving or reusing code and assets.
+
 ## Never reuse conversation examples
 
 - It is strictly forbidden to use any example supplied by a user or developer in a development conversation as a test case, test data, fixture, documentation example, demonstration, or sample configuration.

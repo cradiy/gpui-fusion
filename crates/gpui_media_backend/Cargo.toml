@@ -4,6 +4,7 @@ version = "0.1.0"
 publish.workspace = true
 edition.workspace = true
 license = "MIT"
+authors = ["cradiy <cradiy.rs@gmail.com>"]
 description = "Renderer-independent system media playback and frame extraction"
 
 [features]

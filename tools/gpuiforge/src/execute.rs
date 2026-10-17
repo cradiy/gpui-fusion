@@ -119,9 +119,7 @@ pub fn build(project: &Project, name: &str, release: bool, abi: Option<&str>) ->
     if name == "android" {
         signing_env.insert("GPUIFORGE_SIGNING_ENABLED".into(), "0".into());
         if release && let Some(signing) = &platform.signing {
-            let keystore = signing
-                .keystore
-                .canonicalize()
+            let keystore = crate::host::canonicalize(&signing.keystore)
                 .context("signing keystore not found")?;
             ensure!(keystore.is_file(), "signing keystore must be a file");
             ensure!(

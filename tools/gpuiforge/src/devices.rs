@@ -54,9 +54,9 @@ pub fn adb() -> PathBuf {
         .map(|sdk| {
             PathBuf::from(sdk)
                 .join("platform-tools")
-                .join(if cfg!(windows) { "adb.exe" } else { "adb" })
+                .join(crate::host::executable("adb"))
         })
-        .unwrap_or_else(|| PathBuf::from("adb"))
+        .unwrap_or_else(|| PathBuf::from(crate::host::executable("adb")))
 }
 
 fn output(args: &[&str]) -> Result<String> {

@@ -244,7 +244,7 @@ fn synchronize(project: &Project, name: &str, check: bool) -> Result<PathBuf> {
     let previous = if state_path.exists() {
         let state: State = serde_json::from_slice(&fs::read(&state_path)?)?;
         ensure!(
-            state.owner == project.config_path,
+            dunce::simplified(&state.owner) == dunce::simplified(&project.config_path),
             "generated directory belongs to a different project"
         );
         state
@@ -378,7 +378,7 @@ pub fn eject(project: &Project, name: &str, destination: &Path) -> Result<PathBu
     no_symlinks(&source.join(STATE))?;
     let state: State = serde_json::from_slice(&fs::read(source.join(STATE))?)?;
     ensure!(
-        state.owner == project.config_path,
+        dunce::simplified(&state.owner) == dunce::simplified(&project.config_path),
         "generated directory belongs to a different project"
     );
     // Export source files, including user edits and additions, but no build caches.

@@ -5,6 +5,8 @@ mod config;
 mod devices;
 mod execute;
 mod generate;
+mod host;
+mod native_build;
 mod schema;
 include!(concat!(env!("OUT_DIR"), "/android_files.rs"));
 
@@ -81,6 +83,26 @@ enum Action {
         #[arg(long)]
         output: PathBuf,
     },
+    #[command(hide = true)]
+    BuildAndroidNative {
+        #[arg(long)]
+        manifest_path: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        library: String,
+        #[arg(long, value_parser = ["arm64-v8a", "x86_64"])]
+        abi: String,
+        #[arg(long, default_value = "debug", value_parser = ["debug", "release"])]
+        profile: String,
+        #[arg(long, default_value = "26")]
+        min_sdk: u32,
+    },
+    #[command(hide = true)]
+    Gradle {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<std::ffi::OsString>,
+    },
     /// Manage native project ownership.
     Platform {
         #[command(subcommand)]
@@ -106,6 +128,20 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<()> {
+    if let Action::Gradle { args } = cli.command {
+        return native_build::gradle(&args);
+    }
+    if let Action::BuildAndroidNative {
+        manifest_path,
+        output,
+        library,
+        abi,
+        profile,
+        min_sdk,
+    } = cli.command
+    {
+        return native_build::build(&manifest_path, &output, &library, &abi, &profile, min_sdk);
+    }
     if matches!(cli.command, Action::Devices) {
         return devices::print();
     }
@@ -177,6 +213,8 @@ fn run(cli: Cli) -> Result<()> {
         Action::Schema { .. }
         | Action::Init { .. }
         | Action::PrepareAndroid { .. }
+        | Action::BuildAndroidNative { .. }
+        | Action::Gradle { .. }
         | Action::Devices => unreachable!(),
     }
     Ok(())

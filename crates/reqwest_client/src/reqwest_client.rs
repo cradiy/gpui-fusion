@@ -353,11 +353,8 @@ mod tests {
 
     use crate::ReqwestClient;
 
-    /// Regression test: `StreamReader::poll_next` used to drop the reader it
-    /// `take()`s whenever the reader returned `Poll::Pending`, so the next
-    /// poll reported end-of-stream and streamed request bodies were silently
-    /// truncated. Readers backed by real I/O (e.g. `async_fs::File`) return
-    /// `Pending` on their very first read, so their uploads sent zero bytes.
+    /// Streamed request bodies must retain their reader across `Poll::Pending`
+    /// and upload the complete payload when the reader becomes ready.
     #[test]
     fn test_streamed_body_survives_pending_reader() {
         let payload: Vec<u8> = (0..30_000usize).map(|byte| (byte % 251) as u8).collect();

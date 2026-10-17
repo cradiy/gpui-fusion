@@ -555,7 +555,7 @@ mod tests {
         };
         let mut build = || Ok(Some((size, Cow::Owned(vec![0, 0, 0, 255]))));
 
-        // Regression test: before the fix, this panicked in flush_uploads
+        // Removed textures must not receive queued uploads.
         atlas
             .get_or_insert_with(&key, &mut build)?
             .expect("tile should be created");

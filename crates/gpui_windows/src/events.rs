@@ -768,9 +768,8 @@ impl WindowsWindowInner {
         }
 
         // When the window is activated (gains focus), reset the modifier tracking state.
-        // This fixes the issue where Alt-Tab away and back leaves stale modifier state
-        // (especially the Alt key) because Windows doesn't always send key-up events to
-        // windows that have lost focus.
+        // Windows doesn't always send key-up events to windows that have lost focus,
+        // so modifier state (especially the Alt key) can be stale after Alt-Tab.
         if activated {
             this.state.last_reported_modifiers.set(None);
             this.state.last_reported_capslock.set(None);

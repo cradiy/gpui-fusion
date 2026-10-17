@@ -5109,8 +5109,7 @@ mod tests {
 
     /// A key-down whose key-up lands on a *different* element (because focus
     /// moved in between) must not leak a synthesized click onto the newly
-    /// focused element. This is the core regression: previously the key-up
-    /// handler fired unconditionally on whatever was focused at key-up time.
+    /// focused element.
     #[test]
     fn keyboard_activation_does_not_leak_across_focus_change() {
         let (mut cx, window, clicks, focus_a, focus_b) = setup_keyboard_activation_test();

@@ -40,9 +40,9 @@ checks filesystem paths and platform-specific requirements.
       "application-id": "dev.example.app",
       "build": [
         {
-          "args": ["gradlew", "--no-daemon", "-PgpuiAbis={{abis}}", "-PgpuiForgeExecutable={{tool_path}}", ":app:assemble{{variant}}"],
+          "args": ["gradle", "--", "--no-daemon", "-PgpuiAbis={{abis}}", "-PgpuiForgeExecutable={{tool_path}}", ":app:assemble{{variant}}"],
           "cwd": "{{project_dir}}",
-          "program": "bash"
+          "program": "{{tool_path}}"
         }
       ],
       "run": [
@@ -78,10 +78,25 @@ checks filesystem paths and platform-specific requirements.
 GPUiForge includes the Kotlin host, Gradle wrapper, Android template and Rust
 packaging support. No recipe path or GPUI source checkout is required. The native
 library name is derived from the Cargo package name, replacing hyphens with
-underscores. The default Android build supports Linux and macOS build hosts,
+underscores. The default Android build supports Windows, Linux and macOS build hosts,
 ARM64 and x86_64 Android, and packages
 Rust applications using `src/main.rs` without a companion library or explicit
 `[[bin]]`.
+
+The bundled build invokes the Gradle wrapper through Java and compiles Rust
+through GPUiForge. Windows uses the NDK's `windows-x86_64` tools, including
+the API-specific Clang `.cmd` wrappers and `llvm-ar.exe`. Set `ANDROID_HOME`,
+`ANDROID_NDK_HOME` and `JAVA_HOME` to their native host installations. Install
+the Rust standard libraries for the configured Android targets with `rustup`.
+Use `org.gradle.jvmargs` in `gradle.properties` for Gradle JVM settings.
+
+Windows packaging refreshes copies of application files in the generated Cargo
+directory on every build, removing stale snapshot entries. Source symlinks
+are rejected on Windows. Linux and macOS packaging uses source symlinks.
+Generated project paths and source paths may contain spaces.
+
+Run `gpuiforge sync android` to update a managed Android project. Custom build
+steps and recipes must use tools available on the build host.
 
 `abis` selects the packaged architectures: `arm64-v8a` uses Rust target
 `aarch64-linux-android`, and `x86_64` uses `x86_64-linux-android`. Keep one entry
@@ -132,11 +147,14 @@ Desktop/Web `run` executes its configured run steps, which must build or serve
 the application as needed. It does not separately execute the build steps.
 
 Default managed Android builds check the selected JDK's `java` and `javac`, SDK
-platform 36.1, NDK compilers for `min_sdk`, and Rust standard libraries before
+platform 36.1 or later, NDK compilers for `min_sdk`, and Rust standard libraries before
 generating files or starting Gradle. `run` checks the device ABI; `build` checks
 all configured ABIs. Set `JAVA_HOME`, `ANDROID_HOME` (or `ANDROID_SDK_ROOT`) and
 `ANDROID_NDK_HOME` to complete installations. Custom build steps and manually
 maintained projects control their own prerequisite handling.
+
+The bundled Gradle project uses the lowest installed stable SDK platform at or
+above 36.1 for both application and host compilation. Preview platforms are excluded.
 
 `gpuiforge doctor` checks Cargo, Rust, Java, Android SDK/NDK tools, target standard
 libraries for the default Android build, ADB, and configured paths. It reports
@@ -199,18 +217,8 @@ To allow HTTP through Android networking components, set `cleartext-traffic`:
 }
 ```
 
-To allow only specific hosts, use `cleartext-domains` instead:
-
-```json
-{
-  "platforms": {
-    "android": {
-      "features": ["network"],
-      "cleartext-domains": ["cloud.cradiy.org", "192.168.1.10", "[2001:db8::1]"]
-    }
-  }
-}
-```
+To allow only specific hosts, enable the `network` feature and set
+`platforms.android.cleartext-domains` to a list of hostnames or IP addresses.
 
 Entries are exact ASCII DNS names or IP addresses. Do not include `http://`,
 ports, paths, wildcards or CIDR ranges. All ports on a listed host are allowed;

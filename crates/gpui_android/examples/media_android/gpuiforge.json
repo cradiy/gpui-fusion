@@ -9,9 +9,9 @@
       "application-id": "dev.gpui.media",
       "build": [
         {
-          "args": ["gradlew", "--no-daemon", "-PgpuiAbis={{abis}}", "-PgpuiForgeExecutable={{tool_path}}", ":app:assemble{{variant}}"],
+          "args": ["gradle", "--", "--no-daemon", "-PgpuiAbis={{abis}}", "-PgpuiForgeExecutable={{tool_path}}", ":app:assemble{{variant}}"],
           "cwd": "{{project_dir}}",
-          "program": "bash"
+          "program": "{{tool_path}}"
         }
       ],
       "features": ["files", "media", "background-media"],

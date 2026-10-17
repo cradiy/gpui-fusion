@@ -13,14 +13,15 @@
       "build": [
         {
           "args": [
-            "gradlew",
+            "gradle",
+            "--",
             "--no-daemon",
             "-PgpuiAbis={{abis}}",
             "-PgpuiForgeExecutable={{tool_path}}",
             ":app:assemble{{variant}}"
           ],
           "cwd": "{{project_dir}}",
-          "program": "bash"
+          "program": "{{tool_path}}"
         }
       ],
       "features": [],

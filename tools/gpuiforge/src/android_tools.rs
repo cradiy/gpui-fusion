@@ -11,38 +11,39 @@ fn sdk() -> Result<String> {
         .or_else(|| std::env::var_os("ANDROID_SDK_ROOT"))
         .map(PathBuf::from)
         .context("set ANDROID_HOME to an Android SDK installation")?;
+    let installed = fs::read_dir(path.join("platforms"))
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .any(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let Some(version) = name.strip_prefix("android-") else {
+                return false;
+            };
+            let mut parts = version.split('.');
+            let major = parts.next().and_then(|part| part.parse::<u32>().ok());
+            let minor = parts.next().unwrap_or("0").parse::<u32>().ok();
+            matches!((major, minor), (Some(major), Some(minor)) if (major, minor) >= (36, 1))
+                && parts.next().is_none()
+                && entry.path().join("android.jar").is_file()
+        });
     ensure!(
-        path.join("platforms/android-36.1/android.jar").is_file(),
-        "Android SDK platform 36.1 is missing in {}; install it with Android Studio's SDK Manager",
+        installed,
+        "Android SDK platform 36.1 or later is missing in {}; install it with Android Studio's SDK Manager",
         path.display()
     );
     Ok(path.display().to_string())
 }
 
-fn ndk(root: &Path, target: &str, api: u32) -> Result<String> {
+pub fn ndk(root: &Path, target: &str, api: u32) -> Result<String> {
     let path = std::env::var_os("ANDROID_NDK_HOME")
         .map(PathBuf::from)
         .context("set ANDROID_NDK_HOME to a complete Android NDK installation")?;
-    let host = match std::env::consts::OS {
-        "linux" => "linux-x86_64",
-        "macos" => "darwin-x86_64",
-        other => {
-            anyhow::bail!("bundled Android builds require Linux or macOS; current host is {other}")
-        }
-    };
-    let tools = path.join("toolchains/llvm/prebuilt").join(host).join("bin");
-    for name in [
-        format!("{target}{api}-clang"),
-        format!("{target}{api}-clang++"),
-        "llvm-ar".into(),
-    ] {
-        ensure!(
-            tools.join(&name).is_file(),
-            "NDK tool missing: {}; check ANDROID_NDK_HOME and min_sdk",
-            tools.join(name).display()
-        );
-    }
-    let compiler = tools.join(format!("{target}{api}-clang"));
+    let tools = crate::host::NdkTools::new(&path, target, api)?;
+    tools.validate()?;
+    let path = crate::host::canonicalize(&path)?;
+    let compiler = crate::host::NdkTools::new(&path, target, api)?.cc;
     let output = Command::new(&compiler)
         .arg("--version")
         .current_dir(root)
@@ -56,7 +57,7 @@ fn ndk(root: &Path, target: &str, api: u32) -> Result<String> {
     Ok(path.display().to_string())
 }
 
-fn rust_target(root: &Path, target: &str) -> Result<String> {
+pub fn rust_target(root: &Path, target: &str) -> Result<String> {
     let output = Command::new("rustc")
         .args(["--print", "target-libdir", "--target", target])
         .current_dir(root)
@@ -105,11 +106,7 @@ pub fn inspect(
         .map(|abi| vec![abi])
         .unwrap_or_else(|| platform.abis.iter().map(String::as_str).collect());
     for abi in abis {
-        let target = match abi {
-            "arm64-v8a" => "aarch64-linux-android",
-            "x86_64" => "x86_64-linux-android",
-            _ => anyhow::bail!("unsupported Android ABI: {abi}"),
-        };
+        let target = target(abi)?;
         checks.push((format!("NDK ({abi})"), ndk(&project.root, target, api)));
         checks.push((format!("Rust ({abi})"), rust_target(&project.root, target)));
     }
@@ -130,13 +127,7 @@ pub fn preflight(project: &Project, selected_abi: Option<&str>) -> Result<()> {
 }
 
 pub fn java_development_kit() -> Result<PathBuf> {
-    let executable = |name: &str| {
-        if cfg!(windows) {
-            format!("{name}.exe")
-        } else {
-            name.to_owned()
-        }
-    };
+    use crate::host::executable;
     let configured_home = std::env::var_os("JAVA_HOME").map(PathBuf::from);
     let java = configured_home
         .as_ref()
@@ -180,5 +171,13 @@ pub fn java_development_kit() -> Result<PathBuf> {
         javac.display(),
         String::from_utf8_lossy(&output.stderr)
     );
-    Ok(home)
+    crate::host::canonicalize(&home)
+}
+
+pub fn target(abi: &str) -> Result<&'static str> {
+    match abi {
+        "arm64-v8a" => Ok("aarch64-linux-android"),
+        "x86_64" => Ok("x86_64-linux-android"),
+        _ => anyhow::bail!("unsupported Android ABI: {abi}"),
+    }
 }

@@ -4,6 +4,9 @@ An independent command-line tool for generating, building and running GPUI
 applications. Projects use `gpuiforge.json`; Android templates and build support
 are bundled in the executable.
 
+Android builds run on Windows, Linux and macOS hosts with a native JDK,
+Android SDK/NDK and the required Rust Android targets installed.
+
 Install from the repository root:
 
 ```sh

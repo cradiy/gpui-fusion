@@ -5,7 +5,7 @@
 Requirements:
 
 - JDK 17 or newer, as supported by the bundled Gradle/Android Gradle plugin.
-- Android SDK platform 36.1 and build tools.
+- Android SDK platform 36.1 or later and build tools.
 - Android NDK r29 or newer.
 - The Rust targets for the selected Android ABIs (listed below).
 - Android 8.0/API 26 or newer with a compatible Vulkan or OpenGL ES driver.
@@ -62,7 +62,7 @@ The application is a Cargo binary package with `src/main.rs`. The Android build
 generates a library manifest under `target/android` from the application's
 dependencies and workspace settings, then produces the native library required
 by the APK. The application's manifest does not need a `[lib]` target.
-The shell build helper supports Linux and macOS hosts. The generated project's
+GPUiForge supports Windows, Linux and macOS build hosts. The generated project's
 `:host` module builds the Kotlin host library alongside the Rust application.
 
 The packaging helper currently accepts a binary package with `src/main.rs` and

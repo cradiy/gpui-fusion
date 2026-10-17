@@ -539,9 +539,8 @@ fn repeating_gradient_preserves_spline_weights_and_phase_wrap() -> anyhow::Resul
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn constant_colored_gradients_match_solid_fills() -> anyhow::Result<()> {
-    // Also run with --release on Windows: optimized DX12 shaders previously
-    // lost the red channel after gradient sampling was rewritten using loops,
-    // while the same pixel test passed with debug shader compilation.
+    // Constant-color gradients must match solid fills with both debug and
+    // release shader compilation. Run both profiles on Windows with DX12.
     let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(32), DevicePixels(32)))?;
     for color in [0x332b48, 0x24242e, 0xff4020, 0x2070ff, 0x40c060] {
         let mut render = |background| -> anyhow::Result<Vec<u8>> {

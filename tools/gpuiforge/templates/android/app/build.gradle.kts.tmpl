@@ -23,7 +23,11 @@ android {
         file("$path/source.properties").inputStream().use { properties.load(it) }
         ndkVersion = properties.getProperty("Pkg.Revision")
     }
-    compileSdk { version = release(36) { minorApiLevel = 1 } }
+    compileSdk {
+        version = release(rootProject.extra["gpuiCompileSdkMajor"] as Int) {
+            minorApiLevel = rootProject.extra["gpuiCompileSdkMinor"] as Int
+        }
+    }
     defaultConfig {
         applicationId = "{{application_id|kotlin}}"
         minSdk = "{{var.min_sdk|kotlin}}".toInt()
@@ -49,14 +53,12 @@ for (profile in listOf("debug", "release")) {
     android.sourceSets[profile].jniLibs.directories.add(output.get().asFile.absolutePath)
     val rustBuilds = gpuiAbis.map { abi ->
         tasks.register<Exec>("buildRust${variant}_${abi.replace('-', '_')}") {
-            environment("GPUI_ANDROID_ABI", abi)
-            environment("GPUI_ANDROID_PROFILE", profile)
-            environment("GPUI_ANDROID_MIN_SDK", "{{var.min_sdk|kotlin}}")
             workingDir("{{app_dir|kotlin}}")
-            commandLine("bash", rootProject.file("build-rust.sh").absolutePath,
-                output.get().asFile.absolutePath, "{{app_dir|kotlin}}/Cargo.toml",
-                "{{var.native_library|kotlin}}",
-                providers.gradleProperty("gpuiForgeExecutable").getOrElse("gpuiforge"))
+            commandLine(providers.gradleProperty("gpuiForgeExecutable").getOrElse("gpuiforge"),
+                "build-android-native", "--output", output.get().asFile.absolutePath,
+                "--manifest-path", "{{app_dir|kotlin}}/Cargo.toml",
+                "--library", "{{var.native_library|kotlin}}", "--abi", abi,
+                "--profile", profile, "--min-sdk", "{{var.min_sdk|kotlin}}")
         }
     }
     tasks.matching { it.name == "pre${variant}Build" }.configureEach { dependsOn(rustBuilds) }

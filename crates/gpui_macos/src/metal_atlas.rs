@@ -394,7 +394,7 @@ mod tests {
         // NOT return a stale tile referencing the deleted texture.
         let tile_a2 = insert_tile(&atlas, &key_a, small);
 
-        // The texture must actually exist — this would panic before the fix.
+        // The new tile must reference an existing texture.
         let _texture = atlas.metal_texture(tile_a2.texture_id);
     }
 

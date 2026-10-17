@@ -270,8 +270,7 @@ pub fn relative(path: &Path) -> Result<()> {
 
 impl Project {
     pub fn load(path: &Path) -> Result<Self> {
-        let config_path = path
-            .canonicalize()
+        let config_path = crate::host::canonicalize(path)
             .with_context(|| format!("configuration not found: {}", path.display()))?;
         let root = config_path.parent().unwrap().to_owned();
         let config: Config = serde_json::from_value(read(&config_path)?)?;
@@ -309,9 +308,14 @@ impl Project {
             let mut platform: Platform =
                 serde_json::from_value(base).with_context(|| format!("invalid platform {name}"))?;
             platform.bundled = bundled;
-            platform.default_android_build = bundled
-                && platform.build
-                    == serde_json::from_str::<Platform>(include_str!("../android.json"))?.build;
+            let defaults = serde_json::from_str::<Platform>(include_str!("../android.json"))?.build;
+            let mut legacy = defaults.clone();
+            legacy[0].program = "bash".into();
+            legacy[0].args.splice(0..2, ["gradlew".into()]);
+            if bundled && platform.build == legacy {
+                platform.build = defaults.clone();
+            }
+            platform.default_android_build = bundled && platform.build == defaults;
             if bundled && !platform.variables.contains_key("native_library") {
                 let manifest: toml::Value =
                     toml::from_str(&fs::read_to_string(root.join("Cargo.toml"))?)?;
@@ -539,7 +543,9 @@ impl Project {
             ("app_dir".into(), self.root.display().to_string()),
             (
                 "tool_path".into(),
-                std::env::current_exe()?.display().to_string(),
+                dunce::simplified(&std::env::current_exe()?)
+                    .display()
+                    .to_string(),
             ),
             (
                 "project_dir".into(),
@@ -636,7 +642,7 @@ impl Project {
         for (key, path) in &p.paths {
             vars.insert(
                 format!("path.{key}"),
-                path.canonicalize()
+                crate::host::canonicalize(path)
                     .with_context(|| format!("missing path {key}: {}", path.display()))?
                     .display()
                     .to_string(),

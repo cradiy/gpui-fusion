@@ -68,11 +68,11 @@ fn dependencies(table: &mut Table, workspace: &Table, root: &Path, package: &Pat
 }
 
 pub fn prepare(manifest_path: &Path, workspace_path: &Path, output: &Path) -> Result<()> {
-    let manifest_path = manifest_path.canonicalize()?;
+    let manifest_path = crate::host::canonicalize(manifest_path)?;
     let package_dir = manifest_path
         .parent()
         .context("package directory missing")?;
-    let root = workspace_path.canonicalize()?;
+    let root = crate::host::canonicalize(workspace_path)?;
     let root_manifest = read_manifest(&root.join("Cargo.toml"))?;
     let empty_workspace = Table::new();
     let workspace = root_manifest
@@ -181,27 +181,12 @@ pub fn prepare(manifest_path: &Path, workspace_path: &Path, output: &Path) -> Re
         ])),
     );
     fs::create_dir_all(output)?;
-    let output = output.canonicalize()?;
+    let output = crate::host::canonicalize(output)?;
     ensure!(
-        output != package_dir && output != root,
+        !package_dir.starts_with(&output) && output != root,
         "output must be a separate build directory"
     );
-    for entry in fs::read_dir(package_dir)? {
-        let entry = entry?;
-        if matches!(
-            entry.file_name().to_str(),
-            Some("Cargo.toml" | "Cargo.lock" | "target" | ".git")
-        ) {
-            continue;
-        }
-        let dest = output.join(entry.file_name());
-        if fs::symlink_metadata(&dest).is_err() {
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(entry.path(), dest)?;
-            #[cfg(not(unix))]
-            bail!("Android packaging requires a Linux or macOS build host");
-        }
-    }
+    crate::host::stage_package(package_dir, &output)?;
     fs::write(output.join("Cargo.toml"), toml::to_string(&manifest)?)?;
     if root.join("Cargo.lock").is_file() {
         fs::copy(root.join("Cargo.lock"), output.join("Cargo.lock"))?;

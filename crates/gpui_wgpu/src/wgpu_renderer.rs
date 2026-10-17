@@ -1486,17 +1486,19 @@ impl WgpuRenderer {
             &backdrop_shader_module,
         );
 
-        let quads = create_pipeline(
-            "quads",
-            "vs_quad",
-            "fs_quad",
-            &layouts.globals,
-            &layouts.instances,
-            wgpu::PrimitiveTopology::TriangleStrip,
-            &[Some(color_target.clone())],
-            1,
-            &shader_module,
-        );
+        let quads = || {
+            create_pipeline(
+                "quads",
+                "vs_quad",
+                "fs_quad",
+                &layouts.globals,
+                &layouts.instances,
+                wgpu::PrimitiveTopology::TriangleStrip,
+                &[Some(color_target.clone())],
+                1,
+                &shader_module,
+            )
+        };
 
         let shadows = create_pipeline(
             "shadows",
@@ -1510,21 +1512,23 @@ impl WgpuRenderer {
             &shader_module,
         );
 
-        let path_rasterization = create_pipeline(
-            "path_rasterization",
-            "vs_path_rasterization",
-            "fs_path_rasterization",
-            &layouts.globals,
-            &layouts.instances,
-            wgpu::PrimitiveTopology::TriangleList,
-            &[Some(wgpu::ColorTargetState {
-                format: surface_format,
-                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-            path_sample_count,
-            &shader_module,
-        );
+        let path_rasterization = || {
+            create_pipeline(
+                "path_rasterization",
+                "vs_path_rasterization",
+                "fs_path_rasterization",
+                &layouts.globals,
+                &layouts.instances,
+                wgpu::PrimitiveTopology::TriangleList,
+                &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                path_sample_count,
+                &shader_module,
+            )
+        };
 
         let paths_blend = wgpu::BlendState {
             color: wgpu::BlendComponent {
@@ -1567,17 +1571,36 @@ impl WgpuRenderer {
             &shader_module,
         );
 
-        let mono_sprites = create_pipeline(
-            "mono_sprites",
-            "vs_mono_sprite",
-            "fs_mono_sprite",
-            &layouts.globals,
-            &layouts.instances_with_texture,
-            wgpu::PrimitiveTopology::TriangleStrip,
-            &[Some(color_target.clone())],
-            1,
-            &shader_module,
-        );
+        let mono_sprites = || {
+            create_pipeline(
+                "mono_sprites",
+                "vs_mono_sprite",
+                "fs_mono_sprite",
+                &layouts.globals,
+                &layouts.instances_with_texture,
+                wgpu::PrimitiveTopology::TriangleStrip,
+                &[Some(color_target.clone())],
+                1,
+                &shader_module,
+            )
+        };
+
+        // DX12 compiles these independent gradient shaders synchronously.
+        // Bound compilation to two workers plus the calling thread.
+        #[cfg(target_os = "windows")]
+        let (quads, path_rasterization, mono_sprites) = std::thread::scope(|scope| {
+            let quads = scope.spawn(quads);
+            let paths = scope.spawn(path_rasterization);
+            let sprites = mono_sprites();
+            (
+                quads.join().expect("quad pipeline compilation panicked"),
+                paths.join().expect("path pipeline compilation panicked"),
+                sprites,
+            )
+        });
+        #[cfg(not(target_os = "windows"))]
+        let (quads, path_rasterization, mono_sprites) =
+            (quads(), path_rasterization(), mono_sprites());
 
         let subpixel_sprites = if let Some(subpixel_module) = &subpixel_shader_module {
             let subpixel_blend = wgpu::BlendState {

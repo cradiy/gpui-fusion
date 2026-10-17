@@ -45,7 +45,7 @@ impl WindowsRenderer {
         if !disable_direct_composition {
             let window = SafeHwnd::from(hwnd);
             match WgpuRenderer::new(
-                context.clone(),
+                context,
                 &window,
                 WgpuSurfaceConfig {
                     size: gpui::size(DevicePixels(1), DevicePixels(1)),

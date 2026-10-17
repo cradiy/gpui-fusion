@@ -1,3 +1,5 @@
+#![cfg(any(target_os = "linux", target_os = "freebsd"))]
+
 use std::{
     io::{Read, Write},
     net::Shutdown,

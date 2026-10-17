@@ -427,6 +427,161 @@ fn external_gradient_matches_inline_geometry_midpoints_and_opacity() -> anyhow::
     Ok(())
 }
 
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn angular_seam_blends_endpoints_without_changing_the_opposite_side() -> anyhow::Result<()> {
+    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(96), DevicePixels(96)))?;
+    for space in [ColorSpace::Srgb, ColorSpace::Oklab] {
+        for external in [false, true] {
+            let first = linear_color_stop(rgb(0), 0.);
+            let last = linear_color_stop(rgb(0xffffff), 1.);
+            let stops = if external {
+                vec![first, first, last]
+            } else {
+                vec![first, last]
+            };
+            let background = multi_linear_gradient(90., stops)
+                .color_space(space)
+                .gradient_kind(GradientKind::Angular);
+            let mut render = |width| -> anyhow::Result<Vec<u8>> {
+                let mut scene = Scene::default();
+                scene.insert_primitive(Quad {
+                    bounds: bounds(0., 0., 96., 96.),
+                    content_mask: ContentMask {
+                        bounds: bounds(0., 0., 96., 96.),
+                    },
+                    background: background.clone().angular_seam_width(width),
+                    ..Default::default()
+                });
+                scene.finish();
+                renderer.render_rgba(&scene)
+            };
+            let sharp = render(0.)?;
+            let smooth = render(0.2)?;
+            let pixel = |data: &[u8], x: usize, y: usize| data[(y * 96 + x) * 4];
+            assert!(pixel(&sharp, 90, 47).abs_diff(pixel(&sharp, 90, 48)) > 230);
+            let expected = if space == ColorSpace::Srgb {
+                128u8
+            } else {
+                99u8
+            };
+            for y in [47, 48] {
+                assert!(
+                    pixel(&smooth, 90, y).abs_diff(expected) < 12,
+                    "seam midpoint: {space:?}, external={external}"
+                );
+                assert_eq!(pixel(&sharp, 5, y), pixel(&smooth, 5, y));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn repeating_gradient_preserves_spline_weights_and_phase_wrap() -> anyhow::Result<()> {
+    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(96), DevicePixels(96)))?;
+    for space in [ColorSpace::Srgb, ColorSpace::Oklab] {
+        for count in [2, 4] {
+            let background = multi_linear_gradient(
+                90.,
+                (0..count)
+                    .map(|index| {
+                        linear_color_stop(
+                            rgb(if index % 2 == 0 { 0 } else { 0xffffff }),
+                            index as f32 / count as f32,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .color_space(space);
+            let mut render = |phase| -> anyhow::Result<Vec<u8>> {
+                let mut scene = Scene::default();
+                scene.insert_primitive(Quad {
+                    bounds: bounds(0., 0., 96., 96.),
+                    content_mask: ContentMask {
+                        bounds: bounds(0., 0., 96., 96.),
+                    },
+                    background: background.clone().phase(phase),
+                    ..Default::default()
+                });
+                scene.finish();
+                renderer.render_rgba(&scene)
+            };
+            // Align the sampled pixel with each control point. A periodic cubic
+            // spline gives that point 2/3 and its two neighbors 1/6 each.
+            for (index, expected) in if space == ColorSpace::Srgb {
+                [(0, 85u8), (1, 170u8)]
+            } else {
+                [(0, 54u8), (1, 148u8)]
+            } {
+                let phase = index as f32 / count as f32 - 48.5 / 96.;
+                let pixels = render(phase)?;
+                let wrapped = render(phase + 1.)?;
+                let offset = (48 * 96 + 48) * 4;
+                assert!(
+                    pixels[offset].abs_diff(expected) <= 8,
+                    "{space:?}, {count} stops, control {index}: {}",
+                    pixels[offset]
+                );
+                assert!(
+                    pixels
+                        .iter()
+                        .zip(&wrapped)
+                        .all(|(a, b)| a.abs_diff(*b) <= 1)
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn constant_colored_gradients_match_solid_fills() -> anyhow::Result<()> {
+    // Also run with --release on Windows: optimized DX12 shaders previously
+    // lost the red channel after gradient sampling was rewritten using loops,
+    // while the same pixel test passed with debug shader compilation.
+    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(32), DevicePixels(32)))?;
+    for color in [0x332b48, 0x24242e, 0xff4020, 0x2070ff, 0x40c060] {
+        let mut render = |background| -> anyhow::Result<Vec<u8>> {
+            let mut scene = Scene::default();
+            scene.insert_primitive(Quad {
+                bounds: bounds(0., 0., 32., 32.),
+                content_mask: ContentMask {
+                    bounds: bounds(0., 0., 32., 32.),
+                },
+                background,
+                ..Default::default()
+            });
+            scene.finish();
+            renderer.render_rgba(&scene)
+        };
+        let solid = render(rgb(color).into())?;
+        for space in [ColorSpace::Srgb, ColorSpace::Oklab] {
+            for count in [2, 3] {
+                let gradient = multi_linear_gradient(
+                    140.,
+                    (0..count)
+                        .map(|index| {
+                            linear_color_stop(rgb(color), index as f32 / (count - 1) as f32)
+                        })
+                        .collect::<Vec<_>>(),
+                )
+                .color_space(space);
+                let pixels = render(gradient)?;
+                for (index, (actual, expected)) in pixels.iter().zip(&solid).enumerate() {
+                    assert!(
+                        actual.abs_diff(*expected) <= 8,
+                        "color={color:06x}, {space:?}, stops={count}, byte={index}: {actual} != {expected}"
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn bounds(x: f32, y: f32, w: f32, h: f32) -> Bounds<ScaledPixels> {
     Bounds::new(
         point(ScaledPixels(x), ScaledPixels(y)),

@@ -1,3 +1,5 @@
+#![cfg(any(target_os = "linux", target_os = "freebsd"))]
+
 //! Wayland queue dispatch with cross-thread wakeups for shared connections.
 
 use std::{

@@ -33,6 +33,7 @@ fn cpu_adapter_preserves_shared_planes_geometry_and_color() {
     assert_eq!(surface.display_size(), pixel_size(FrameSize::new(12, 4)));
     assert_eq!(surface.color().matrix, gpui::YuvMatrix::Bt601);
     assert_eq!(surface.color().range, gpui::ColorRange::Full);
+    #[allow(irrefutable_let_patterns)]
     let gpui::SurfaceFrameBacking::Cpu(planes) = surface.backing() else {
         panic!("expected CPU frame");
     };

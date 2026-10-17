@@ -5,11 +5,11 @@ edition.workspace = true
 publish.workspace = true
 license = "Apache-2.0"
 
-[dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 calloop = "0.14"
 wayland-client = "0.31.15"
 
-[dev-dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dev-dependencies]
 wayland-backend = { version = "0.3.17", features = ["client_system", "dlopen"] }
 
 [lints]

@@ -538,6 +538,56 @@ fn repeating_gradient_preserves_spline_weights_and_phase_wrap() -> anyhow::Resul
 
 #[test]
 #[ignore = "requires a GPU adapter"]
+fn gradient_dither_preserves_transparent_and_opaque_coverage() -> anyhow::Result<()> {
+    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(32), DevicePixels(32)))?;
+    let region = bounds(0., 0., 32., 32.);
+    let mut render = |underlay: Background, overlay: Option<Background>| {
+        let mut scene = Scene::default();
+        for background in std::iter::once(underlay).chain(overlay) {
+            scene.insert_primitive(Quad {
+                bounds: region,
+                content_mask: ContentMask { bounds: region },
+                background,
+                ..Default::default()
+            });
+        }
+        scene.finish();
+        renderer.render_rgba(&scene)
+    };
+    let dark = rgb(0x172635);
+    let light = rgb(0xe6d9c2);
+    let clear_reference = render(dark.into(), None)?;
+    for space in [ColorSpace::Srgb, ColorSpace::Oklab] {
+        for kind in [
+            GradientKind::Linear,
+            GradientKind::Radial,
+            GradientKind::Angular,
+            GradientKind::Diamond,
+        ] {
+            let first = linear_color_stop(rgb(0x673ba1), 0.);
+            let last = linear_color_stop(rgb(0x2b9478), 1.);
+            for stops in [vec![first, last], vec![first, first, last]] {
+                let gradient = multi_linear_gradient(110., stops)
+                    .color_space(space)
+                    .gradient_kind(kind);
+                assert_eq!(
+                    render(dark.into(), Some(gradient.clone().opacity(0.)))?,
+                    clear_reference,
+                    "transparent gradient changed its backdrop: {space:?}, {kind:?}"
+                );
+                assert_eq!(
+                    render(dark.into(), Some(gradient.clone()))?,
+                    render(light.into(), Some(gradient))?,
+                    "opaque gradient exposed its backdrop: {space:?}, {kind:?}"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
 fn constant_colored_gradients_match_solid_fills() -> anyhow::Result<()> {
     // Constant-color gradients must match solid fills with both debug and
     // release shader compilation. Run both profiles on Windows with DX12.

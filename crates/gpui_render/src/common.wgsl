@@ -656,9 +656,12 @@ fn gradient_color(background: Background, position: vec2<f32>, bounds: Bounds,
             let r1 = fract(sin(dot(seed, vec2<f32>(12.9898, 78.233))) * 43758.5453);
             let r2 = fract(sin(dot(seed, vec2<f32>(39.3460, 11.135))) * 24634.6345);
             let triangular_noise = r1 + r2 - 1.0;
+            let alpha = clamp(background_color.a, 0.0, 1.0);
+            // Bound symmetric alpha noise to preserve transparent and opaque coverage.
+            let alpha_noise_scale = min(3.0 / 255.0, min(alpha, 1.0 - alpha));
             background_color = vec4<f32>(
                 background_color.rgb + vec3<f32>(triangular_noise * 2.0 / 255.0),
-                background_color.a + triangular_noise * 3.0 / 255.0,
+                alpha + triangular_noise * alpha_noise_scale,
             );
         }
         case 2u: {

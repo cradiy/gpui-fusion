@@ -268,6 +268,11 @@ impl Host {
     }
 
     pub fn request_frame_after(&self, delay: Duration) {
+        let host = self.clone();
+        deferred::post(move || host.request_frame_after_now(delay));
+    }
+
+    fn request_frame_after_now(&self, delay: Duration) {
         if let Err(error) = self.with_env(|env| {
             env.call_method(
                 self.object.as_obj(),
@@ -987,8 +992,17 @@ pub(crate) fn call<T: Default>(env: &mut JNIEnv, f: impl FnOnce(&mut JNIEnv) -> 
         outcome => {
             let error = match outcome {
                 Ok(Err(error)) => format!("{error:#}"),
-                _ => "GPUI Android callback panicked".to_owned(),
+                Err(payload) => {
+                    let message = payload
+                        .downcast_ref::<String>()
+                        .map(String::as_str)
+                        .or_else(|| payload.downcast_ref::<&str>().copied())
+                        .unwrap_or("non-string panic payload");
+                    format!("GPUI Android callback panicked: {message}")
+                }
+                Ok(Ok(_)) => unreachable!(),
             };
+            log::error!("{error}");
             let _ = env.throw_new("java/lang/IllegalStateException", error);
             T::default()
         }

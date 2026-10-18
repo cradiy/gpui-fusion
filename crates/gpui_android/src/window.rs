@@ -78,6 +78,7 @@ pub(crate) struct AndroidWindow {
     force_frame: Cell<bool>,
     recovery_retry_at: Cell<Option<Instant>>,
     recovery_failures: Cell<u32>,
+    presentation_failures: Cell<u32>,
     pub(crate) pointer: Cell<Point<Pixels>>,
     pub(crate) hovered: Cell<bool>,
     modifiers: Cell<Modifiers>,
@@ -132,6 +133,7 @@ impl AndroidWindow {
             force_frame: Cell::new(true),
             recovery_retry_at: Cell::new(None),
             recovery_failures: Cell::new(0),
+            presentation_failures: Cell::new(0),
             pointer: Cell::default(),
             hovered: Cell::new(false),
             modifiers: Cell::default(),
@@ -802,8 +804,26 @@ impl PlatformWindow for AndroidWindowHandle {
         }
         let presented = renderer.draw(scene);
         let needs_redraw = renderer.needs_redraw();
+        if presented {
+            let failures = self.presentation_failures.replace(0);
+            if failures >= 3 {
+                log::info!("Android frame presentation resumed after {failures} failed attempts");
+            }
+        } else {
+            let failures = self.presentation_failures.get().saturating_add(1);
+            self.presentation_failures.set(failures);
+            if failures == 3 || failures.is_multiple_of(120) {
+                log::warn!(
+                    "Android frame presentation has failed {failures} consecutive times; device_lost={}",
+                    renderer.device_lost()
+                );
+            }
+        }
         if !presented || needs_redraw {
             self.force_frame.set(true);
+            let failures = self.presentation_failures.get();
+            let delay = Duration::from_millis((16 << failures.saturating_sub(1).min(6)).min(1000));
+            self.host.request_frame_after(delay);
         }
     }
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {

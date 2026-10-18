@@ -284,6 +284,14 @@ impl WgpuContext {
     async fn create_device(
         adapter: &wgpu::Adapter,
     ) -> anyhow::Result<(wgpu::Device, wgpu::Queue, bool, TextureFormat)> {
+        let required_storage =
+            wgpu::DownlevelFlags::VERTEX_STORAGE | wgpu::DownlevelFlags::FRAGMENT_STORAGE;
+        let missing_storage = required_storage & !adapter.get_downlevel_capabilities().flags;
+        anyhow::ensure!(
+            missing_storage.is_empty(),
+            "renderer requires unsupported shader storage capabilities: {missing_storage:?}"
+        );
+
         let dual_source_blending = adapter
             .features()
             .contains(wgpu::Features::DUAL_SOURCE_BLENDING);
@@ -396,6 +404,7 @@ impl WgpuContext {
         TextureFormat,
     )> {
         let mut adapters: Vec<_> = instance.enumerate_adapters(wgpu::Backends::all()).await;
+        let mut failures = Vec::new();
 
         if adapters.is_empty() {
             anyhow::bail!("No GPU adapters found");
@@ -504,18 +513,18 @@ impl WgpuContext {
                         color_atlas_texture_format,
                     ));
                 }
-                Err(e) => {
-                    log::info!(
-                        "  Adapter {} ({:?}) failed: {}, trying next...",
-                        info.name,
-                        info.backend,
-                        e
-                    );
+                Err(error) => {
+                    let failure = format!("{} ({:?}): {error:#}", info.name, info.backend);
+                    log::info!("Adapter {failure}; trying next...");
+                    failures.push(failure);
                 }
             }
         }
 
-        anyhow::bail!("No GPU adapter found that can configure the display surface")
+        anyhow::bail!(
+            "No compatible GPU adapter could configure the display surface: {}",
+            failures.join("; ")
+        )
     }
 
     /// Try to use an adapter with a surface by creating a device and testing configuration.

@@ -16,69 +16,66 @@ pub(crate) fn create_device(
     adapter: &wgpu::Adapter,
     descriptor: &wgpu::DeviceDescriptor<'_>,
 ) -> Option<(wgpu::Device, wgpu::Queue)> {
-    let result =
-        (|| -> anyhow::Result<_> {
-            let hal = unsafe { adapter.as_hal::<wgpu::hal::vulkan::Api>() }
-                .ok_or_else(|| anyhow::anyhow!("not Vulkan"))?;
-            let properties = unsafe {
-                hal.shared_instance()
-                    .raw_instance()
-                    .get_physical_device_properties(hal.raw_physical_device())
-            };
-            anyhow::ensure!(
-                properties.api_version >= vk::API_VERSION_1_1,
-                "hardware buffer import requires Vulkan 1.1"
-            );
-            let extensions = unsafe {
-                hal.shared_instance()
-                    .raw_instance()
-                    .enumerate_device_extension_properties(hal.raw_physical_device())
-            }?;
-            anyhow::ensure!(
-                EXTENSIONS
-                    .iter()
-                    .all(|extension| extensions.iter().any(|available| unsafe {
-                        CStr::from_ptr(available.extension_name.as_ptr())
-                    } == *extension)),
-                "Android external memory extensions unavailable"
-            );
-            let mut sync = vk::ExternalSemaphoreProperties::default();
-            unsafe {
-                hal.shared_instance()
-                    .raw_instance()
-                    .get_physical_device_external_semaphore_properties(
-                        hal.raw_physical_device(),
-                        &vk::PhysicalDeviceExternalSemaphoreInfo::default()
-                            .handle_type(vk::ExternalSemaphoreHandleTypeFlags::SYNC_FD),
-                        &mut sync,
-                    );
-            }
-            anyhow::ensure!(
-                sync.external_semaphore_features
-                    .contains(vk::ExternalSemaphoreFeatureFlags::IMPORTABLE),
-                "native GPU fence import unavailable"
-            );
-            // Vulkan 1.1 supplies the AHB
-            // extension's external-memory, dedicated-allocation and YCbCr dependencies.
-            let opened = unsafe {
-                hal.open_with_callback(
-                    descriptor.required_features,
-                    &descriptor.required_limits,
-                    &descriptor.memory_hints,
-                    Some(Box::new(|args| {
-                        for extension in EXTENSIONS {
-                            if !args.extensions.contains(&extension) {
-                                args.extensions.push(extension);
-                            }
+    let result = (|| -> anyhow::Result<_> {
+        let hal = unsafe { adapter.as_hal::<wgpu_hal::vulkan::Api>() }
+            .ok_or_else(|| anyhow::anyhow!("not Vulkan"))?;
+        let properties = unsafe {
+            hal.shared_instance()
+                .raw_instance()
+                .get_physical_device_properties(hal.raw_physical_device())
+        };
+        anyhow::ensure!(
+            properties.api_version >= vk::API_VERSION_1_1,
+            "hardware buffer import requires Vulkan 1.1"
+        );
+        let extensions = unsafe {
+            hal.shared_instance()
+                .raw_instance()
+                .enumerate_device_extension_properties(hal.raw_physical_device())
+        }?;
+        anyhow::ensure!(
+            EXTENSIONS
+                .iter()
+                .all(|extension| extensions.iter().any(|available| unsafe {
+                    CStr::from_ptr(available.extension_name.as_ptr())
+                } == *extension)),
+            "Android external memory extensions unavailable"
+        );
+        let mut sync = vk::ExternalSemaphoreProperties::default();
+        unsafe {
+            hal.shared_instance()
+                .raw_instance()
+                .get_physical_device_external_semaphore_properties(
+                    hal.raw_physical_device(),
+                    &vk::PhysicalDeviceExternalSemaphoreInfo::default()
+                        .handle_type(vk::ExternalSemaphoreHandleTypeFlags::SYNC_FD),
+                    &mut sync,
+                );
+        }
+        anyhow::ensure!(
+            sync.external_semaphore_features
+                .contains(vk::ExternalSemaphoreFeatureFlags::IMPORTABLE),
+            "native GPU fence import unavailable"
+        );
+        // Vulkan 1.1 supplies the AHB
+        // extension's external-memory, dedicated-allocation and YCbCr dependencies.
+        let opened = unsafe {
+            hal.open_with_callback(
+                descriptor.required_features,
+                &descriptor.required_limits,
+                &descriptor.memory_hints,
+                Some(Box::new(|args| {
+                    for extension in EXTENSIONS {
+                        if !args.extensions.contains(&extension) {
+                            args.extensions.push(extension);
                         }
-                    })),
-                )
-            }?;
-            drop(hal);
-            Ok(unsafe {
-                adapter.create_device_from_hal::<wgpu::hal::vulkan::Api>(opened, descriptor)
-            }?)
-        })();
+                    }
+                })),
+            )
+        }?;
+        drop(hal);
+        Ok(unsafe { adapter.create_device_from_hal::<wgpu_hal::vulkan::Api>(opened, descriptor) }?)
+    })();
     match result {
         Ok(device) => Some(device),
         Err(error) => {
@@ -89,7 +86,7 @@ pub(crate) fn create_device(
 }
 
 pub(crate) fn supported(device: &wgpu::Device) -> bool {
-    unsafe { device.as_hal::<wgpu::hal::vulkan::Api>() }.is_some_and(|device| {
+    unsafe { device.as_hal::<wgpu_hal::vulkan::Api>() }.is_some_and(|device| {
         EXTENSIONS
             .iter()
             .all(|extension| device.enabled_device_extensions().contains(extension))
@@ -126,8 +123,8 @@ pub(crate) fn copy(
         supported(device),
         "renderer does not support hardware buffers"
     );
-    let instance = unsafe { instance.as_hal::<wgpu::hal::vulkan::Api>() }.unwrap();
-    let hal = unsafe { device.as_hal::<wgpu::hal::vulkan::Api>() }.unwrap();
+    let instance = unsafe { instance.as_hal::<wgpu_hal::vulkan::Api>() }.unwrap();
+    let hal = unsafe { device.as_hal::<wgpu_hal::vulkan::Api>() }.unwrap();
     let raw = hal.raw_device();
     let extension = ash::android::external_memory_android_hardware_buffer::Device::new(
         instance.shared_instance().raw_instance(),
@@ -232,7 +229,7 @@ pub(crate) fn copy(
     let hal_texture = unsafe {
         hal.texture_from_raw(
             image,
-            &wgpu::hal::TextureDescriptor {
+            &wgpu_hal::TextureDescriptor {
                 label: Some("android_video_buffer"),
                 size,
                 mip_level_count: 1,
@@ -240,16 +237,16 @@ pub(crate) fn copy(
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba8Unorm,
                 usage: wgpu::wgt::TextureUses::COPY_SRC,
-                memory_flags: wgpu::hal::MemoryFlags::empty(),
+                memory_flags: wgpu_hal::MemoryFlags::empty(),
                 view_formats: Vec::new(),
             },
             Some(Box::new(move || drop(imported))),
-            wgpu::hal::vulkan::TextureMemory::External,
+            wgpu_hal::vulkan::TextureMemory::External,
         )
     };
     drop(hal);
     let source = unsafe {
-        device.create_texture_from_hal::<wgpu::hal::vulkan::Api>(
+        device.create_texture_from_hal::<wgpu_hal::vulkan::Api>(
             hal_texture,
             &wgpu::TextureDescriptor {
                 label: Some("android_video_buffer"),
@@ -272,7 +269,7 @@ pub(crate) fn copy(
         label: Some("android_video_copy"),
     });
     unsafe {
-        encoder.as_hal_mut::<wgpu::hal::vulkan::Api, _, _>(|encoder| {
+        encoder.as_hal_mut::<wgpu_hal::vulkan::Api, _, _>(|encoder| {
             raw.cmd_pipeline_barrier(
                 encoder.unwrap().raw_handle(),
                 vk::PipelineStageFlags::TOP_OF_PIPE,
@@ -303,7 +300,7 @@ pub(crate) fn copy(
         label: Some("android_video_release"),
     });
     unsafe {
-        encoder.as_hal_mut::<wgpu::hal::vulkan::Api, _, _>(|encoder| {
+        encoder.as_hal_mut::<wgpu_hal::vulkan::Api, _, _>(|encoder| {
             raw.cmd_pipeline_barrier(
                 encoder.unwrap().raw_handle(),
                 vk::PipelineStageFlags::TRANSFER,
@@ -323,7 +320,7 @@ pub(crate) fn copy(
         });
     }
     let release = encoder.finish();
-    unsafe { queue.as_hal::<wgpu::hal::vulkan::Api>() }
+    unsafe { queue.as_hal::<wgpu_hal::vulkan::Api>() }
         .unwrap()
         .add_wait_semaphore(semaphore, None, vk::PipelineStageFlags::TRANSFER);
     queue.submit([acquire, copy, release]);

@@ -7,27 +7,12 @@ unsafe extern "C" {
 
 struct AndroidLogger;
 static LOGGER: AndroidLogger = AndroidLogger;
-const MAX_LEVEL: log::LevelFilter = if cfg!(debug_assertions) {
-    log::LevelFilter::Debug
-} else {
-    log::LevelFilter::Info
-};
-
 impl log::Log for AndroidLogger {
-    fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::Level::Info
-            || (cfg!(debug_assertions)
-                && metadata.level() <= log::Level::Debug
-                && matches!(
-                    metadata.target(),
-                    "wgpu_hal::vulkan::instance" | "wgpu_hal::vulkan::adapter"
-                ))
+    fn enabled(&self, _: &log::Metadata) -> bool {
+        true
     }
 
     fn log(&self, record: &log::Record) {
-        if !self.enabled(record.metadata()) {
-            return;
-        }
         let text = format!("{}: {}", record.target(), record.args()).replace('\0', "�");
         let text = CString::new(text).expect("log message has no NUL bytes");
         let priority = match record.level() {
@@ -48,6 +33,20 @@ impl log::Log for AndroidLogger {
 
 pub(crate) fn initialize() {
     if log::set_logger(&LOGGER).is_ok() {
-        log::set_max_level(MAX_LEVEL);
+        log::set_max_level(log::LevelFilter::Trace);
     }
+    static PANIC_HOOK: std::sync::Once = std::sync::Once::new();
+    PANIC_HOOK.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            log::error!(target: "gpui_android::panic", "{info}");
+            for line in std::backtrace::Backtrace::force_capture()
+                .to_string()
+                .lines()
+            {
+                log::error!(target: "gpui_android::panic", "{line}");
+            }
+            previous(info);
+        }));
+    });
 }

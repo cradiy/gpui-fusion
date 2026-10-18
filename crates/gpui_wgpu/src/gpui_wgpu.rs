@@ -163,52 +163,6 @@ fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
         );
     }
 
-    #[test]
-    fn frosted_glass_backdrop_shader_is_valid_wgsl() {
-        let shader = gpui_effects::frosted_glass_shader();
-        let source = gpui::compose_backdrop_shader_wgsl(&shader);
-        let module = wgpu::naga::front::wgsl::parse_str(&source)
-            .unwrap_or_else(|error| panic!("frosted glass backdrop shader should parse: {error}"));
-        wgpu::naga::valid::Validator::new(
-            wgpu::naga::valid::ValidationFlags::all(),
-            wgpu::naga::valid::Capabilities::all(),
-        )
-        .validate(&module)
-        .unwrap_or_else(|error| panic!("frosted glass backdrop shader should validate: {error}"));
-
-        assert_eq!(
-            shader_struct_span(&module, "BackdropInstance") as usize,
-            std::mem::size_of::<super::wgpu_renderer::BackdropInstance>(),
-        );
-    }
-
-    #[test]
-    fn built_in_effect_shaders_are_valid_wgsl() {
-        for shader in [
-            gpui_effects::aurora_shader(),
-            gpui_effects::plasma_shader(),
-            gpui_effects::color_orbs_shader(),
-            gpui_effects::color_flow_shader(),
-            gpui_effects::holographic_shader(),
-            gpui_effects::holographic_mask_shader(),
-            gpui_effects::holographic_image_shader(),
-            gpui_effects::flip_shader(),
-            gpui_effects::rigid_flip_shader(),
-            gpui_effects::soft_flip_shader(),
-            gpui_effects::spectrum_mask_shader(),
-        ] {
-            let source = gpui::compose_effect_shader_wgsl(&shader);
-            let module =
-                wgpu::naga::front::wgsl::parse_str(&source).expect("built-in effect should parse");
-            wgpu::naga::valid::Validator::new(
-                wgpu::naga::valid::ValidationFlags::all(),
-                wgpu::naga::valid::Capabilities::all(),
-            )
-            .validate(&module)
-            .expect("built-in effect should validate");
-        }
-    }
-
     fn assert_effect_translates_to_msl_and_hlsl(shader: gpui::EffectShader) {
         let source = gpui::compose_effect_shader_wgsl(&shader);
         let module = naga::front::wgsl::parse_str(&source).expect("effect should parse");
@@ -397,7 +351,7 @@ fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
     }
 
     #[test]
-    fn built_in_effect_translates_to_msl_and_hlsl() {
+    fn four_image_effect_contract_translates_to_msl_and_hlsl() {
         let four_image_shader = gpui::EffectShader::wgsl_four_images(
             r#"
 fn effect(input: EffectInput, params: EffectParams) -> vec4<f32> {
@@ -410,16 +364,7 @@ fn effect(input: EffectInput, params: EffectParams) -> vec4<f32> {
 }
 "#,
         );
-        for shader in [
-            four_image_shader,
-            gpui_effects::holographic_shader(),
-            gpui_effects::holographic_mask_shader(),
-            gpui_effects::holographic_image_shader(),
-            gpui_effects::flip_shader(),
-            gpui_effects::spectrum_mask_shader(),
-        ] {
-            assert_effect_translates_to_msl_and_hlsl(shader);
-        }
+        assert_effect_translates_to_msl_and_hlsl(four_image_shader);
     }
 
     #[test]

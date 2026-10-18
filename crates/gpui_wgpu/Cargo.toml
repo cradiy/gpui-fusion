@@ -64,7 +64,6 @@ js-sys = "0.3"
 
 [dev-dependencies]
 criterion.workspace = true
-gpui_effects.workspace = true
 naga.workspace = true
 
 [[bench]]

@@ -8,47 +8,47 @@ use gpui::{
     Scene, SubtreeLayer, point, rgba, size,
 };
 
-#[path = "../../../gpui_wgpu/tests/support/contour_glow.rs"]
+#[path = "../../../gpui_effects/tests/support/contour_glow.rs"]
 mod contour_glow;
-#[path = "../../../gpui_wgpu/tests/support/contour_relief.rs"]
+#[path = "../../../gpui_effects/tests/support/contour_relief.rs"]
 mod contour_relief;
-#[path = "../../../gpui_wgpu/tests/support/contour_shadow.rs"]
+#[path = "../../../gpui_effects/tests/support/contour_shadow.rs"]
 mod contour_shadow;
-#[path = "../../../gpui_wgpu/tests/support/deformation.rs"]
+#[path = "../../../gpui_effects/tests/support/deformation.rs"]
 mod deformation;
-#[path = "../../../gpui_wgpu/tests/support/depth_parallax.rs"]
+#[path = "../../../gpui_effects/tests/support/depth_parallax.rs"]
 mod depth_parallax;
-#[path = "../../../gpui_wgpu/tests/support/displacement_map.rs"]
+#[path = "../../../gpui_effects/tests/support/displacement_map.rs"]
 mod displacement_map;
-#[path = "../../../gpui_wgpu/tests/support/feedback.rs"]
+#[path = "../../../gpui_effects/tests/support/feedback.rs"]
 mod feedback;
-#[path = "../../../gpui_wgpu/tests/support/fluid.rs"]
+#[path = "../../../gpui_effects/tests/support/fluid.rs"]
 mod fluid;
-#[path = "../../../gpui_wgpu/tests/support/gradient_map.rs"]
+#[path = "../../../gpui_effects/tests/support/gradient_map.rs"]
 mod gradient_map;
-#[path = "../../../gpui_wgpu/tests/support/holographic.rs"]
+#[path = "../../../gpui_effects/tests/support/holographic.rs"]
 mod holographic;
-#[path = "../../../gpui_wgpu/tests/support/interaction_mapping.rs"]
+#[path = "../../../gpui_effects/tests/support/interaction_mapping.rs"]
 mod interaction_mapping;
-#[path = "../../../gpui_wgpu/tests/support/motion_blur.rs"]
+#[path = "../../../gpui_effects/tests/support/motion_blur.rs"]
 mod motion_blur;
-#[path = "../../../gpui_wgpu/tests/support/particle_mask.rs"]
+#[path = "../../../gpui_effects/tests/support/particle_mask.rs"]
 mod particle_mask;
-#[path = "../../../gpui_wgpu/tests/support/particle_transition.rs"]
+#[path = "../../../gpui_effects/tests/support/particle_transition.rs"]
 mod particle_transition;
-#[path = "../../../gpui_wgpu/tests/support/particles.rs"]
+#[path = "../../../gpui_effects/tests/support/particles.rs"]
 mod particles;
-#[path = "../../../gpui_wgpu/tests/support/path_morph.rs"]
+#[path = "../../../gpui_effects/tests/support/path_morph.rs"]
 mod path_morph;
-#[path = "../../../gpui_wgpu/tests/support/path_motion.rs"]
+#[path = "../../../gpui_effects/tests/support/path_motion.rs"]
 mod path_motion;
-#[path = "../../../gpui_wgpu/tests/support/pixelate.rs"]
+#[path = "../../../gpui_effects/tests/support/pixelate.rs"]
 mod pixelate;
-#[path = "../../../gpui_wgpu/tests/support/sdf.rs"]
+#[path = "../../../gpui_effects/tests/support/sdf.rs"]
 mod sdf;
 #[path = "../../../gpui_wgpu/tests/support/shadows.rs"]
 mod shadows;
-#[path = "../../../gpui_wgpu/tests/support/subtree_transition.rs"]
+#[path = "../../../gpui_effects/tests/support/subtree_transition.rs"]
 mod subtree_transition;
 
 use crate::metal_renderer::{InstanceBufferPool, MetalRenderer};

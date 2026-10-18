@@ -58,7 +58,8 @@ pub struct ColorFlowOptions {
     pub seed: f32,
     /// Nonnegative light density; larger values reveal more of the local color over the base.
     pub glow: f32,
-    /// Monochrome dithering in 8-bit color steps, `0..=2`; zero disables it.
+    /// Static multiscale dithering strength, `0..=2`; zero disables it.
+    /// Higher values trade more visible grain for smoother quantized gradients.
     pub dither: f32,
 }
 

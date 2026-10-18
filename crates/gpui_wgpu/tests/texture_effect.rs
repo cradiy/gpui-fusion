@@ -89,130 +89,6 @@ fn near(actual: [f32; 4], expected: [f32; 4]) {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn hdr_depth_processing_preserves_texels_alpha_and_owned_results() -> Result<()> {
-    let context = WgpuContext::new_headless()?;
-    let color = upload(
-        &context,
-        [3, 2],
-        wgpu::TextureFormat::Rgba32Float,
-        &[2., 0.5, 0.25, 0.5].repeat(6),
-    );
-    let depth = upload(
-        &context,
-        [3, 2],
-        wgpu::TextureFormat::R32Float,
-        &[0., 2., 4., 6., 8., 10.],
-    );
-    let config = TextureEffectConfig {
-        output_format: wgpu::TextureFormat::Rgba32Float,
-        ..Default::default()
-    };
-    let identity = WgpuTextureEffect::new(
-        context.clone(),
-        &gpui_effects::subtree_identity_shader(),
-        config.clone(),
-    )?;
-    let retained = identity.render(&[&color], [3, 2], EffectUniforms::default(), 0.)?;
-    let texels = [[0.2, 0., 0., 0.2], [0., 0.4, 0., 0.4], [0., 0., 2., 0.5]];
-    let varied = upload(
-        &context,
-        [3, 1],
-        wgpu::TextureFormat::Rgba32Float,
-        texels.as_flattened(),
-    );
-    let exact = identity.render(&[&varied], [3, 1], EffectUniforms::default(), 0.)?;
-    let fog = WgpuTextureEffect::new(
-        context.clone(),
-        &gpui_effects::depth_fog_shader(),
-        TextureEffectConfig {
-            inputs: vec![
-                config.inputs[0],
-                EffectTextureOptions {
-                    premultiplied_alpha: false,
-                    nearest: true,
-                },
-            ],
-            ..config.clone()
-        },
-    )?;
-    let uniforms = EffectUniforms::new()
-        .with_slot(0, [2., 6., 0., 0.])
-        .with_slot(1, [0., 0., 1., 1.]);
-    let fogged = fog.render(&[&retained, &depth], [3, 2], uniforms, 0.)?;
-    let rows = upload(&context, [1, 2], wgpu::TextureFormat::R32Float, &[0., 8.]);
-    let row_fogged = fog.render(&[&retained, &rows], [3, 2], uniforms, 0.)?;
-    let tone = WgpuTextureEffect::new(
-        context.clone(),
-        &gpui_effects::hdr_tone_map_shader(),
-        config.clone(),
-    )?;
-    let display = tone.render(
-        &[&retained],
-        [3, 2],
-        EffectUniforms::new().with_slot(0, [0., 1., 0., 0.]),
-        0.,
-    )?;
-    let resized = identity.render(&[&retained], [6, 4], EffectUniforms::default(), 0.)?;
-    drop((identity, fog, tone, color, depth, rows));
-
-    for output in [&retained, &exact, &fogged, &row_fogged, &display, &resized] {
-        output.check_device(&context.device)?;
-        output
-            .create_view(&Default::default())
-            .check_device(&context.device)?;
-    }
-
-    for pixel in read(&context, &retained)? {
-        near(pixel, [2., 0.5, 0.25, 0.5]);
-    }
-    for (actual, expected) in read(&context, &exact)?.into_iter().zip(texels) {
-        near(actual, expected);
-    }
-    for pixel in read(&context, &resized)? {
-        near(pixel, [2., 0.5, 0.25, 0.5]);
-    }
-    let pixels = read(&context, &fogged)?;
-    near(pixels[0], [2., 0.5, 0.25, 0.5]);
-    near(pixels[1], pixels[0]);
-    near(pixels[2], [1., 0.25, 0.375, 0.5]);
-    for pixel in &pixels[3..] {
-        near(*pixel, [0., 0., 0.5, 0.5]);
-    }
-    let pixels = read(&context, &row_fogged)?;
-    for pixel in &pixels[..3] {
-        near(*pixel, [2., 0.5, 0.25, 0.5]);
-    }
-    for pixel in &pixels[3..] {
-        near(*pixel, [0., 0., 0.5, 0.5]);
-    }
-    let expected = [4_f32, 1., 0.5].map(|v| (1.055 * (v / (1. + v)).powf(1. / 2.4) - 0.055) * 0.5);
-    for pixel in read(&context, &display)? {
-        near(pixel, [expected[0], expected[1], expected[2], 0.5]);
-    }
-
-    let a = upload(&context, [1, 1], wgpu::TextureFormat::R32Float, &[2.]);
-    let b = upload(&context, [1, 1], wgpu::TextureFormat::R32Float, &[3.]);
-    let c = upload(&context, [1, 1], wgpu::TextureFormat::R32Float, &[4.]);
-    let d = upload(&context, [1, 1], wgpu::TextureFormat::R32Float, &[0.5]);
-    let shader = EffectShader::wgsl_four_images(
-        "fn effect(i: EffectInput, p: EffectParams) -> vec4<f32> { return vec4<f32>(sample_effect_image(i, i.uv).r, sample_effect_second_image(i, i.uv).r, sample_effect_third_image(i, i.uv).r, sample_effect_fourth_image(i, i.uv).r); }",
-    );
-    let four = WgpuTextureEffect::new(
-        context.clone(),
-        &shader,
-        TextureEffectConfig {
-            inputs: vec![EffectTextureOptions::default(); 4],
-            premultiplied_alpha: false,
-            ..config
-        },
-    )?;
-    let result = four.render(&[&a, &b, &c, &d], [1, 1], EffectUniforms::default(), 0.)?;
-    near(read(&context, &result)?[0], [2., 3., 4., 0.5]);
-    Ok(())
-}
-
-#[test]
-#[ignore = "requires a GPU adapter"]
 fn caller_encoding_preserves_pass_order_cancellation_and_parameter_isolation() -> Result<()> {
     let context = WgpuContext::new_headless()?;
     let source = upload(
@@ -289,7 +165,9 @@ fn invalid_gpu_inputs_fail_without_poisoning_the_processor() -> Result<()> {
     let other = WgpuContext::new_headless()?;
     let processor = WgpuTextureEffect::new(
         context.clone(),
-        &gpui_effects::subtree_identity_shader(),
+        &EffectShader::wgsl_image(
+            "fn effect(i: EffectInput, p: EffectParams) -> vec4<f32> { return sample_effect_image(i, i.uv); }",
+        ),
         TextureEffectConfig::default(),
     )?;
     let local = upload(

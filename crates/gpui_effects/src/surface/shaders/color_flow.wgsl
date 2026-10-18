@@ -55,6 +55,34 @@ fn flow_tone(color: vec3<f32>, ceiling: f32) -> vec3<f32> {
     return color * compressed / max(peak, 0.0001);
 }
 
+fn flow_dither_hash(pixel: vec2<i32>) -> vec3<f32> {
+    let bits = bitcast<vec2<u32>>(pixel);
+    let seed = bits.x * 1597334677u ^ bits.y * 3812015801u;
+    var h = vec3<u32>(seed, seed ^ 0x68bc21ebu, seed ^ 0x02e5be93u);
+    h = (h ^ (h >> vec3<u32>(16u))) * 0x7feb352du;
+    h = (h ^ (h >> vec3<u32>(15u))) * 0x846ca68bu;
+    h = h ^ (h >> vec3<u32>(16u));
+    return vec3<f32>(h >> vec3<u32>(8u)) / 16777216.0;
+}
+
+fn flow_dither(position: vec2<f32>) -> vec3<f32> {
+    let pixel = floor(position);
+    let fine = fract(52.9829189 * fract(dot(pixel, vec2<f32>(0.06711056, 0.00583715)))) - 0.5;
+    // A smooth four-device-pixel field retains variation when the output is
+    // downsampled. Independent channels also break up chroma quantization bands.
+    let p = position / 4.0;
+    let cell = vec2<i32>(floor(p));
+    let f = smoothstep(vec2<f32>(0.0), vec2<f32>(1.0), fract(p));
+    let coarse = mix(
+        mix(flow_dither_hash(cell), flow_dither_hash(cell + vec2<i32>(1, 0)), f.x),
+        mix(flow_dither_hash(cell + vec2<i32>(0, 1)), flow_dither_hash(cell + vec2<i32>(1)), f.x),
+        f.y,
+    ) - vec3<f32>(0.5);
+    // The fine component covers an output quantization step; the coarse
+    // component is zero-centered and has no time dependence.
+    return vec3<f32>(fine) + coarse * 1.5;
+}
+
 fn effect(input: EffectInput, params: EffectParams) -> vec4<f32> {
     let diffusion = clamp(params.slots[0].x / 0.3, 0.0, 1.0);
     let saturation = max(params.slots[0].y, 0.0);
@@ -156,9 +184,8 @@ fn effect(input: EffectInput, params: EffectParams) -> vec4<f32> {
     let edge = input.uv - vec2<f32>(0.5);
     rgb *= 1.0 - vignette * smoothstep(0.08, 0.50, dot(edge, edge));
 
-    // Stationary, monochrome sub-LSB dither breaks quantized gradient bands
-    // without introducing colored noise or temporal shimmer.
-    let pixel = floor(input.uv * input.size);
-    let dither = fract(52.9829189 * fract(dot(pixel, vec2<f32>(0.06711056, 0.00583715)))) - 0.5;
-    return vec4<f32>(clamp(rgb + vec3<f32>(dither * grain / 255.0), vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    if (grain > 0.0) {
+        rgb += flow_dither(input.position) * grain / 255.0;
+    }
+    return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }

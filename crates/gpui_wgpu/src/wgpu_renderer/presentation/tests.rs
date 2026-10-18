@@ -7,7 +7,7 @@ use gpui::{
 
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn glass_on_noncopyable_targets_matches_direct_rendering() -> anyhow::Result<()> {
+fn backdrop_on_noncopyable_targets_matches_direct_rendering() -> anyhow::Result<()> {
     let context = WgpuContext::new_headless()?;
     for format in [
         wgpu::TextureFormat::Rgba8Unorm,
@@ -61,13 +61,18 @@ fn glass_on_noncopyable_targets_matches_direct_rendering() -> anyhow::Result<()>
                 corner_radii: Default::default(),
                 blur_radius: ScaledPixels(4.),
                 opacity: 1.,
-                shader: Some(gpui_effects::liquid_glass_shader()),
-                uniforms: EffectUniforms::new()
-                    .with_slot(0, [1., 1., 6., 6.])
-                    .with_slot(1, [1., 1., 1., 0.12])
-                    .with_slot(2, [0.34, 0.04, 0.015, 0.22])
-                    .with_slot(3, [-0.6, -0.8, 0.8, 0.])
-                    .with_slot(4, [4.; 4]),
+                shader: Some(gpui::BackdropShader::wgsl(
+                    r#"
+fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
+    return mix(
+        sample_raw_backdrop(input, vec2<f32>(2.0, 0.0)),
+        sample_blurred_backdrop(input, vec2<f32>(0.0)),
+        params.slots[0].x,
+    );
+}
+"#,
+                )),
+                uniforms: EffectUniforms::new().with_slot(0, [0.75, 0., 0., 0.]),
                 time: 0.,
                 pointer: point(0.5, 0.5),
                 pointer_active: false,

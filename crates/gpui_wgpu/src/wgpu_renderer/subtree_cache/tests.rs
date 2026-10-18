@@ -23,7 +23,21 @@ fn layer(source: Scene, offset: f32) -> SubtreeLayer {
             effect_bounds: bounds,
             transformation: Default::default(),
             content_mask: ContentMask { bounds },
-            shader: gpui_effects::transform_group_shader(),
+            shader: gpui::EffectShader::wgsl_image(
+                r#"
+fn effect(input: EffectInput, params: EffectParams) -> vec4<f32> {
+    let position = vec3<f32>(input.uv * input.size, 1.0);
+    let source = vec2<f32>(
+        dot(params.slots[0].xyz, position),
+        dot(params.slots[1].xyz, position),
+    ) / input.size;
+    if any(source < vec2<f32>(0.0)) || any(source >= vec2<f32>(1.0)) {
+        return vec4<f32>(0.0);
+    }
+    return sample_effect_image(input, source);
+}
+"#,
+            ),
             uniforms: gpui::EffectUniforms::default()
                 .with_slot(0, [1., 0., -offset, 0.])
                 .with_slot(1, [0., 1., 0., 0.]),

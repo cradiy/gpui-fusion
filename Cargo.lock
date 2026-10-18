@@ -2644,8 +2644,10 @@ version = "0.1.0"
 dependencies = [
  "accesskit",
  "anyhow",
+ "bytemuck",
  "gpui",
  "gpui_platform",
+ "gpui_wgpu",
  "image",
  "naga",
  "pollster 0.4.0",
@@ -2991,7 +2993,6 @@ dependencies = [
  "etagere",
  "foreign-types",
  "gpui",
- "gpui_effects",
  "gpui_render",
  "gpui_util",
  "half",

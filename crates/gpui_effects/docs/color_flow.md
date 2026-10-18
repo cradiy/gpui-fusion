@@ -2,7 +2,7 @@
 
 The [color flow example](../examples/color_flow.rs) extracts four alpha-weighted
 main colors once from the decoded image. Soft color volumes overlap above an
-image-derived dark base, with monochrome dithering for smooth gradients. The
+image-derived dark base, with static multiscale dithering for smooth gradients. The
 preview displays the extracted palette alongside tone, brightness, speed,
 cohesion, diffusion, and pause controls. Rendering defaults to the component's
 tone-grouped image sampling; click Source to switch to the extracted palette.
@@ -115,11 +115,20 @@ let background = color_flow(cover)
 | `vignette` | `0.18` | Edge darkening, `0..=1` |
 | `seed` | `0.37` | Stable variation of the color arrangement and paths |
 | `glow` | `0.20` | Nonnegative light density; higher values reveal more local color over the base |
-| `dither` | `1.0` | Monochrome noise in 8-bit color steps, `0..=2`; `0` disables it |
+| `dither` | `1.0` | Static multiscale dithering strength, `0..=2`; `0` disables it |
 
 Layout, rounding, shadows, and opacity use the normal GPUI `Styled` methods.
 Pass elapsed seconds to `.time()`; playback speed is controlled by how quickly
 that time advances. Keep it fixed to pause.
+
+Dithering combines a fine luminance pattern with a smooth four-device-pixel
+color pattern. It is applied after brightness and vignette, stays fixed in
+render-target pixel coordinates, and does not animate independently of the
+color field. The larger pattern helps retain variation through downsampling.
+Increasing `dither` reduces coherent color bands at the cost of more visible
+grain. Use `brightness` to dim the field before dithering; later opacity,
+blur, scaling, and lossy video encoding can still weaken the result or introduce
+new bands.
 
 For concentrated blending, use high `cohesion` with low `drift`. At
 `cohesion = 1.0`, all colors share a small moving region while local deformation

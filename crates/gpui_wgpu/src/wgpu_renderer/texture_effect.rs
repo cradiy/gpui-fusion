@@ -486,11 +486,12 @@ mod tests {
             "fn effect(i: EffectInput, p: EffectParams) -> vec4<f32> { return sample_effect_image_cover(i, i.uv) + sample_effect_second_image_cover(i, i.uv) + sample_effect_third_image_cover(i, i.uv) + load_effect_fourth_image(vec2<i32>(i.position)); }",
         );
         for shader in [
-            gpui_effects::subtree_identity_shader(),
-            gpui_effects::subtree_blur_shader(),
-            gpui_effects::hdr_tone_map_shader(),
-            gpui_effects::depth_fog_shader(),
-            gpui_effects::bloom_composite_shader(),
+            EffectShader::wgsl_image(
+                "fn effect(i: EffectInput, p: EffectParams) -> vec4<f32> { return sample_effect_image(i, i.uv); }",
+            ),
+            EffectShader::wgsl_two_images(
+                "fn effect(i: EffectInput, p: EffectParams) -> vec4<f32> { return sample_effect_image(i, i.uv) * sample_effect_second_image(i, i.uv).r; }",
+            ),
             four,
         ] {
             for premultiplied_alpha in [false, true] {

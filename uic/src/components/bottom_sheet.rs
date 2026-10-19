@@ -43,6 +43,23 @@ impl BottomSheet {
         self
     }
 
+    /// Animates presentation, dismissal and cancelled handle drags.
+    /// Zero keeps transitions immediate.
+    pub fn animation_duration(mut self, duration: std::time::Duration) -> Self {
+        self.modal.sheet_animation = (!duration.is_zero()).then_some(duration);
+        self
+    }
+
+    /// Fit content on presentation; drag the handle or blank surface upward to fill the safe viewport.
+    /// A downward drag returns to the content detent before dismissal.
+    pub fn expandable(mut self, enabled: bool) -> Self {
+        self.modal.sheet_expandable = enabled;
+        if enabled {
+            self.modal = self.modal.h_auto().max_h(relative(1.));
+        }
+        self
+    }
+
     pub fn title(mut self, title: impl Into<gpui::SharedString>) -> Self {
         self.modal = self.modal.title_text(title);
         self

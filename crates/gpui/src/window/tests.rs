@@ -487,3 +487,28 @@ fn ui_texture_density_invalidates_cached_paint_without_changing_layout(cx: &mut 
         assert_eq!(renders.get(), render_count);
     }
 }
+
+#[test]
+fn thermal_frame_pacing_tolerates_vsync_jitter_without_unlocking_high_refresh() {
+    use std::time::Duration;
+    let interval = animation_frame_interval(
+        AnimationFramePolicy::FollowDisplay,
+        true,
+        Some(ThermalState::Serious),
+        RequestFrameOptions::default(),
+        true,
+    )
+    .unwrap();
+    for (period_us, expected_frames) in [(16_500, 60), (16_800, 60), (8_333, 30)] {
+        let mut last = Duration::ZERO;
+        let mut frames = 0;
+        for tick in 1..=60 {
+            let now = Duration::from_micros(period_us * tick);
+            if super::animation_frame_is_due(now - last, interval) {
+                last = now;
+                frames += 1;
+            }
+        }
+        assert_eq!(frames, expected_frames, "vsync period {period_us}");
+    }
+}

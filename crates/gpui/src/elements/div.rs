@@ -2461,7 +2461,10 @@ impl Interactivity {
             scroll_offset.x = scroll_offset.x.clamp(-scroll_max.x, px(0.));
             if scroll_to_bottom {
                 scroll_offset.y = -scroll_max.y;
-            } else {
+            } else if !tracked_scroll_handle
+                .as_ref()
+                .is_some_and(|state| state.preserve_vertical_offset)
+            {
                 scroll_offset.y = scroll_offset.y.clamp(-scroll_max.y, px(0.));
             }
 
@@ -4128,6 +4131,7 @@ struct ScrollHandleState {
     max_offset: Point<Pixels>,
     child_bounds: Vec<Bounds<Pixels>>,
     scroll_to_bottom: bool,
+    preserve_vertical_offset: bool,
     overflow: Point<Overflow>,
     active_item: Option<ScrollActiveItem>,
 }
@@ -4302,6 +4306,12 @@ impl ScrollHandle {
     pub fn set_offset(&self, mut position: Point<Pixels>) {
         let state = self.0.borrow();
         *state.offset.borrow_mut() = position;
+    }
+
+    /// Keeps the vertical offset stable when a coordinated viewport resize changes its range.
+    /// The owner must settle any out-of-range offset before disabling this option.
+    pub fn preserve_vertical_offset(&self, preserve: bool) {
+        self.0.borrow_mut().preserve_vertical_offset = preserve;
     }
 
     /// Get the logical scroll top, based on a child index and a pixel offset.

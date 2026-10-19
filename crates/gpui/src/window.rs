@@ -780,6 +780,12 @@ fn animation_frame_interval(
     }
 }
 
+fn animation_frame_is_due(elapsed: Duration, interval: Duration) -> bool {
+    // Display callbacks jitter around their nominal period. A strict comparison
+    // can turn a 60 Hz thermal cap into 30 Hz when vsync arrives slightly early.
+    elapsed >= interval.saturating_sub(Duration::from_millis(1))
+}
+
 impl Drop for Window {
     fn drop(&mut self) {
         // Platform state may outlive this window during native teardown. Release the
@@ -1019,7 +1025,7 @@ impl Window {
                 let now = Instant::now();
                 if let Some(min_interval) = min_frame_interval {
                     if let Some(last_frame) = last_frame_time.get()
-                        && now.duration_since(last_frame) < min_interval
+                        && !animation_frame_is_due(now.duration_since(last_frame), min_interval)
                     {
                         // Must still complete the frame on platforms that require it.
                         // On Wayland, `surface.frame()` was already called to request the

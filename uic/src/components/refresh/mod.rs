@@ -4,8 +4,8 @@ use gpui::{
     AnyElement, App, ElementId, Entity, HitboxBehavior, IntoElement, ParentElement, Refineable,
     RenderOnce, Role, StyleRefinement, Styled, TouchEvent, Window, canvas, div, prelude::*, px,
 };
+use scheduler::Instant;
 use std::rc::Rc;
-use std::time::Instant;
 
 pub use state::{RefreshRequested, RefreshState, RefreshStatus};
 

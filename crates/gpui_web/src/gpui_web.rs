@@ -11,6 +11,7 @@ mod http_client;
 mod keyboard;
 mod logging;
 mod platform;
+mod reentrancy;
 mod window;
 
 pub use dispatcher::WebDispatcher;

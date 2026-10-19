@@ -9,6 +9,7 @@ use gpui::{
 use smallvec::smallvec;
 use wasm_bindgen::prelude::*;
 
+use crate::reentrancy::{invoke_callback, update_state};
 use crate::window::WebWindowInner;
 
 pub struct WebEventListeners {
@@ -149,8 +150,10 @@ impl WebWindowInner {
     }
 
     fn dispatch_input(&self, input: PlatformInput) -> Option<DispatchEventResult> {
-        let mut borrowed = self.callbacks.borrow_mut();
-        borrowed.input.as_mut().map(|callback| callback(input))
+        // Never hold the borrow across the callback: GPUI may synchronously
+        // re-enter a DOM listener, which would panic with "RefCell already
+        // borrowed" and, on wasm32, leave the cell permanently borrowed.
+        invoke_callback!(self.callbacks, input, callback, { callback(input) })
     }
 
     fn register_pointer_down(self: &Rc<Self>) -> Closure<dyn FnMut(JsValue)> {
@@ -169,11 +172,10 @@ impl WebWindowInner {
             this.pressed_button.set(Some(button));
             let click_count = this.click_state.borrow_mut().register_click(position, time);
 
-            {
-                let mut current_state = this.state.borrow_mut();
+            update_state!(this.state, |current_state| {
                 current_state.mouse_position = position;
                 current_state.modifiers = modifiers;
-            }
+            });
 
             this.dispatch_input(PlatformInput::MouseDown(MouseDownEvent {
                 button,
@@ -198,11 +200,10 @@ impl WebWindowInner {
             this.pressed_button.set(None);
             let click_count = this.click_state.borrow().current_count;
 
-            {
-                let mut current_state = this.state.borrow_mut();
+            update_state!(this.state, |current_state| {
                 current_state.mouse_position = position;
                 current_state.modifiers = modifiers;
-            }
+            });
 
             this.dispatch_input(PlatformInput::MouseUp(MouseUpEvent {
                 button,
@@ -223,11 +224,10 @@ impl WebWindowInner {
             let modifiers = modifiers_from_mouse_event(&event);
             let current_pressed = this.pressed_button.get();
 
-            {
-                let mut current_state = this.state.borrow_mut();
+            update_state!(this.state, |current_state| {
                 current_state.mouse_position = position;
                 current_state.modifiers = modifiers;
-            }
+            });
 
             this.dispatch_input(PlatformInput::MouseMove(MouseMoveEvent {
                 position,
@@ -246,11 +246,10 @@ impl WebWindowInner {
             let modifiers = modifiers_from_mouse_event(&event);
             let current_pressed = this.pressed_button.get();
 
-            {
-                let mut current_state = this.state.borrow_mut();
+            update_state!(this.state, |current_state| {
                 current_state.mouse_position = position;
                 current_state.modifiers = modifiers;
-            }
+            });
 
             this.dispatch_input(PlatformInput::MouseExited(MouseExitEvent {
                 position,
@@ -280,10 +279,9 @@ impl WebWindowInner {
                 ))
             };
 
-            {
-                let mut current_state = this.state.borrow_mut();
+            update_state!(this.state, |current_state| {
                 current_state.modifiers = modifiers;
-            }
+            });
 
             this.dispatch_input(PlatformInput::ScrollWheel(ScrollWheelEvent {
                 position,
@@ -310,10 +308,9 @@ impl WebWindowInner {
             let mouse_event: &web_sys::MouseEvent = event.as_ref();
             let position = mouse_position_in_element(mouse_event);
 
-            {
-                let mut current_state = this.state.borrow_mut();
+            update_state!(this.state, |current_state| {
                 current_state.mouse_position = position;
-            }
+            });
 
             this.dispatch_input(PlatformInput::FileDrop(FileDropEvent::Pending { position }));
         })
@@ -328,10 +325,9 @@ impl WebWindowInner {
             let mouse_event: &web_sys::MouseEvent = event.as_ref();
             let position = mouse_position_in_element(mouse_event);
 
-            {
-                let mut current_state = this.state.borrow_mut();
+            update_state!(this.state, |current_state| {
                 current_state.mouse_position = position;
-            }
+            });
 
             let paths = extract_file_paths_from_drag(&event);
 
@@ -363,11 +359,10 @@ impl WebWindowInner {
             let modifiers = modifiers_from_keyboard_event(&event);
             let capslock = capslock_from_keyboard_event(&event);
 
-            {
-                let mut current_state = this.state.borrow_mut();
+            update_state!(this.state, |current_state| {
                 current_state.modifiers = modifiers;
                 current_state.capslock = capslock;
-            }
+            });
 
             this.dispatch_input(PlatformInput::ModifiersChanged(ModifiersChangedEvent {
                 modifiers,
@@ -442,11 +437,10 @@ impl WebWindowInner {
             let modifiers = modifiers_from_keyboard_event(&event);
             let capslock = capslock_from_keyboard_event(&event);
 
-            {
-                let mut current_state = this.state.borrow_mut();
+            update_state!(this.state, |current_state| {
                 current_state.modifiers = modifiers;
                 current_state.capslock = capslock;
-            }
+            });
 
             this.dispatch_input(PlatformInput::ModifiersChanged(ModifiersChangedEvent {
                 modifiers,
@@ -509,56 +503,48 @@ impl WebWindowInner {
     fn register_focus(self: &Rc<Self>) -> Closure<dyn FnMut(JsValue)> {
         let this = Rc::clone(self);
         self.listen_input("focus", move |_event: JsValue| {
-            {
-                let mut state = this.state.borrow_mut();
+            update_state!(this.state, |state| {
                 state.is_active = true;
-            }
-            let mut callbacks = this.callbacks.borrow_mut();
-            if let Some(ref mut callback) = callbacks.active_status_change {
+            });
+            invoke_callback!(this.callbacks, active_status_change, callback, {
                 callback(true);
-            }
+            });
         })
     }
 
     fn register_blur(self: &Rc<Self>) -> Closure<dyn FnMut(JsValue)> {
         let this = Rc::clone(self);
         self.listen_input("blur", move |_event: JsValue| {
-            {
-                let mut state = this.state.borrow_mut();
+            update_state!(this.state, |state| {
                 state.is_active = false;
-            }
-            let mut callbacks = this.callbacks.borrow_mut();
-            if let Some(ref mut callback) = callbacks.active_status_change {
+            });
+            invoke_callback!(this.callbacks, active_status_change, callback, {
                 callback(false);
-            }
+            });
         })
     }
 
     fn register_pointer_enter(self: &Rc<Self>) -> Closure<dyn FnMut(JsValue)> {
         let this = Rc::clone(self);
         self.listen("pointerenter", move |_event: JsValue| {
-            {
-                let mut state = this.state.borrow_mut();
+            update_state!(this.state, |state| {
                 state.is_hovered = true;
-            }
-            let mut callbacks = this.callbacks.borrow_mut();
-            if let Some(ref mut callback) = callbacks.hover_status_change {
+            });
+            invoke_callback!(this.callbacks, hover_status_change, callback, {
                 callback(true);
-            }
+            });
         })
     }
 
     fn register_pointer_leave_hover(self: &Rc<Self>) -> Closure<dyn FnMut(JsValue)> {
         let this = Rc::clone(self);
         self.listen("pointerleave", move |_event: JsValue| {
-            {
-                let mut state = this.state.borrow_mut();
+            update_state!(this.state, |state| {
                 state.is_hovered = false;
-            }
-            let mut callbacks = this.callbacks.borrow_mut();
-            if let Some(ref mut callback) = callbacks.hover_status_change {
+            });
+            invoke_callback!(this.callbacks, hover_status_change, callback, {
                 callback(false);
-            }
+            });
         })
     }
 }

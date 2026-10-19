@@ -1,7 +1,8 @@
 mod interaction;
 mod state;
 
-use std::{rc::Rc, time::Instant};
+use scheduler::Instant;
+use std::{rc::Rc};
 
 use gpui::{
     AnyElement, App, Bounds, CursorStyle, ElementId, Entity, FontWeight, IntoElement, Pixels,

@@ -1,5 +1,6 @@
 use crate::display::WebDisplay;
 use crate::events::{ClickState, WebEventListeners};
+use crate::reentrancy::{invoke_callback, update_state};
 use std::sync::Arc;
 use std::{cell::Cell, cell::RefCell, rc::Rc};
 
@@ -43,6 +44,37 @@ pub(crate) struct WebWindowCallbacks {
     pub(crate) close: Option<Box<dyn FnOnce()>>,
     pub(crate) appearance_changed: Option<Box<dyn FnMut()>>,
     pub(crate) hit_test_window_control: Option<Box<dyn FnMut() -> Option<WindowControlArea>>>,
+}
+
+/// Delivers a resize notification without re-entering itself.
+///
+/// A reflow caused by the resize itself can fire the observer again while the
+/// callback is still running, and the callback is stored in a `RefCell`, so a
+/// nested borrow would panic (and on wasm32 leave the cell borrowed forever).
+///
+/// A nested notification is dropped rather than queued: `ResizeObserver` always
+/// delivers the current size on the next frame, so the pending size is never
+/// lost, while replaying it from inside the callback risks the callback
+/// re-triggering the observer forever. An earlier version of this function did
+/// replay and hung the browser's main thread.
+fn reentrant_resize(
+    callbacks: &RefCell<WebWindowCallbacks>,
+    size: Size<Pixels>,
+    scale_factor: f32,
+) {
+    thread_local! {
+        static DEPTH: Cell<u32> = const { Cell::new(0) };
+    }
+
+    if DEPTH.with(|depth| depth.get()) > 0 {
+        return;
+    }
+
+    DEPTH.with(|depth| depth.set(depth.get() + 1));
+    invoke_callback!(*callbacks, resize, callback, {
+        callback(size, scale_factor);
+    });
+    DEPTH.with(|depth| depth.set(depth.get() - 1));
 }
 
 pub(crate) struct WebWindowMutableState {
@@ -190,18 +222,20 @@ impl WebWindow {
             Closure::<dyn FnMut(String, String)>::new(move |id: String, value: String| {
                 if let Some(callbacks) = weak.upgrade()
                     && let Ok(id) = id.parse()
-                    && let Some(callback) = &callbacks.borrow().autofill
                 {
-                    callback(id, value);
+                    invoke_callback!(callbacks, autofill, callback, {
+                        callback(id, value);
+                    });
                 }
             });
         let weak = Rc::downgrade(&callbacks);
         let autofill_focus_callback = Closure::<dyn FnMut(String)>::new(move |id: String| {
             if let Some(callbacks) = weak.upgrade()
                 && let Ok(id) = id.parse()
-                && let Some(callback) = &callbacks.borrow().autofill_focus
             {
-                callback(id);
+                invoke_callback!(callbacks, autofill_focus, callback, {
+                    callback(id);
+                });
             }
         });
         let autofill = crate::autofill::WebAutofill::new(
@@ -270,15 +304,29 @@ impl WebWindow {
 
             let (physical_width, physical_height, logical_width, logical_height) =
                 if inner.has_device_pixel_support {
-                    let size: web_sys::ResizeObserverSize = entry
-                        .device_pixel_content_box_size()
-                        .get(0)
-                        .unchecked_into();
-                    let pw = size.inline_size() as u32;
-                    let ph = size.block_size() as u32;
-                    let lw = pw as f64 / dpr;
-                    let lh = ph as f64 / dpr;
-                    (pw, ph, lw as f32, lh as f32)
+                    let sizes = entry.device_pixel_content_box_size();
+                    if sizes.length() == 0 {
+                        // `devicePixelContentBoxSize` is empty when the element is not
+                        // rendered (display:none, detached, zero-size). Falling back to
+                        // the content rect keeps the window usable instead of trapping
+                        // on an undefined entry.
+                        log::warn!(
+                            "resize observer: empty devicePixelContentBoxSize, using contentRect"
+                        );
+                        let rect = entry.content_rect();
+                        let lw = rect.width() as f32;
+                        let lh = rect.height() as f32;
+                        let pw = (lw as f64 * dpr).round() as u32;
+                        let ph = (lh as f64 * dpr).round() as u32;
+                        (pw, ph, lw, lh)
+                    } else {
+                        let size: web_sys::ResizeObserverSize = sizes.get(0).unchecked_into();
+                        let pw = size.inline_size() as u32;
+                        let ph = size.block_size() as u32;
+                        let lw = pw as f64 / dpr;
+                        let lh = ph as f64 / dpr;
+                        (pw, ph, lw as f32, lh as f32)
+                    }
                 } else {
                     // Safari fallback: use contentRect (always CSS px).
                     let rect = entry.content_rect();
@@ -302,15 +350,12 @@ impl WebWindow {
 
             // Skip rendering to a zero-size canvas (e.g. display:none).
             if physical_width == 0 || physical_height == 0 {
-                let mut s = inner.state.borrow_mut();
-                s.bounds.size = Size::default();
-                s.scale_factor = dpr_f32;
+                update_state!(inner.state, |s| {
+                    s.bounds.size = Size::default();
+                    s.scale_factor = dpr_f32;
+                });
                 // Still fire the callback so GPUI knows the window is gone.
-                drop(s);
-                let mut cbs = inner.callbacks.borrow_mut();
-                if let Some(ref mut callback) = cbs.resize {
-                    callback(Size::default(), dpr_f32);
-                }
+                reentrant_resize(&inner.callbacks, Size::default(), dpr_f32);
                 return;
             }
 
@@ -322,24 +367,22 @@ impl WebWindow {
                 .pending_physical_size
                 .set(Some((clamped_width, clamped_height)));
 
-            {
-                let mut s = inner.state.borrow_mut();
+            update_state!(inner.state, |s| {
                 s.bounds.size = Size {
                     width: px(logical_width),
                     height: px(logical_height),
                 };
                 s.scale_factor = dpr_f32;
-            }
+            });
 
             let new_size = Size {
                 width: px(logical_width),
                 height: px(logical_height),
             };
 
-            let mut cbs = inner.callbacks.borrow_mut();
-            if let Some(ref mut callback) = cbs.resize {
-                callback(new_size, dpr_f32);
-            }
+            // A resize can arrive while this callback is running (reflowing the
+            // page re-triggers the observer), so replay it instead of dropping it.
+            reentrant_resize(&inner.callbacks, new_size, dpr_f32);
         })
     }
 }
@@ -379,15 +422,12 @@ impl WebWindowInner {
                 }
                 return;
             }
-            {
-                let mut callbacks = this.callbacks.borrow_mut();
-                if let Some(ref mut callback) = callbacks.request_frame {
-                    callback(RequestFrameOptions {
-                        require_presentation: true,
-                        force_render: false,
-                    });
-                }
-            }
+            invoke_callback!(this.callbacks, request_frame, callback, {
+                callback(RequestFrameOptions {
+                    require_presentation: true,
+                    force_render: false,
+                });
+            });
 
             // Controls need not explicitly invalidate character coordinates.
             // Pull after GPUI has painted and registered the current handler;
@@ -479,14 +519,12 @@ impl WebWindowInner {
                 })
                 .unwrap_or(true);
 
-            {
-                let mut state = this.state.borrow_mut();
+            update_state!(this.state, |state| {
                 state.is_active = is_visible;
-            }
-            let mut callbacks = this.callbacks.borrow_mut();
-            if let Some(ref mut callback) = callbacks.active_status_change {
+            });
+            invoke_callback!(this.callbacks, active_status_change, callback, {
                 callback(is_visible);
-            }
+            });
         });
 
         document
@@ -516,10 +554,9 @@ impl WebWindowInner {
 
         let this = Rc::clone(self);
         let closure = Closure::<dyn FnMut(JsValue)>::new(move |_event: JsValue| {
-            let mut callbacks = this.callbacks.borrow_mut();
-            if let Some(ref mut callback) = callbacks.appearance_changed {
+            invoke_callback!(this.callbacks, appearance_changed, callback, {
                 callback();
-            }
+            });
         });
 
         mql.add_event_listener_with_callback("change", closure.as_ref().unchecked_ref())

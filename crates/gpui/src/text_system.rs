@@ -61,7 +61,7 @@ pub struct TextSystem {
 
 #[derive(Default)]
 struct FontCache {
-    ids_by_font: FxHashMap<Font, Result<FontId>>,
+    ids_by_font: FxHashMap<Font, Option<FontId>>,
     fonts_by_id: FxHashMap<FontId, Font>,
 }
 
@@ -114,30 +114,27 @@ impl TextSystem {
     }
 
     /// Get the FontId for the configure font family and style.
-    fn font_id(&self, font: &Font) -> Result<FontId> {
-        fn clone_font_id_result(font_id: &Result<FontId>) -> Result<FontId> {
-            match font_id {
-                Ok(font_id) => Ok(*font_id),
-                Err(err) => Err(anyhow!("{err}")),
-            }
-        }
-
+    fn font_id(&self, font: &Font) -> Option<FontId> {
         if let Some(font_id) = self.font_cache.read().ids_by_font.get(font) {
-            return clone_font_id_result(font_id);
+            return *font_id;
         }
 
         let cache = self.font_cache.upgradable_read();
         if let Some(font_id) = cache.ids_by_font.get(font) {
-            return clone_font_id_result(font_id);
+            return *font_id;
         }
-        let font_id = self.platform_text_system.font_id(font);
+        let font_id = match self.platform_text_system.font_id(font) {
+            Ok(id) => Some(id),
+            Err(error) => {
+                log::debug!("failed to load font '{}': {error:#}", font.family);
+                None
+            }
+        };
         let mut cache = RwLockUpgradableReadGuard::upgrade(cache);
-        if let Ok(id) = font_id {
+        if let Some(id) = font_id {
             cache.fonts_by_id.entry(id).or_insert_with(|| font.clone());
         }
-        cache
-            .ids_by_font
-            .insert(font.clone(), clone_font_id_result(&font_id));
+        cache.ids_by_font.insert(font.clone(), font_id);
         font_id
     }
 
@@ -153,11 +150,11 @@ impl TextSystem {
     ///
     /// Panics if the font and none of the fallbacks can be resolved.
     pub fn resolve_font(&self, font: &Font) -> FontId {
-        if let Ok(font_id) = self.font_id(font) {
+        if let Some(font_id) = self.font_id(font) {
             return font_id;
         }
         for fallback in &self.fallback_font_stack {
-            if let Ok(font_id) = self.font_id(fallback) {
+            if let Some(font_id) = self.font_id(fallback) {
                 return font_id;
             }
         }
@@ -1316,21 +1313,24 @@ pub fn font_name_with_fallbacks_shared<'a>(
 }
 
 #[cfg(test)]
-mod blurred_glyph_tests {
+mod tests {
     use super::*;
     use crate::{FontRun, LineLayout, ShapedGlyph, ShapedRun, WindowTextSystem, point, size};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     const SPACE_GLYPH: GlyphId = GlyphId(1);
     const INK_GLYPH: GlyphId = GlyphId(2);
 
     #[derive(Default)]
-    struct WhitespaceTextSystem {
+    struct TestTextSystem {
         rasterize_calls: AtomicUsize,
+        font_lookups: AtomicUsize,
+        deferred_font_loaded: AtomicBool,
     }
 
-    impl PlatformTextSystem for WhitespaceTextSystem {
+    impl PlatformTextSystem for TestTextSystem {
         fn add_fonts(&self, _fonts: Vec<Cow<'static, [u8]>>) -> Result<()> {
+            self.deferred_font_loaded.store(true, Ordering::Relaxed);
             Ok(())
         }
 
@@ -1338,7 +1338,15 @@ mod blurred_glyph_tests {
             Vec::new()
         }
 
-        fn font_id(&self, _descriptor: &Font) -> Result<FontId> {
+        fn font_id(&self, descriptor: &Font) -> Result<FontId> {
+            self.font_lookups.fetch_add(1, Ordering::Relaxed);
+            if descriptor.family == "Deferred Test Face" {
+                anyhow::ensure!(
+                    self.deferred_font_loaded.load(Ordering::Relaxed),
+                    "font has not been registered"
+                );
+                return Ok(FontId(2));
+            }
             Ok(FontId(1))
         }
 
@@ -1433,6 +1441,30 @@ mod blurred_glyph_tests {
         }
     }
 
+    #[test]
+    fn missing_font_reuses_fallback_until_font_registration_invalidates_cache() -> Result<()> {
+        let platform = Arc::new(TestTextSystem::default());
+        let text_system = TextSystem::new(platform.clone());
+        let requested = font("Deferred Test Face");
+        let fallback = text_system.resolve_font(&requested);
+        assert_eq!(platform.font_lookups.load(Ordering::Relaxed), 2);
+        for _ in 0..8 {
+            assert_eq!(text_system.resolve_font(&requested), fallback);
+        }
+        assert_eq!(platform.font_lookups.load(Ordering::Relaxed), 2);
+
+        text_system.add_fonts(Vec::new())?;
+        let registered = text_system.resolve_font(&requested);
+        assert_ne!(registered, fallback);
+        assert_eq!(
+            text_system.get_font_for_id(registered),
+            Some(requested.clone())
+        );
+        assert_eq!(text_system.resolve_font(&requested), registered);
+        assert_eq!(platform.font_lookups.load(Ordering::Relaxed), 3);
+        Ok(())
+    }
+
     fn render_params(glyph_id: GlyphId, blur_radius: u16) -> RenderGlyphParams {
         RenderGlyphParams {
             font_id: FontId(1),
@@ -1453,7 +1485,7 @@ mod blurred_glyph_tests {
 
         for blur_radius in [0, 3] {
             for text in cases {
-                let platform = Arc::new(WhitespaceTextSystem::default());
+                let platform = Arc::new(TestTextSystem::default());
                 let text_system = Arc::new(TextSystem::new(platform.clone()));
                 let window_text_system = WindowTextSystem::new(text_system.clone());
                 let line = window_text_system.shape_line(
@@ -1497,7 +1529,7 @@ mod blurred_glyph_tests {
 
     #[test]
     fn rasterizing_empty_glyph_returns_an_empty_mask() -> Result<()> {
-        let platform = Arc::new(WhitespaceTextSystem::default());
+        let platform = Arc::new(TestTextSystem::default());
         let text_system = TextSystem::new(platform.clone());
 
         for blur_radius in [0, 3] {

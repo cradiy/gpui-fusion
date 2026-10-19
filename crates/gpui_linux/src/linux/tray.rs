@@ -36,11 +36,19 @@ impl GpuiTray {
     }
 
     pub(crate) fn spawn(self) -> anyhow::Result<ksni::Handle<Self>> {
+        #[cfg(any(feature = "wayland", feature = "x11"))]
+        let sandboxed = ashpd::is_sandboxed();
+        #[cfg(not(any(feature = "wayland", feature = "x11")))]
+        let sandboxed = std::path::Path::new("/.flatpak-info").exists();
         // A desktop's watcher may appear after application autostart. Keep the
         // item alive so ksni can register on watcher arrival and re-register
         // after host restarts, retaining the same handle and latest options.
-        smol::block_on(<Self as ksni::TrayMethods>::assume_sni_available(self, true).spawn())
-            .map_err(|error| anyhow::anyhow!(error))
+        smol::block_on(
+            <Self as ksni::TrayMethods>::assume_sni_available(self, true)
+                .disable_dbus_name(sandboxed)
+                .spawn(),
+        )
+        .map_err(|error| anyhow::anyhow!(error))
     }
 }
 
@@ -256,7 +264,8 @@ mod tests {
                     [gpui::TrayIconImage::new(vec![255; 4], 1, 1).unwrap()],
                 )
                 .unwrap(),
-            );
+            )
+            .menu([MenuItem::action("Open panel", gpui::NoAction)]);
             let handle = GpuiTray::new(TrayId::from_u32(1), options, sender)
                 .spawn()
                 .unwrap();
@@ -285,6 +294,7 @@ mod tests {
                 if let Some(previous) = &previous_service {
                     assert_eq!(&service, previous, "host restart must retain the tray item");
                 }
+                assert_eq!(service.starts_with(':'), ashpd::is_sandboxed());
                 let item = zbus::Proxy::new(
                     &bus,
                     service.as_str(),
@@ -297,6 +307,17 @@ mod tests {
                     item.get_property::<String>("Title").await.unwrap(),
                     "Updated offline"
                 );
+                let menu_path = item
+                    .get_property::<zbus::zvariant::OwnedObjectPath>("Menu")
+                    .await
+                    .unwrap();
+                let menu =
+                    zbus::Proxy::new(&bus, service.clone(), menu_path, "com.canonical.dbusmenu")
+                        .await
+                        .unwrap();
+                let label: zbus::zvariant::OwnedValue =
+                    menu.call("GetProperty", &(1_i32, "label")).await.unwrap();
+                assert_eq!(String::try_from(label).unwrap(), "Open panel");
                 previous_service = Some(service.clone());
                 watcher.close().await.unwrap();
             }

@@ -1276,7 +1276,7 @@ impl WaylandWindowStatePtr {
                         state.resize_throttle = true;
                     }
                     if !configure.fullscreen && !configure.maximized {
-                        configure.size = if got_unmaximized {
+                        configure.size = if got_unmaximized && configure.size.is_none() {
                             Some(state.window_bounds.size)
                         } else {
                             compute_outer_size(state.inset(), configure.size, state.tiling)

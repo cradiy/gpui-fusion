@@ -22,11 +22,20 @@ struct QuadVarying {
     @location(4) @interpolate(flat) border_gradient_color0: vec4<f32>,
     @location(5) @interpolate(flat) border_gradient_color1: vec4<f32>,
     @location(8) @interpolate(flat) quad_id: u32,
-    // TODO: use `clip_distance` once Naga supports it
-    @location(9) clip_distances: vec4<f32>,
+    // Replaces an unused clip-distance varying: the fragment shader tests the mask
+    // directly, so carrying the raw rect costs nothing extra and removes a per-pixel
+    // storage read of the whole `Quad`.
+    @location(9) @interpolate(flat) content_mask: vec4<f32>,
     @location(10) @interpolate(flat) background_solid: vec4<f32>,
     @location(11) @interpolate(flat) background_color0: vec4<f32>,
     @location(12) @interpolate(flat) background_color1: vec4<f32>,
+    // Per-quad geometry the fragment shader needs on every pixel. Reading these from
+    // the storage buffer costs a cache-line fetch of the whole `Quad` per fragment;
+    // carrying them as flat varyings moves the cost to the vertex stage instead.
+    @location(6) @interpolate(flat) corner_radii: vec4<f32>,
+    @location(7) @interpolate(flat) border_widths: vec4<f32>,
+    @location(13) @interpolate(flat) bounds_origin: vec2<f32>,
+    @location(14) @interpolate(flat) bounds_size: vec2<f32>,
 }
 
 @vertex
@@ -59,7 +68,32 @@ fn vs_quad(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) insta
     out.border_gradient_color0 = gradient_colors[0];
     out.border_gradient_color1 = gradient_colors[1];
     out.quad_id = instance_id;
-    out.clip_distances = distance_from_clip_rect(unit_vertex, quad.bounds, quad.content_mask);
+    out.content_mask = vec4<f32>(
+        quad.content_mask.origin,
+        quad.content_mask.origin + quad.content_mask.size,
+    );
+    out.corner_radii = vec4<f32>(
+        quad.corner_radii.top_left,
+        quad.corner_radii.top_right,
+        quad.corner_radii.bottom_right,
+        quad.corner_radii.bottom_left,
+    );
+    out.border_widths = vec4<f32>(
+        quad.border_widths.top,
+        quad.border_widths.right,
+        quad.border_widths.bottom,
+        quad.border_widths.left,
+    );
+    out.bounds_origin = quad.bounds.origin;
+    // Encode the background tag in the sign of `bounds_size.x`. Sizes are always
+    // positive, so a negative x can only mean "non-solid background": the fragment
+    // shader then knows whether it may skip reading `quad.background` entirely.
+    let solid_background = quad.background.tag == 0u;
+    out.bounds_size = select(
+        -quad.bounds.size,
+        quad.bounds.size,
+        solid_background,
+    );
     return out;
 }
 
@@ -177,39 +211,52 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
     let quad = b_quads[input.quad_id];
     // Fragment positions preserve pixel centers at shared edges. Interpolating
     // clip distances can turn an exact zero negative on Metal.
-    if (any((input.position.xy + globals.viewport_origin) < quad.content_mask.origin)
-        || any((input.position.xy + globals.viewport_origin) > quad.content_mask.origin + quad.content_mask.size)) {
+    if (any((input.position.xy + globals.viewport_origin) < input.content_mask.xy)
+        || any((input.position.xy + globals.viewport_origin) > input.content_mask.zw)) {
         return vec4<f32>(0.0);
     }
 
-    let background_color = gradient_color(
-        quad.background,
-        (input.position.xy + globals.viewport_origin),
-        quad.bounds,
-        input.background_solid,
-        array(
-            input.background_color0,
-            input.background_color1,
-        ),
-    );
+    // Solid backgrounds are the common case and only need the colour already carried
+    // by `background_solid`. Reading `quad.background` costs a cache-line fetch of the
+    // whole `Quad` per fragment, so the non-solid path is kept separate.
+    // Solid backgrounds are the common case and already arrive through the varyings.
+    // A branch (rather than `select`) is used on purpose: `select` evaluates both
+    // operands, so it would still fetch the whole `Background` from the storage buffer
+    // on every fragment. The varying is uniform across the quad, so the branch is
+    // uniform too and the non-taken side costs nothing.
+    var background_color: vec4<f32>;
+    if (input.bounds_size.x >= 0.0) {
+        background_color = input.background_solid;
+    } else {
+        background_color = gradient_color(
+            quad.background,
+            (input.position.xy + globals.viewport_origin),
+            Bounds(input.bounds_origin, abs(input.bounds_size)),
+            input.background_solid,
+            array(
+                input.background_color0,
+                input.background_color1,
+            ),
+        );
+    }
+    let size = abs(input.bounds_size);
 
-    let unrounded = quad.corner_radii.top_left == 0.0 &&
-        quad.corner_radii.bottom_left == 0.0 &&
-        quad.corner_radii.top_right == 0.0 &&
-        quad.corner_radii.bottom_right == 0.0;
+    let unrounded = input.corner_radii.x == 0.0 &&
+        input.corner_radii.w == 0.0 &&
+        input.corner_radii.y == 0.0 &&
+        input.corner_radii.z == 0.0;
 
     // Fast path when the quad is not rounded and doesn't have any border
-    if (quad.border_widths.top == 0.0 &&
-            quad.border_widths.left == 0.0 &&
-            quad.border_widths.right == 0.0 &&
-            quad.border_widths.bottom == 0.0 &&
+    if (input.border_widths.x == 0.0 &&
+            input.border_widths.w == 0.0 &&
+            input.border_widths.y == 0.0 &&
+            input.border_widths.z == 0.0 &&
             unrounded) {
         return blend_color(background_color, 1.0);
     }
 
-    let size = quad.bounds.size;
     let half_size = size / 2.0;
-    let point = (input.position.xy + globals.viewport_origin) - quad.bounds.origin;
+    let point = (input.position.xy + globals.viewport_origin) - input.bounds_origin;
     let center_to_point = point - half_size;
 
     // Signed distance field threshold for inclusion of pixels. 0.5 is the
@@ -217,17 +264,25 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
     let antialias_threshold = 0.5;
 
     // Radius of the nearest corner
-    let corner_radius = pick_corner_radius(center_to_point, quad.corner_radii);
+    let corner_radius = pick_corner_radius(
+        center_to_point,
+        Corners(
+            input.corner_radii.x,
+            input.corner_radii.y,
+            input.corner_radii.z,
+            input.corner_radii.w,
+        ),
+    );
 
     // Width of the nearest borders
     let border = vec2<f32>(
         select(
-            quad.border_widths.right,
-            quad.border_widths.left,
+            input.border_widths.y,
+            input.border_widths.w,
             center_to_point.x < 0.0),
         select(
-            quad.border_widths.bottom,
-            quad.border_widths.top,
+            input.border_widths.z,
+            input.border_widths.x,
             center_to_point.y < 0.0));
 
     // 0-width borders are reduced so that `inner_sdf >= antialias_threshold`.
@@ -359,7 +414,12 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
                 center_to_point,
                 corner_center_to_point,
                 is_near_rounded_corner,
-                quad.corner_radii,
+                Corners(
+                    input.corner_radii.x,
+                    input.corner_radii.y,
+                    input.corner_radii.z,
+                    input.corner_radii.w,
+                ),
             );
             let gradient_position = fract(perimeter_position + quad.border_gradient.phase);
             let gradient_color = sample_border_gradient(
@@ -420,12 +480,12 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
                 // this does not fix single dashed borders at the corners
                 let dashed_border = vec2<f32>(
                         max(
-                            quad.border_widths.bottom,
-                            quad.border_widths.top,
+                            input.border_widths.z,
+                            input.border_widths.x,
                         ),
                         max(
-                            quad.border_widths.right,
-                            quad.border_widths.left,
+                            input.border_widths.y,
+                            input.border_widths.w,
                         )
                    );
 

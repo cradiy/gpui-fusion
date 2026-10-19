@@ -46,6 +46,13 @@ pub(in crate::wgpu_renderer) struct ViewportRenderer {
 }
 
 impl ViewportRenderer {
+    #[cfg_attr(
+        target_family = "wasm",
+        expect(
+            clippy::arc_with_non_send_sync,
+            reason = "The material image cache shares ownership through Arc on all platforms; WebGPU handles remain thread-local."
+        )
+    )]
     pub(in crate::wgpu_renderer) fn new(
         context: crate::WgpuContext,
         format: wgpu::TextureFormat,

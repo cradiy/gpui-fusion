@@ -1,7 +1,10 @@
-fn glass_sample(input: BackdropInput, offset: vec2<f32>, clarity: f32) -> vec3<f32> {
+fn glass_footprint(offset: vec2<f32>) -> f32 {
     let dx = vec2<f32>(1.0, 0.0) + dpdx(offset);
     let dy = vec2<f32>(0.0, 1.0) + dpdy(offset);
-    let footprint = max(length(dx), length(dy));
+    return max(length(dx), length(dy));
+}
+
+fn glass_sample(input: BackdropInput, offset: vec2<f32>, clarity: f32, footprint: f32) -> vec3<f32> {
     return mix(
         sample_blurred_backdrop(input, offset).rgb,
         sample_raw_backdrop(input, offset).rgb,
@@ -63,10 +66,16 @@ fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
     let displacement = -lens_direction * refraction * curvature;
     // Preserve detail in the lens edge while retaining the configured center blur.
     let clarity = mix(surface.w, 1.0, curvature * 0.9);
-    var color = glass_sample(input, displacement, clarity);
+    let red_displacement = displacement * (1.0 + surface.z);
+    let blue_displacement = displacement * (1.0 - surface.z);
+    // Derivatives run uniformly, with each dispersed channel's own sampling footprint.
+    let footprint = glass_footprint(displacement);
+    let red_footprint = glass_footprint(red_displacement);
+    let blue_footprint = glass_footprint(blue_displacement);
+    var color = glass_sample(input, displacement, clarity, footprint);
     if (surface.z > 0.0) {
-        color.r = glass_sample(input, displacement * (1.0 + surface.z), clarity).r;
-        color.b = glass_sample(input, displacement * (1.0 - surface.z), clarity).b;
+        color.r = glass_sample(input, red_displacement, clarity, red_footprint).r;
+        color.b = glass_sample(input, blue_displacement, clarity, blue_footprint).b;
     }
 
     let luminance = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));

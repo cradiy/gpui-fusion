@@ -3,11 +3,8 @@ use gpui::{
     AnyElement, Context, EventEmitter, IntoElement, Pixels, Point, Render, Transformation, Window,
     div, point,
 };
-use std::{
-    collections::VecDeque,
-    rc::Rc,
-    time::{Duration, Instant},
-};
+use scheduler::Instant;
+use std::{collections::VecDeque, rc::Rc, time::Duration};
 
 /// Identifies one group of coordinated motion items.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

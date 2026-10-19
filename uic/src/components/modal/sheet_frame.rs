@@ -35,8 +35,10 @@ impl Element for SheetFrame {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, ()) {
-        let mut style = Style::default();
-        style.size = size(relative(1.).into(), relative(1.).into());
+        let style = Style {
+            size: size(relative(1.).into(), relative(1.).into()),
+            ..Default::default()
+        };
         (window.request_layout(style, [], cx), ())
     }
 

@@ -13,14 +13,9 @@ extern "C" {
     fn global_fetch(input: &web_sys::Request) -> Result<js_sys::Promise, JsValue>;
 }
 
+#[derive(Default)]
 pub struct FetchHttpClient {
     user_agent: Option<http_client::http::header::HeaderValue>,
-}
-
-impl Default for FetchHttpClient {
-    fn default() -> Self {
-        Self { user_agent: None }
-    }
 }
 
 #[cfg(feature = "multithreaded")]

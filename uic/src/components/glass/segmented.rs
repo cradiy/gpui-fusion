@@ -1,4 +1,5 @@
-use std::{cell::Cell, rc::Rc, time::Instant};
+use scheduler::Instant;
+use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     AnyElement, App, Axis, Bounds, BoxShadow, ElementId, FlexDirection, IntoElement, Pixels,

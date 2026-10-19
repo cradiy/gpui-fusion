@@ -197,6 +197,13 @@ impl WgpuScene3dRenderer {
         Self::new(WgpuContext::new_headless()?)
     }
 
+    #[cfg_attr(
+        target_family = "wasm",
+        expect(
+            clippy::arc_with_non_send_sync,
+            reason = "The cross-platform atlas interface requires Arc; WebGPU handles remain thread-local."
+        )
+    )]
     pub fn new(context: WgpuContext) -> Result<Self> {
         let device_capabilities = Scene3dDeviceCapabilities::query(&context);
         let capabilities = device_capabilities.rendering()?;

@@ -126,6 +126,13 @@ impl WgpuContext {
         })
     }
 
+    #[cfg_attr(
+        target_family = "wasm",
+        expect(
+            clippy::arc_with_non_send_sync,
+            reason = "Shared device identity uses Arc on all platforms; WebGPU handles remain thread-local."
+        )
+    )]
     pub fn from_external(
         instance: wgpu::Instance,
         adapter: wgpu::Adapter,
@@ -226,6 +233,10 @@ impl WgpuContext {
     }
 
     #[cfg(target_family = "wasm")]
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "Shared device identity uses Arc on all platforms; WebGPU handles remain thread-local."
+    )]
     pub async fn new_web() -> anyhow::Result<Self> {
         // Probe the raw JS result: wgpu 30.0.0 can wrap a null adapter as Ok.
         if !wgpu::util::is_browser_webgpu_supported().await {

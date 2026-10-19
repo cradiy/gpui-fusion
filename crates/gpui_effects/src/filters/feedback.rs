@@ -1,4 +1,5 @@
-use std::time::{Duration, Instant};
+use scheduler::Instant;
+use std::time::Duration;
 
 use gpui::{EffectHistoryId, EffectShader, IntoElement, SubtreeFeedbackPass};
 

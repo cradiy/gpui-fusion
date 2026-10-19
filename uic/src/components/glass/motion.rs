@@ -1,4 +1,5 @@
-use std::time::{Duration, Instant};
+use scheduler::Instant;
+use std::time::Duration;
 
 use gpui::{Bounds, Pixels, Point, point, px, size};
 

@@ -2,7 +2,8 @@ use gpui::{
     Context, EventEmitter, Pixels, Point, ScrollHandle, Subscription, TouchEvent, TouchId,
     TouchPhase, Window, px,
 };
-use std::time::{Duration, Instant};
+use scheduler::Instant;
+use std::time::Duration;
 
 const THRESHOLD: f32 = 64.;
 const HOLD: f32 = 48.;

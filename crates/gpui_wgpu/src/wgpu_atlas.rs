@@ -105,6 +105,13 @@ impl WgpuAtlas {
         )
     }
 
+    #[cfg_attr(
+        target_family = "wasm",
+        expect(
+            clippy::arc_with_non_send_sync,
+            reason = "Atlas resources share their context through Arc on all platforms; WebGPU handles remain thread-local."
+        )
+    )]
     pub fn from_context(context: &WgpuContext) -> Self {
         let atlas = Self::new(
             context.device.clone(),
@@ -163,6 +170,13 @@ impl WgpuAtlas {
 
     /// Handles device lost by clearing all textures and cached tiles.
     /// The atlas will lazily recreate textures as needed on subsequent frames.
+    #[cfg_attr(
+        target_family = "wasm",
+        expect(
+            clippy::arc_with_non_send_sync,
+            reason = "Atlas resources share their context through Arc on all platforms; WebGPU handles remain thread-local."
+        )
+    )]
     pub fn handle_device_lost(&self, context: &WgpuContext) {
         let mut lock = self.0.lock();
         lock.context = Some(Arc::new(context.clone()));

@@ -153,27 +153,30 @@ impl ModalLayer {
             .as_ref()
             .is_some_and(|motion| motion.value(now).1);
         let touching = self.sheet_surface_touch.is_some() || self.sheet_drag.is_some();
-        if !touching && !resizing && !self.closing && self.scroll_hold_rebound {
-            if let Some(scroll) = self.held_scroll.clone() {
-                let offset = scroll.offset();
-                let target = offset.y.clamp(-scroll.max_offset().y, px(0.)).as_f32();
-                if self.scroll_settle.is_none() && (offset.y.as_f32() - target).abs() > 0.1 {
-                    self.scroll_settle = Some(SheetMotion {
-                        from: offset.y.as_f32(),
-                        to: target,
-                        started: now,
-                        duration: Duration::from_millis(260),
-                    });
-                }
-                if let Some(motion) = &self.scroll_settle {
-                    let (y, moving) = motion.value(now);
-                    scroll.set_offset(point(offset.x, px(y)));
-                    if !moving {
-                        self.release_scroll_hold();
-                    }
-                } else {
+        if !touching
+            && !resizing
+            && !self.closing
+            && self.scroll_hold_rebound
+            && let Some(scroll) = self.held_scroll.clone()
+        {
+            let offset = scroll.offset();
+            let target = offset.y.clamp(-scroll.max_offset().y, px(0.)).as_f32();
+            if self.scroll_settle.is_none() && (offset.y.as_f32() - target).abs() > 0.1 {
+                self.scroll_settle = Some(SheetMotion {
+                    from: offset.y.as_f32(),
+                    to: target,
+                    started: now,
+                    duration: Duration::from_millis(260),
+                });
+            }
+            if let Some(motion) = &self.scroll_settle {
+                let (y, moving) = motion.value(now);
+                scroll.set_offset(point(offset.x, px(y)));
+                if !moving {
                     self.release_scroll_hold();
                 }
+            } else {
+                self.release_scroll_hold();
             }
         }
         if resizing {
@@ -230,10 +233,10 @@ impl ModalLayer {
         let mut extension = self.sheet_drag_expansion * gap - self.sheet_offset.as_f32();
         if gesture.route != GestureRoute::List && delta < 0. {
             let consumed = (-delta).min((gap - extension).max(0.));
-            if consumed > 0. {
-                if let Some(scroll) = &gesture.scroll {
-                    self.hold_scroll(scroll);
-                }
+            if consumed > 0.
+                && let Some(scroll) = &gesture.scroll
+            {
+                self.hold_scroll(scroll);
             }
             if consumed > 0. {
                 gesture.last_consumer = GestureRoute::Sheet;
@@ -446,25 +449,24 @@ impl ModalLayer {
                         && now.saturating_duration_since(gesture.sampled)
                             < Duration::from_millis(100)
                         && gesture.velocity.abs() > 120.
+                        && let Some(scroll) = gesture.scroll
                     {
-                        if let Some(scroll) = gesture.scroll {
-                            let available = if gesture.velocity < 0. {
-                                scroll.max_offset().y + scroll.offset().y > px(0.5)
-                            } else {
-                                scroll.offset().y < px(-0.5)
-                            };
-                            let at_full_height =
-                                (self.sheet_max_height - self.sheet_height).abs() < px(0.5);
-                            if available
-                                && gesture.last_consumer == GestureRoute::List
-                                && (gesture.route == GestureRoute::List || at_full_height)
-                            {
-                                self.scroll_motion = Some(ScrollMotion {
-                                    scroll,
-                                    velocity: gesture.velocity,
-                                    sampled: now,
-                                });
-                            }
+                        let available = if gesture.velocity < 0. {
+                            scroll.max_offset().y + scroll.offset().y > px(0.5)
+                        } else {
+                            scroll.offset().y < px(-0.5)
+                        };
+                        let at_full_height =
+                            (self.sheet_max_height - self.sheet_height).abs() < px(0.5);
+                        if available
+                            && gesture.last_consumer == GestureRoute::List
+                            && (gesture.route == GestureRoute::List || at_full_height)
+                        {
+                            self.scroll_motion = Some(ScrollMotion {
+                                scroll,
+                                velocity: gesture.velocity,
+                                sampled: now,
+                            });
                         }
                     }
                     self.release_edge(now);

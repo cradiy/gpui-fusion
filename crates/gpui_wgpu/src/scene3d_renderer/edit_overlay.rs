@@ -38,6 +38,13 @@ pub(crate) struct EditOverlay {
 
 impl EditOverlay {
     #[allow(clippy::too_many_arguments)]
+    #[cfg_attr(
+        target_family = "wasm",
+        expect(
+            clippy::arc_with_non_send_sync,
+            reason = "The cross-platform picking interface shares frames through Arc; WebGPU handles remain thread-local."
+        )
+    )]
     pub(crate) fn new(
         context: &WgpuContext,
         capabilities: Scene3dCapabilities,

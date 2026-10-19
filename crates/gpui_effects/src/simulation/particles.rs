@@ -1,7 +1,5 @@
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use scheduler::Instant;
+use std::{sync::Arc, time::Duration};
 
 use gpui::{Canvas, EffectHistoryId, ParticleFrame, canvas};
 pub use gpui::{ParticleMask, ParticlePhysics, ParticleSpawn};

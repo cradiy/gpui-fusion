@@ -1,4 +1,5 @@
-use std::{cell::Cell, rc::Rc, time::Instant};
+use scheduler::Instant;
+use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     Along, App, Axis, Bounds, DispatchPhase, Entity, HitboxBehavior, HitboxId, IntoElement,

@@ -1,9 +1,7 @@
 use gpui::{Canvas, EffectHistoryId, FluidFrame, canvas};
 pub use gpui::{FluidOptions, FluidSplat};
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use scheduler::Instant;
+use std::{sync::Arc, time::Duration};
 
 /// Persistent input queue and simulation clock for a GPU fluid surface.
 pub struct Fluid {

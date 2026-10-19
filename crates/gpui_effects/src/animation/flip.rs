@@ -6,7 +6,8 @@ use gpui::{
     Bounds, Context, EffectShader, EffectUniforms, EventEmitter, ImageSource, IntoElement,
     MouseButton, ObjectFit, Pixels, Render, Rgba, Window, canvas, div, img, px,
 };
-use std::{cell::Cell, ops::Range, rc::Rc, time::Instant};
+use scheduler::Instant;
+use std::{cell::Cell, ops::Range, rc::Rc};
 
 /// Uniform slot containing `[progress, pointer_y, edge, curl_radius]`.
 pub const FLIP_INTERACTION_SLOT: usize = 0;

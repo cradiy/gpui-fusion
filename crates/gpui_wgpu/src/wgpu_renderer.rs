@@ -336,6 +336,13 @@ impl WgpuRenderer {
             .expect("GPU resources not available")
     }
 
+    #[cfg_attr(
+        target_family = "wasm",
+        expect(
+            clippy::arc_with_non_send_sync,
+            reason = "The cross-platform atlas interface requires Arc; WebGPU handles remain thread-local."
+        )
+    )]
     pub fn new_external(
         context: &WgpuContext,
         config: WgpuExternalRendererConfig,
@@ -473,6 +480,10 @@ impl WgpuRenderer {
     }
 
     #[cfg(target_family = "wasm")]
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "The cross-platform atlas interface requires Arc; WebGPU handles remain thread-local."
+    )]
     pub fn new_from_canvas(
         context: &WgpuContext,
         canvas: &web_sys::HtmlCanvasElement,
@@ -721,7 +732,10 @@ impl WgpuRenderer {
             let error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
             let sink = error.clone();
             device.on_uncaptured_error(Arc::new(move |error| {
-                *sink.lock().unwrap() = Some(error.to_string());
+                log::error!("uncaptured GPU error: {error}");
+                sink.lock()
+                    .unwrap()
+                    .get_or_insert_with(|| error.to_string());
             }));
             error
         });
@@ -4758,7 +4772,9 @@ impl WgpuRenderer {
             let blur_scissor = (
                 scissor_x,
                 scissor_y,
-                (((right - left) * 0.5).ceil() as u32).min(blur_width - scissor_x).max(1),
+                (((right - left) * 0.5).ceil() as u32)
+                    .min(blur_width - scissor_x)
+                    .max(1),
                 (((bottom - top) * 0.5).ceil() as u32)
                     .min(blur_height - scissor_y)
                     .max(1),

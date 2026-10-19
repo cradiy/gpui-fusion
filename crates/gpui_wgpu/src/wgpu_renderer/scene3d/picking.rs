@@ -70,6 +70,13 @@ impl PickRenderer {
         }
     }
 
+    #[cfg_attr(
+        target_family = "wasm",
+        expect(
+            clippy::arc_with_non_send_sync,
+            reason = "The cross-platform picking interface shares frames through Arc; WebGPU handles remain thread-local."
+        )
+    )]
     pub(super) fn prepare(
         &mut self,
         scene: &Scene,

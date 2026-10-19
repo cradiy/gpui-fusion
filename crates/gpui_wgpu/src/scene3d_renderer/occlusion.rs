@@ -168,6 +168,13 @@ fn sources(frame: &Scene3dFrame) -> Result<Vec<Arc<Scene3dFrame>>> {
 
 impl OcclusionPasses {
     #[allow(clippy::too_many_arguments)]
+    #[cfg_attr(
+        target_family = "wasm",
+        expect(
+            clippy::arc_with_non_send_sync,
+            reason = "The cross-platform picking interface shares frames through Arc; WebGPU handles remain thread-local."
+        )
+    )]
     pub(crate) fn prepare(
         context: &WgpuContext,
         capabilities: Scene3dCapabilities,

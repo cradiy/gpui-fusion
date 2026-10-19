@@ -4717,24 +4717,64 @@ impl WgpuRenderer {
             self.surface_config.width.div_ceil(2) as f32,
             self.surface_config.height.div_ceil(2) as f32,
         ];
-        let extent = wgpu::Extent3d {
-            width: self.surface_config.width,
-            height: self.surface_config.height,
-            depth_or_array_layers: 1,
-        };
-
         for backdrop in backdrops {
+            // Blurring the full screen for a card that covers a fraction of it wastes work
+            // proportional to the viewport rather than the card. A frosted panel is
+            // typically under 10% of the screen, so the copy and both blur passes only
+            // need to touch the panel plus enough margin for the kernel to reach.
+            //
+            // The blur shaders sample with viewport-normalised coordinates, so limiting
+            // the written region does not change the UV mapping: pixels inside the region
+            // read exactly the texels this frame copied.
+            let padding = backdrop.blur_radius.0.abs().max(0.0) * 2.0 + 2.0;
+            let left = (backdrop.bounds.origin.x.0 - padding).floor().max(0.0);
+            let top = (backdrop.bounds.origin.y.0 - padding).floor().max(0.0);
+            let right = (backdrop.bounds.origin.x.0 + backdrop.bounds.size.width.0 + padding)
+                .ceil()
+                .min(self.surface_config.width as f32);
+            let bottom = (backdrop.bounds.origin.y.0 + backdrop.bounds.size.height.0 + padding)
+                .ceil()
+                .min(self.surface_config.height as f32);
+            if right <= left || bottom <= top {
+                continue;
+            }
+            let extent = wgpu::Extent3d {
+                width: (right - left) as u32,
+                height: (bottom - top) as u32,
+                depth_or_array_layers: 1,
+            };
+            let origin = wgpu::Origin3d {
+                x: left as u32,
+                y: top as u32,
+                z: 0,
+            };
+            // Blur targets are half resolution, so the scissor is halved as well and then
+            // clamped to the target: a panel touching the screen edge would otherwise
+            // produce a rectangle that runs past the attachment.
+            let blur_width = self.surface_config.width.div_ceil(2);
+            let blur_height = self.surface_config.height.div_ceil(2);
+            let scissor_x = ((left * 0.5).floor() as u32).min(blur_width.saturating_sub(1));
+            let scissor_y = ((top * 0.5).floor() as u32).min(blur_height.saturating_sub(1));
+            let blur_scissor = (
+                scissor_x,
+                scissor_y,
+                (((right - left) * 0.5).ceil() as u32).min(blur_width - scissor_x).max(1),
+                (((bottom - top) * 0.5).ceil() as u32)
+                    .min(blur_height - scissor_y)
+                    .max(1),
+            );
+
             encoder.copy_texture_to_texture(
                 wgpu::TexelCopyTextureInfo {
                     texture: frame_texture,
                     mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
+                    origin,
                     aspect: wgpu::TextureAspect::All,
                 },
                 wgpu::TexelCopyTextureInfo {
                     texture: source_texture,
                     mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
+                    origin,
                     aspect: wgpu::TextureAspect::All,
                 },
                 extent,
@@ -4761,6 +4801,12 @@ impl WgpuRenderer {
                     depth_stencil_attachment: None,
                     ..Default::default()
                 });
+                pass.set_scissor_rect(
+                    blur_scissor.0,
+                    blur_scissor.1,
+                    blur_scissor.2,
+                    blur_scissor.3,
+                );
                 if !self.draw_instances_with_texture(
                     bytemuck::bytes_of(&horizontal),
                     1,
@@ -4794,6 +4840,12 @@ impl WgpuRenderer {
                     depth_stencil_attachment: None,
                     ..Default::default()
                 });
+                pass.set_scissor_rect(
+                    blur_scissor.0,
+                    blur_scissor.1,
+                    blur_scissor.2,
+                    blur_scissor.3,
+                );
                 if !self.draw_instances_with_texture(
                     bytemuck::bytes_of(&vertical),
                     1,

@@ -51,6 +51,7 @@ pub struct RenderImageParams {
 
 /// A cached and processed image, in BGRA format
 pub struct RenderImage {
+    loop_count: crate::ImageLoopCount,
     /// The ID associated with this image
     pub id: ImageId,
     /// The scale factor of this image on render.
@@ -73,6 +74,7 @@ impl RenderImage {
     pub fn new(data: impl Into<SmallVec<[Frame; 1]>>) -> Self {
         Self {
             id: ImageId::allocate(),
+            loop_count: crate::ImageLoopCount::Infinite,
             scale_factor: 1.0,
             data: Arc::new(data.into()),
             animation: None,
@@ -85,8 +87,23 @@ impl RenderImage {
         self.animation.as_ref()
     }
 
+    /// Sets the playback limit for resident frames. Custom images loop infinitely
+    /// unless configured otherwise. Encoded animations use their source metadata.
+    pub fn with_loop_count(mut self, loop_count: crate::ImageLoopCount) -> Self {
+        self.loop_count = loop_count;
+        self
+    }
+
+    /// Number of complete plays before stopping on the last frame.
+    pub fn loop_count(&self) -> crate::ImageLoopCount {
+        self.animation
+            .as_ref()
+            .map_or(self.loop_count, |source| source.loop_count())
+    }
+
     pub(crate) fn with_animation(&self, animation: Arc<crate::ImageAnimation>) -> Self {
         Self {
+            loop_count: self.loop_count,
             id: self.id,
             scale_factor: self.scale_factor,
             data: self.data.clone(),

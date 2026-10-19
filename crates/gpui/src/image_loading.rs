@@ -10,8 +10,9 @@ use std::{io::Cursor, sync::Arc};
 mod animation;
 mod color_profile;
 mod playback;
-pub use animation::{ImageAnimation, ImageAnimationOptions};
+pub use animation::{ImageAnimation, ImageAnimationOptions, ImageLoopCount};
 pub(crate) use playback::AnimationPlayback;
+pub(crate) use playback::PendingFrame;
 
 pub(crate) fn load_image(
     bytes: &[u8],
@@ -181,7 +182,10 @@ pub(crate) fn decode_image(
             )?
         }
     };
-    Ok(Arc::new(RenderImage::new(frames)))
+    let loop_count = animation::encoded_loop_count(bytes, format, limits)?;
+    Ok(Arc::new(
+        RenderImage::new(frames).with_loop_count(loop_count),
+    ))
 }
 
 fn single_frame(

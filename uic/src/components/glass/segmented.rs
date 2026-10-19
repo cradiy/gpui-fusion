@@ -331,7 +331,8 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for GlassSegmentedControl<T> {
             }
             if reduced {
                 window.paint_quad(
-                    fill(selected, fallback.blend(optics.tint)).corner_radii(selected_corners),
+                    fill(selected, optics.tint.composite_over(fallback))
+                        .corner_radii(selected_corners),
                 );
             } else {
                 lens.set(Some((selected, selected_corners, optics)));

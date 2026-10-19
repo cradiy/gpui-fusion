@@ -253,10 +253,50 @@ impl DerefMut for Stateful<Img> {
 
 /// The image state between frames
 struct ImgState {
+    image_id: Option<crate::ImageId>,
+    completed_plays: u32,
+    finished: bool,
+    wakeup: Option<(Instant, Task<()>)>,
     animation: Option<crate::image_loading::AnimationPlayback>,
     frame_index: usize,
     last_frame_time: Option<Instant>,
     started_loading: Option<(Instant, Task<()>)>,
+}
+
+impl ImgState {
+    fn schedule_wakeup(
+        &mut self,
+        wakeup: Option<(Instant, Option<crate::image_loading::PendingFrame>)>,
+        window: &Window,
+        cx: &App,
+    ) {
+        let Some((deadline, pending)) = wakeup else {
+            self.wakeup = None;
+            return;
+        };
+        if self
+            .wakeup
+            .as_ref()
+            .is_some_and(|(existing, _)| *existing == deadline)
+        {
+            return;
+        }
+        let view = window.current_view();
+        let task = window.spawn(cx, async move |cx| {
+            cx.background_executor()
+                .timer(deadline.saturating_duration_since(Instant::now()))
+                .await;
+            if let Some(pending) = pending {
+                let _ = pending.await;
+            }
+            let _ = cx.update(|window, cx| {
+                if window.is_window_active() {
+                    cx.notify(view);
+                }
+            });
+        });
+        self.wakeup = Some((deadline, task));
+    }
 }
 
 /// The image layout state between frames
@@ -294,6 +334,10 @@ impl Element for Img {
         window.with_optional_element_state(global_id, |state, window| {
             let mut state = state.map(|state| {
                 state.unwrap_or(ImgState {
+                    image_id: None,
+                    completed_plays: 0,
+                    finished: false,
+                    wakeup: None,
                     animation: None,
                     frame_index: 0,
                     last_frame_time: None,
@@ -323,6 +367,15 @@ impl Element for Img {
                         .map(|result| {
                             result.and_then(|data| {
                                 if let Some(state) = &mut state {
+                                    if state.image_id != Some(data.id) {
+                                        state.image_id = Some(data.id);
+                                        state.animation = None;
+                                        state.frame_index = 0;
+                                        state.last_frame_time = None;
+                                        state.completed_plays = 0;
+                                        state.finished = false;
+                                        state.wakeup = None;
+                                    }
                                     if let Some(animation) = data.animation() {
                                         if state
                                             .animation
@@ -341,10 +394,9 @@ impl Element for Img {
                                             cx.background_executor(),
                                         );
                                         layout_state.animation_frame = Some(frame.clone());
+                                        let wakeup = state.animation.as_ref().unwrap().wakeup();
+                                        state.schedule_wakeup(wakeup, window, cx);
                                         let frame = frame?;
-                                        if window.is_window_active() {
-                                            window.request_animation_frame();
-                                        }
                                         return Ok(frame);
                                     }
                                     state.animation = None;
@@ -360,18 +412,27 @@ impl Element for Img {
                             if let Some(state) = &mut state {
                                 state.frame_index = state.frame_index.min(max_frame_index);
                                 if frame_count > 1 {
-                                    if window.is_window_active() {
+                                    if window.is_window_active() && !state.finished {
                                         let current_time = Instant::now();
                                         if let Some(last_frame_time) = state.last_frame_time {
                                             let elapsed = current_time - last_frame_time;
                                             let frame_duration =
-                                                Duration::from(data.delay(state.frame_index));
+                                                Duration::from(data.delay(state.frame_index))
+                                                    .max(Duration::from_millis(10));
 
                                             if elapsed >= frame_duration {
-                                                state.frame_index =
-                                                    (state.frame_index + 1) % frame_count;
-                                                state.last_frame_time =
-                                                    Some(current_time - (elapsed - frame_duration));
+                                                if state.frame_index + 1 == frame_count {
+                                                    state.completed_plays =
+                                                        state.completed_plays.saturating_add(1);
+                                                    state.finished = data
+                                                        .loop_count()
+                                                        .finished_after(state.completed_plays);
+                                                }
+                                                if !state.finished {
+                                                    state.frame_index =
+                                                        (state.frame_index + 1) % frame_count;
+                                                }
+                                                state.last_frame_time = Some(current_time);
                                             }
                                         } else {
                                             state.last_frame_time = Some(current_time);
@@ -381,6 +442,20 @@ impl Element for Img {
                                     }
                                 } else {
                                     state.last_frame_time = None;
+                                }
+                                if state.animation.is_none() {
+                                    let wakeup = state
+                                        .last_frame_time
+                                        .filter(|_| !state.finished && window.is_window_active())
+                                        .map(|started| {
+                                            (
+                                                started
+                                                    + Duration::from(data.delay(state.frame_index))
+                                                        .max(Duration::from_millis(10)),
+                                                None,
+                                            )
+                                        });
+                                    state.schedule_wakeup(wakeup, window, cx);
                                 }
                                 state.started_loading = None;
                                 frame_index = state.frame_index;
@@ -416,15 +491,11 @@ impl Element for Img {
                                     _ => Length::Definite(image_size.height.into()),
                                 };
                             }
-
-                            if global_id.is_some()
-                                && data.frame_count() > 1
-                                && window.is_window_active()
-                            {
-                                window.request_animation_frame();
-                            }
                         }
                         Some(_err) => {
+                            if let Some(state) = &mut state {
+                                state.wakeup = None;
+                            }
                             if layout_state.animation_frame.is_none()
                                 && let Some(state) = &mut state
                             {
@@ -441,6 +512,7 @@ impl Element for Img {
                         }
                         None => {
                             if let Some(state) = &mut state {
+                                state.wakeup = None;
                                 state.animation = None;
                                 if let Some((started_loading, _)) = state.started_loading {
                                     if started_loading.elapsed() > LOADING_DELAY
@@ -491,7 +563,27 @@ impl Element for Img {
             bounds.size,
             window,
             cx,
-            |_, _, hitbox, window, cx| {
+            |style, _, hitbox, window, cx| {
+                if style.visibility == crate::Visibility::Hidden
+                    || !bounds.intersects(&window.content_mask().bounds)
+                {
+                    window.with_optional_element_state::<ImgState, _>(global_id, |state, _| {
+                        let state = state.map(|state| {
+                            let mut state = state.expect("image layout initializes state");
+                            state.wakeup = None;
+                            state.last_frame_time = None;
+                            if let Some(animation) = &mut state.animation {
+                                let _ = animation.update(
+                                    Instant::now(),
+                                    false,
+                                    cx.background_executor(),
+                                );
+                            }
+                            state
+                        });
+                        ((), state)
+                    });
+                }
                 if let Some(replacement) = &mut request_layout.replacement {
                     replacement.prepaint(window, cx);
                 }
@@ -820,6 +912,109 @@ mod tests {
     use smallvec::SmallVec;
 
     const TEST_IMG_ID: &str = "test-img";
+
+    #[gpui::test]
+    fn animation_wakes_at_deadline_and_cancels_outside_viewport_or_when_replaced(
+        cx: &mut TestAppContext,
+    ) {
+        use crate::{Context, Render, VisualTestContext};
+        use std::{cell::Cell, rc::Rc};
+        struct View(Arc<RenderImage>, bool);
+        impl Render for View {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().size_full().overflow_hidden().child(
+                    img(self.0.clone())
+                        .id(TEST_IMG_ID)
+                        .size(px(24.))
+                        .absolute()
+                        .left(px(if self.1 { 160. } else { 0. })),
+                )
+            }
+        }
+        let frame = Frame::from_parts(
+            ImageBuffer::from_pixel(2, 2, Rgba([30, 90, 180, 255])),
+            0,
+            0,
+            image::Delay::from_numer_denom_ms(240, 1),
+        );
+        let image = Arc::new(RenderImage::new(vec![frame.clone(), frame.clone()]));
+        let handle = cx.open_window(size(px(80.), px(80.)), |_, _| View(image.clone(), false));
+        let view = handle.update(cx, |_, _, cx| cx.entity()).unwrap();
+        let mut visual = VisualTestContext::from_window(handle.into(), cx);
+        visual.update(|window, cx| {
+            window.activate_window();
+            window.draw(cx).clear();
+        });
+        visual.run_until_parked();
+        let notifications = Rc::new(Cell::new(0));
+        visual.cx.update(|cx| {
+            cx.observe(&view, {
+                let notifications = notifications.clone();
+                move |_, _| notifications.set(notifications.get() + 1)
+            })
+            .detach();
+        });
+        visual
+            .cx
+            .executor()
+            .advance_clock(Duration::from_millis(100));
+        visual.run_until_parked();
+        assert_eq!(notifications.get(), 0);
+        visual
+            .cx
+            .executor()
+            .advance_clock(Duration::from_millis(200));
+        visual.run_until_parked();
+        assert_eq!(notifications.get(), 1);
+        visual.cx.executor().advance_clock(Duration::from_secs(2));
+        visual.run_until_parked();
+        assert_eq!(notifications.get(), 1);
+
+        handle
+            .update(&mut visual.cx, |view, _, cx| {
+                view.0 = Arc::new(RenderImage::new(vec![frame.clone(), frame.clone()]));
+                cx.notify();
+            })
+            .unwrap();
+        visual.update(|window, cx| window.draw(cx).clear());
+        visual.run_until_parked();
+        handle
+            .update(&mut visual.cx, |view, _, cx| {
+                view.1 = true;
+                cx.notify();
+            })
+            .unwrap();
+        visual.update(|window, cx| window.draw(cx).clear());
+        let before = notifications.get();
+        visual.cx.executor().advance_clock(Duration::from_secs(2));
+        visual.run_until_parked();
+        assert_eq!(notifications.get(), before);
+
+        handle
+            .update(&mut visual.cx, |view, _, cx| {
+                view.0 = Arc::new(RenderImage::new(vec![frame.clone(), frame.clone()]));
+                view.1 = false;
+                cx.notify();
+            })
+            .unwrap();
+        visual.update(|window, cx| window.draw(cx).clear());
+        visual.run_until_parked();
+        handle
+            .update(&mut visual.cx, |view, _, cx| {
+                view.0 = Arc::new(RenderImage::new(vec![Frame::new(ImageBuffer::from_pixel(
+                    2,
+                    2,
+                    Rgba([0; 4]),
+                ))]));
+                cx.notify();
+            })
+            .unwrap();
+        visual.update(|window, cx| window.draw(cx).clear());
+        let before = notifications.get();
+        visual.cx.executor().advance_clock(Duration::from_secs(2));
+        visual.run_until_parked();
+        assert_eq!(notifications.get(), before);
+    }
 
     fn test_image(frame_count: usize) -> Arc<RenderImage> {
         let frame = Frame::new(ImageBuffer::from_pixel(1, 1, Rgba([0, 0, 0, 0])));

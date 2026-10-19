@@ -131,7 +131,7 @@ pub use gpui_macros::{
     AppContext, IntoElement, Render, VisualContext, bench, property_test, register_action, test,
 };
 pub use gpui_notifications;
-pub use image_loading::{ImageAnimation, ImageAnimationOptions, ImageLoadLimits};
+pub use image_loading::{ImageAnimation, ImageAnimationOptions, ImageLoadLimits, ImageLoopCount};
 pub use particle_transition::*;
 pub use particles::*;
 pub use pbr3d::*;

@@ -540,7 +540,7 @@ impl TextStyle {
         }
 
         if let Some(color) = style.color {
-            self.color = self.color.blend(color);
+            self.color = color.composite_over(self.color);
         }
 
         if let Some(factor) = style.fade_out {
@@ -992,7 +992,7 @@ impl HighlightStyle {
                 .color
                 .map(|other_color| {
                     if let Some(color) = self.color {
-                        color.blend(other_color)
+                        other_color.composite_over(color)
                     } else {
                         other_color
                     }
@@ -1400,6 +1400,26 @@ mod tests {
     use super::*;
 
     use util_macros::perf;
+
+    #[test]
+    fn highlight_color_remains_visible_over_transparent_text() {
+        let overlay = HighlightStyle {
+            color: Some(blue().alpha(0.6)),
+            ..Default::default()
+        };
+        let text = TextStyle {
+            color: red().alpha(0.),
+            ..Default::default()
+        }
+        .highlight(overlay);
+        assert_eq!(text.color, overlay.color.unwrap());
+        let combined = HighlightStyle {
+            color: Some(red().alpha(0.)),
+            ..Default::default()
+        }
+        .highlight(overlay);
+        assert_eq!(combined.color, overlay.color);
+    }
 
     #[test]
     fn resolves_individual_border_colors_against_uniform_fallback() {

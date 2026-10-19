@@ -4,6 +4,22 @@ use futures::lock::Mutex;
 use image::{Delay, Frame, ImageFormat, RgbaImage};
 use std::{collections::VecDeque, io::Cursor, sync::Arc};
 
+/// Number of complete animation plays, including the initial play.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ImageLoopCount {
+    /// Repeat without a playback limit.
+    #[default]
+    Infinite,
+    /// Stop on the last frame after this many complete plays.
+    Finite(std::num::NonZeroU32),
+}
+
+impl ImageLoopCount {
+    pub(crate) fn finished_after(self, completed: u32) -> bool {
+        matches!(self, Self::Finite(count) if completed >= count.get())
+    }
+}
+
 /// Cache settings for animations loaded by GPUI's built-in image loaders.
 /// Install as an application global before loading images.
 #[derive(Clone, Copy, Debug)]
@@ -33,6 +49,7 @@ pub struct ImageAnimation {
     format: ImageFormat,
     limits: ImageLoadLimits,
     frame_count: usize,
+    loop_count: ImageLoopCount,
     capacity: usize,
     ids: Vec<ImageId>,
     color_transform: Option<RgbaTransform>,
@@ -52,6 +69,11 @@ impl ImageAnimation {
     /// Number of frames in one complete animation cycle.
     pub fn frame_count(&self) -> usize {
         self.frame_count
+    }
+
+    /// Playback limit from the encoded file, expressed as complete plays.
+    pub fn loop_count(&self) -> ImageLoopCount {
+        self.loop_count
     }
 
     /// Decodes or retrieves an immutable single-frame image without doing work
@@ -128,7 +150,7 @@ pub(super) fn load(
     limits: ImageLoadLimits,
     options: ImageAnimationOptions,
 ) -> Result<Arc<RenderImage>, ImageCacheError> {
-    let (count, frame_bytes, color_transform) = match format {
+    let (count, frame_bytes, color_transform, loop_count) = match format {
         ImageFormat::Gif => {
             let mut options = gif_options(limits);
             options.skip_frame_decoding(true);
@@ -142,7 +164,7 @@ pub(super) fn load(
                 count += 1;
                 ImageLoadLimits::check("frame count", count as u64, limits.max_frames.into())?;
             }
-            (count, frame_bytes, None)
+            (count, frame_bytes, None, gif_loop_count(decoder.repeat()))
         }
         ImageFormat::WebP => {
             let mut decoder =
@@ -155,7 +177,12 @@ pub(super) fn load(
                 .map_err(codec_error)?
                 .as_deref()
                 .and_then(RgbaTransform::new);
-            (decoder.num_frames().max(1) as usize, frame_bytes, transform)
+            (
+                decoder.num_frames().max(1) as usize,
+                frame_bytes,
+                transform,
+                webp_loop_count(decoder.loop_count()),
+            )
         }
         _ => unreachable!(),
     };
@@ -182,7 +209,7 @@ pub(super) fn load(
         transform.apply(first.buffer_mut())?;
     }
     convert_to_bgra(&mut first);
-    let poster = Arc::new(RenderImage::new(vec![first]));
+    let poster = Arc::new(RenderImage::new(vec![first]).with_loop_count(loop_count));
     if count == 1 {
         return Ok(poster);
     }
@@ -197,6 +224,7 @@ pub(super) fn load(
         format,
         limits,
         frame_count: count,
+        loop_count,
         capacity,
         ids,
         color_transform,
@@ -211,6 +239,44 @@ pub(super) fn load(
 
 fn codec_error(error: impl std::error::Error + Send + Sync + 'static) -> ImageCacheError {
     anyhow::Error::new(error).into()
+}
+
+fn gif_loop_count(repeat: gif::Repeat) -> ImageLoopCount {
+    match repeat {
+        gif::Repeat::Infinite => ImageLoopCount::Infinite,
+        gif::Repeat::Finite(repeats) => {
+            ImageLoopCount::Finite(std::num::NonZeroU32::new(u32::from(repeats) + 1).unwrap())
+        }
+    }
+}
+
+fn webp_loop_count(count: image_webp::LoopCount) -> ImageLoopCount {
+    match count {
+        image_webp::LoopCount::Forever => ImageLoopCount::Infinite,
+        image_webp::LoopCount::Times(count) => ImageLoopCount::Finite(count.into()),
+    }
+}
+
+pub(super) fn encoded_loop_count(
+    bytes: &[u8],
+    format: ImageFormat,
+    limits: ImageLoadLimits,
+) -> Result<ImageLoopCount, ImageCacheError> {
+    match format {
+        ImageFormat::Gif => {
+            let mut options = gif_options(limits);
+            options.skip_frame_decoding(true);
+            let mut decoder = options.read_info(Cursor::new(bytes)).map_err(codec_error)?;
+            while decoder.next_frame_info().map_err(codec_error)?.is_some() {}
+            Ok(gif_loop_count(decoder.repeat()))
+        }
+        ImageFormat::WebP => Ok(webp_loop_count(
+            image_webp::WebPDecoder::new(Cursor::new(bytes))
+                .map_err(codec_error)?
+                .loop_count(),
+        )),
+        _ => Ok(ImageLoopCount::Infinite),
+    }
 }
 
 fn gif_options(limits: ImageLoadLimits) -> gif::DecodeOptions {

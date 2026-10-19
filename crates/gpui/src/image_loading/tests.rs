@@ -866,6 +866,100 @@ fn animation_playback_keeps_current_frame_until_ready(cx: &mut TestAppContext) {
     );
 }
 
+#[crate::test]
+fn animation_loop_metadata_stops_playback_on_the_final_frame(cx: &mut TestAppContext) {
+    let mut repeated = Vec::new();
+    {
+        let mut encoder = GifEncoder::new(&mut repeated);
+        encoder
+            .set_repeat(image::codecs::gif::Repeat::Finite(2))
+            .unwrap();
+        encoder.encode_frames((0..3).map(|_| frame())).unwrap();
+    }
+    let mut finite_webp = webp(3);
+    let anim = finite_webp
+        .windows(4)
+        .position(|tag| tag == b"ANIM")
+        .unwrap();
+    finite_webp[anim + 12..anim + 14].copy_from_slice(&2u16.to_le_bytes());
+    for (bytes, plays) in [(gif(3), 1), (repeated, 3), (finite_webp, 2)] {
+        let poster = load_image(
+            &bytes,
+            image::guess_format(&bytes).ok(),
+            &renderer(),
+            ImageLoadLimits::default(),
+            ImageAnimationOptions::default(),
+        )
+        .unwrap();
+        let source = poster.animation().unwrap().clone();
+        let expected = ImageLoopCount::Finite(std::num::NonZeroU32::new(plays).unwrap());
+        assert_eq!(source.loop_count(), expected);
+        assert_eq!(
+            decode(&bytes, ImageLoadLimits::default())
+                .unwrap()
+                .loop_count(),
+            expected
+        );
+        let mut player = AnimationPlayback::new(poster, source.clone());
+        let start = scheduler::Instant::now();
+        let executor = cx.background_executor.clone();
+        for index in 0..plays * 3 {
+            let now = start + std::time::Duration::from_millis(u64::from(index) * 20);
+            let image = player.update(now, true, &executor).unwrap();
+            cx.run_until_parked();
+            assert_eq!(image.id, source.frame_ids()[index as usize % 3]);
+            assert!(player.wakeup().is_some());
+        }
+        let ended = start + std::time::Duration::from_millis(u64::from(plays) * 60);
+        let last = player.update(ended, true, &executor).unwrap();
+        assert_eq!(last.id, source.frame_ids()[2]);
+        assert!(player.wakeup().is_none());
+        assert_eq!(
+            player
+                .update(ended + std::time::Duration::from_secs(9), true, &executor)
+                .unwrap()
+                .id,
+            last.id
+        );
+        assert!(player.wakeup().is_none());
+    }
+}
+
+#[crate::test]
+fn infinite_animation_repeats_and_waits_for_its_deadline(cx: &mut TestAppContext) {
+    let bytes = webp(3);
+    let poster = load_image(
+        &bytes,
+        Some(ImageFormat::WebP),
+        &renderer(),
+        ImageLoadLimits::default(),
+        ImageAnimationOptions::default(),
+    )
+    .unwrap();
+    let source = poster.animation().unwrap().clone();
+    assert_eq!(source.loop_count(), ImageLoopCount::Infinite);
+    let mut player = AnimationPlayback::new(poster, source.clone());
+    let start = scheduler::Instant::now();
+    let executor = cx.background_executor.clone();
+    for index in 0..10 {
+        let now = start + std::time::Duration::from_millis(index * 20);
+        let image = player.update(now, true, &executor).unwrap();
+        cx.run_until_parked();
+        assert_eq!(image.id, source.frame_ids()[index as usize % 3]);
+        assert_eq!(
+            player.wakeup().unwrap().0,
+            now + std::time::Duration::from_millis(20)
+        );
+        assert_eq!(
+            player
+                .update(now + std::time::Duration::from_millis(7), true, &executor)
+                .unwrap()
+                .id,
+            image.id
+        );
+    }
+}
+
 #[test]
 fn incremental_loading_checks_metadata_and_cache_budgets() {
     for bytes in [gif(3), webp(3)] {

@@ -58,6 +58,36 @@ RGB conversion; their CMYK profiles are not applied to those RGB samples.
 Output is 8-bit; wide-gamut display output and HDR tone mapping are not supported
 by this conversion.
 
+### Animated images
+
+Give each animated `img` a stable element ID to preserve its playback state.
+Built-in GIF and WebP loading decodes frames in the background and retains a
+bounded cache configured with `ImageAnimationOptions`.
+
+Animations honor the file's loop metadata and stop on the last frame after its
+delay. A GIF without a loop extension plays once; a GIF repetition count adds
+repeats after the initial play, while a WebP loop count includes the initial
+play. `ImageLoopCount::Finite` always counts complete plays. Custom resident
+frames created with `RenderImage::new` repeat infinitely by default; use
+`with_loop_count` to set a finite limit before sharing the image.
+
+Playback wakes the owning view when the next frame is due and decoded, rather
+than requesting display-rate updates. Frame delays have a minimum of 10 ms.
+Inactive windows and images clipped out of their viewport pause playback;
+resuming starts the current frame's delay again. Replacing the image cancels its
+scheduled wakeup and starts the replacement at its first frame.
+
+### Color compositing
+
+Use `foreground.composite_over(background)` on `Rgba` or `Hsla` to combine
+straight-alpha colors with source-over semantics. This accounts for both
+colors' alpha and does not change the RGB color space. Text highlight layers
+use this compositing operation.
+
+`background.blend(tint)` instead interpolates RGB using the tint's alpha and
+preserves the background alpha, except for an opaque tint, which replaces it.
+Use it when preserving that tinting behavior is intentional.
+
 ### File clipboard
 
 Linux applications can exchange local file lists and copy/cut intent with file

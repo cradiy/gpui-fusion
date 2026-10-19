@@ -60,6 +60,7 @@ impl std::fmt::Debug for ListState {
 }
 
 struct StateInner {
+    uniform_height_hint: Option<Pixels>,
     last_layout_bounds: Option<Bounds<Pixels>>,
     last_padding: Option<Edges<Pixels>>,
     items: SumTree<ListItem>,
@@ -313,6 +314,7 @@ impl ListState {
     /// that the list doesn't flicker or pop in when scrolling.
     pub fn new(item_count: usize, alignment: ListAlignment, overdraw: Pixels) -> Self {
         let this = Self(Rc::new(RefCell::new(StateInner {
+            uniform_height_hint: None,
             last_layout_bounds: None,
             last_padding: None,
             items: SumTree::default(),
@@ -344,6 +346,8 @@ impl ListState {
     /// As items are actually rendered their real heights replace the hint, so the scrollbar
     /// converges to the exact size over time. This is a cheaper alternative to [`Self::measure_all`]
     /// for lists where items have roughly uniform heights (e.g. table rows).
+    /// The estimate survives width changes, resets, and inserted items. Actual
+    /// measurements remain width-dependent and replace the estimate when available.
     pub fn with_uniform_item_height(self, height: Pixels) -> Self {
         self.apply_uniform_item_height(height);
         self
@@ -380,11 +384,12 @@ impl ListState {
             height,
         };
         let mut state = self.0.borrow_mut();
+        state.uniform_height_hint = Some(height);
         let new_items = state
             .items
             .iter()
             .map(|item| ListItem::Unmeasured {
-                size_hint: Some(item.size_hint().unwrap_or(size_hint)),
+                size_hint: Some(item.size().unwrap_or(size_hint)),
                 focus_handle: item.focus_handle(),
             })
             .collect::<Vec<_>>();
@@ -524,7 +529,7 @@ impl ListState {
             focus_handles.into_iter().map(|focus_handle| {
                 spliced_count += 1;
                 ListItem::Unmeasured {
-                    size_hint: None,
+                    size_hint: state.uniform_height_hint.map(|height| size(px(0.), height)),
                     focus_handle,
                 }
             }),
@@ -1534,7 +1539,9 @@ impl Element for List {
         {
             let new_items = SumTree::from_iter(
                 state.items.iter().map(|item| ListItem::Unmeasured {
-                    size_hint: None,
+                    size_hint: state
+                        .uniform_height_hint
+                        .map(|height| size(bounds.size.width, height)),
                     focus_handle: item.focus_handle(),
                 }),
                 (),
@@ -1851,6 +1858,65 @@ mod test {
     }
 
     struct TestListView(ListState);
+    #[gpui::test]
+    fn uniform_estimate_survives_layout_resize_and_splice(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        let state = ListState::new(128, crate::ListAlignment::Top, px(0.))
+            .with_uniform_item_height(px(20.));
+        for width in [180., 96.] {
+            cx.draw(point(px(0.), px(0.)), size(px(width), px(80.)), |_, cx| {
+                cx.new(|_| TestListView(state.clone())).into_any_element()
+            });
+            assert_eq!(state.max_offset_for_scrollbar().y, px(2480.));
+            state.scroll_by(px(1200.));
+            cx.draw(point(px(0.), px(0.)), size(px(width), px(80.)), |_, cx| {
+                cx.new(|_| TestListView(state.clone())).into_any_element()
+            });
+            assert!(state.logical_scroll_top().item_ix >= 60);
+        }
+        state.splice(128..128, 16);
+        assert_eq!(state.max_offset_for_scrollbar().y, px(2800.));
+        state.reset_with_uniform_height(32, px(36.));
+        assert_eq!(state.0.borrow().items.summary().height, px(1152.));
+    }
+
+    #[gpui::test]
+    fn uniform_estimate_does_not_freeze_width_dependent_measurements(cx: &mut TestAppContext) {
+        struct Rows(ListState, f32);
+        impl Render for Rows {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let height = self.1;
+                list(self.0.clone(), move |_, _, _| {
+                    div().h(px(height)).into_any_element()
+                })
+                .size_full()
+            }
+        }
+        let cx = cx.add_empty_window();
+        let state =
+            ListState::new(16, crate::ListAlignment::Top, px(0.)).with_uniform_item_height(px(20.));
+        for (width, height) in [(160., 20.), (80., 40.)] {
+            cx.draw(point(px(0.), px(0.)), size(px(width), px(80.)), |_, cx| {
+                cx.new(|_| Rows(state.clone(), height)).into_any_element()
+            });
+            let state = state.0.borrow();
+            assert_eq!(
+                state.items.iter().next().unwrap().size().unwrap().height,
+                px(height)
+            );
+            assert!(
+                state
+                    .items
+                    .iter()
+                    .filter_map(|item| match item {
+                        super::ListItem::Unmeasured { size_hint, .. } => *size_hint,
+                        _ => None,
+                    })
+                    .all(|hint| hint.height == px(20.))
+            );
+        }
+    }
+
     impl Render for TestListView {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             list(self.0.clone(), |_, _, _| {

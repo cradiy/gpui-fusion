@@ -61,7 +61,8 @@ impl fmt::Debug for Rgba {
 }
 
 impl Rgba {
-    /// Create a new [`Rgba`] color by blending this and another color together
+    /// Tints RGB by `other`'s alpha, retaining this color's alpha unless `other`
+    /// is opaque. Use [`Self::composite_over`] for source-over compositing.
     pub fn blend(&self, other: Rgba) -> Self {
         if other.a >= 1.0 {
             other
@@ -74,6 +75,27 @@ impl Rgba {
                 b: (self.b * (1.0 - other.a)) + (other.b * other.a),
                 a: self.a,
             }
+        }
+    }
+
+    /// Composites this foreground over `background` using straight-alpha
+    /// source-over. Channels are combined in their existing color space.
+    /// Colors must have components in `[0, 1]`. A transparent foreground leaves
+    /// the background unchanged.
+    pub fn composite_over(self, background: Self) -> Self {
+        if self.a >= 1.0 {
+            return self;
+        }
+        if self.a <= 0.0 {
+            return background;
+        }
+        let background_alpha = background.a * (1.0 - self.a);
+        let alpha = self.a + background_alpha;
+        Self {
+            r: (self.r * self.a + background.r * background_alpha) / alpha,
+            g: (self.g * self.a + background.g * background_alpha) / alpha,
+            b: (self.b * self.a + background.b * background_alpha) / alpha,
+            a: alpha,
         }
     }
 
@@ -573,15 +595,15 @@ impl Hsla {
         self.a == 1.0
     }
 
-    /// Blends `other` on top of `self` based on `other`'s alpha value. The resulting color is a combination of `self`'s and `other`'s colors.
+    /// Tints this color in RGB space using `other`'s alpha.
     ///
     /// If `other`'s alpha value is 1.0 or greater, `other` color is fully opaque, thus `other` is returned as the output color.
     /// If `other`'s alpha value is 0.0 or less, `other` color is fully transparent, thus `self` is returned as the output color.
-    /// Else, the output color is calculated as a blend of `self` and `other` based on their weighted alpha values.
+    /// Otherwise, the output retains this color's alpha. Use
+    /// [`Self::composite_over`] for source-over compositing.
     ///
     /// Assumptions:
     /// - Alpha values are contained in the range [0, 1], with 1 as fully opaque and 0 as fully transparent.
-    /// - The relative contributions of `self` and `other` is based on `self`'s alpha value (`self.a`) and `other`'s  alpha value (`other.a`), `self` contributing `self.a * (1.0 - other.a)` and `other` contributing its own alpha value.
     /// - RGB color components are contained in the range [0, 1].
     /// - If `self` and `other` colors are out of the valid range, the blend operation's output and behavior is undefined.
     pub fn blend(self, other: Hsla) -> Hsla {
@@ -596,6 +618,18 @@ impl Hsla {
             let converted_other = Rgba::from(other);
             let blended_rgb = converted_self.blend(converted_other);
             Hsla::from(blended_rgb)
+        }
+    }
+
+    /// Composites this foreground over `background` in RGB space using
+    /// [`Rgba::composite_over`], then converts the result back to HSLA.
+    pub fn composite_over(self, background: Self) -> Self {
+        if self.a <= 0.0 {
+            background
+        } else if self.a >= 1.0 {
+            self
+        } else {
+            Rgba::from(self).composite_over(background.into()).into()
         }
     }
 
@@ -1307,6 +1341,47 @@ impl From<Rgba> for Background {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn source_over_preserves_coverage_and_ignores_invisible_rgb() {
+        use super::{Hsla, Rgba};
+        let foreground = Rgba {
+            r: 0.9,
+            g: 0.2,
+            b: 0.1,
+            a: 0.25,
+        };
+        let background = Rgba {
+            r: 0.1,
+            g: 0.4,
+            b: 0.8,
+            a: 0.8,
+        };
+        let result = foreground.composite_over(background);
+        let expected = [0.285 / 0.85, 0.29 / 0.85, 0.505 / 0.85, 0.85];
+        for (actual, expected) in [result.r, result.g, result.b, result.a]
+            .into_iter()
+            .zip(expected)
+        {
+            assert!((actual - expected).abs() < 0.00001);
+        }
+        assert_eq!(foreground.composite_over(background.alpha(0.)), foreground);
+        assert_eq!(foreground.alpha(0.).composite_over(background), background);
+        assert_eq!(
+            foreground.alpha(1.).composite_over(background),
+            foreground.alpha(1.)
+        );
+        let converted: Rgba = Hsla::from(foreground)
+            .composite_over(background.into())
+            .into();
+        for (a, b) in [converted.r, converted.g, converted.b, converted.a]
+            .into_iter()
+            .zip([result.r, result.g, result.b, result.a])
+        {
+            assert!((a - b).abs() < 0.00001);
+        }
+        assert_eq!(background.blend(foreground).a, background.a);
+    }
+
     #[test]
     fn rgba_conversion_preserves_all_alpha_channel_pairs() {
         for alpha in 0..=255u8 {

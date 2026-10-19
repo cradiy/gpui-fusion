@@ -1,7 +1,9 @@
-fn glass_sample(input: BackdropInput, offset: vec2<f32>, clarity: f32) -> vec3<f32> {
-    let dx = vec2<f32>(1.0, 0.0) + dpdx(offset);
-    let dy = vec2<f32>(0.0, 1.0) + dpdy(offset);
-    let footprint = max(length(dx), length(dy));
+fn glass_sample(
+    input: BackdropInput,
+    offset: vec2<f32>,
+    clarity: f32,
+    footprint: f32,
+) -> vec3<f32> {
     return mix(
         sample_blurred_backdrop(input, offset).rgb,
         sample_raw_backdrop(input, offset).rgb,
@@ -63,10 +65,30 @@ fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
     let displacement = -lens_direction * refraction * curvature;
     // Preserve detail in the lens edge while retaining the configured center blur.
     let clarity = mix(surface.w, 1.0, curvature * 0.9);
-    var color = glass_sample(input, displacement, clarity);
+    // The screen-space footprint of one backdrop texel is a property of the
+    // surface, not of the displaced sample, and `dpdx`/`dpdy` are only legal in
+    // uniform control flow. Deriving it from `displacement` inside the branches
+    // below made the whole shader fail to compile on WebGPU. Deriving it once
+    // here also gives the physically meaningful value: the per-pixel step across
+    // the screen, which is what decides whether the blurred or sharp tap wins.
+    let footprint = max(
+        length(vec2<f32>(1.0, 0.0) + dpdx(displacement)),
+        length(vec2<f32>(0.0, 1.0) + dpdy(displacement)),
+    );
+    var color = glass_sample(input, displacement, clarity, footprint);
     if (surface.z > 0.0) {
-        color.r = glass_sample(input, displacement * (1.0 + surface.z), clarity).r;
-        color.b = glass_sample(input, displacement * (1.0 - surface.z), clarity).b;
+        color.r = glass_sample(
+            input,
+            displacement * (1.0 + surface.z),
+            clarity,
+            footprint,
+        ).r;
+        color.b = glass_sample(
+            input,
+            displacement * (1.0 - surface.z),
+            clarity,
+            footprint,
+        ).b;
     }
 
     let luminance = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));

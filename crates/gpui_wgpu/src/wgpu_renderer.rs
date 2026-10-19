@@ -721,6 +721,11 @@ impl WgpuRenderer {
             let error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
             let sink = error.clone();
             device.on_uncaptured_error(Arc::new(move |error| {
+                // Log immediately: the sink holds only the most recent error, so a
+                // validation failure followed by its cascading "invalid command
+                // buffer" errors would otherwise be lost before the next frame
+                // reads the sink. The first message here is the real cause.
+                log::error!("uncaptured GPU error: {error}");
                 *sink.lock().unwrap() = Some(error.to_string());
             }));
             error

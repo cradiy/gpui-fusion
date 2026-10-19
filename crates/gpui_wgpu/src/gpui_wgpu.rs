@@ -164,6 +164,32 @@ fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
     }
 
     #[test]
+    fn every_glass_backdrop_shader_is_valid_wgsl() {
+        // Covers the glass shaders that `frosted_glass_backdrop_shader_is_valid_wgsl`
+        // below does not. Note naga accepts `textureSample` in non-uniform control
+        // flow while the browser's Tint compiler rejects it, so this test cannot
+        // catch that class of bug: keep glass shaders sampling through
+        // `backdrop_sample_texture`, which is uniform-safe by construction.
+        for shader in [
+            gpui_effects::frosted_glass_shader(),
+            gpui_effects::liquid_glass_shader(),
+            gpui_effects::fluted_glass_shader(),
+        ] {
+            let source = gpui::compose_backdrop_shader_wgsl(&shader);
+            let module = wgpu::naga::front::wgsl::parse_str(&source)
+                .unwrap_or_else(|error| panic!("glass backdrop shader should parse: {error}"));
+            wgpu::naga::valid::Validator::new(
+                wgpu::naga::valid::ValidationFlags::all(),
+                wgpu::naga::valid::Capabilities::all(),
+            )
+            .validate(&module)
+            .unwrap_or_else(|error| {
+                panic!("glass backdrop shader should validate: {error}")
+            });
+        }
+    }
+
+    #[test]
     fn frosted_glass_backdrop_shader_is_valid_wgsl() {
         let shader = gpui_effects::frosted_glass_shader();
         let source = gpui::compose_backdrop_shader_wgsl(&shader);

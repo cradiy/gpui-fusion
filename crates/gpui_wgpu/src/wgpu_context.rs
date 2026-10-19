@@ -11,6 +11,26 @@ use wgpu::TextureFormat;
 mod resources;
 pub use resources::WgpuResource;
 
+/// Instance flags used for every wgpu instance GPUI creates.
+///
+/// `wgpu::InstanceFlags::default()` resolves through `from_build_config()`,
+/// which returns `debugging()` — i.e. `DEBUG | VALIDATION |
+/// VALIDATION_INDIRECT_CALL` — in debug builds. `VALIDATION` is harmless when
+/// the layer is missing, but `DEBUG` makes wgpu-hal add `VK_EXT_debug_utils`
+/// and then name every Vulkan object through `vkSetDebugUtilsObjectNameEXT`.
+///
+/// Several Android GPU driver stacks (and the virtualized/translated Vulkan
+/// drivers used by x86_64 emulators) crash inside that entry point, so any
+/// debug build of a GPUI Android app segfaults while the first adapter is
+/// created. Android therefore drops `DEBUG`; `WGPU_DEBUG=1` still opts in.
+#[cfg(not(target_family = "wasm"))]
+pub(crate) fn instance_flags() -> wgpu::InstanceFlags {
+    let flags = wgpu::InstanceFlags::default();
+    #[cfg(target_os = "android")]
+    let flags = flags - wgpu::InstanceFlags::DEBUG;
+    flags.with_env()
+}
+
 #[cfg(not(target_family = "wasm"))]
 pub(crate) fn create_instance(descriptor: wgpu::InstanceDescriptor) -> wgpu::Instance {
     // Native loader discovery is process-global, even for independent contexts.
@@ -66,7 +86,7 @@ impl WgpuContext {
             } else {
                 wgpu::Backends::VULKAN | wgpu::Backends::GL
             },
-            flags: wgpu::InstanceFlags::default(),
+            flags: instance_flags(),
             backend_options: wgpu::BackendOptions::default(),
             memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
             display: None,
@@ -334,7 +354,7 @@ impl WgpuContext {
         }
         create_instance(wgpu::InstanceDescriptor {
             backends: backend,
-            flags: wgpu::InstanceFlags::default(),
+            flags: instance_flags(),
             backend_options,
             memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
             display: Some(display),

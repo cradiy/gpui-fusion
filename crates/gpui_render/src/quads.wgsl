@@ -216,14 +216,11 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0);
     }
 
-    // Solid backgrounds are the common case and only need the colour already carried
-    // by `background_solid`. Reading `quad.background` costs a cache-line fetch of the
-    // whole `Quad` per fragment, so the non-solid path is kept separate.
-    // Solid backgrounds are the common case and already arrive through the varyings.
-    // A branch (rather than `select`) is used on purpose: `select` evaluates both
-    // operands, so it would still fetch the whole `Background` from the storage buffer
-    // on every fragment. The varying is uniform across the quad, so the branch is
-    // uniform too and the non-taken side costs nothing.
+    // Solid backgrounds arrive through the varyings. A branch (rather than `select`)
+    // is used on purpose: `select` evaluates both operands, so it would still fetch the
+    // whole `Background` from the storage buffer on every fragment. The varying is
+    // uniform across the quad, so the branch is uniform too and the untaken side costs
+    // nothing.
     var background_color: vec4<f32>;
     if (input.bounds_size.x >= 0.0) {
         background_color = input.background_solid;

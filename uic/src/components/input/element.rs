@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{ops::Range, rc::Rc};
 
 use gpui::{
     App, Bounds, Element, ElementId, ElementInputHandler, Entity, GlobalElementId, Hitbox,
@@ -11,6 +11,12 @@ use super::{InputMode, TextInput, state::TextLayout};
 pub(super) struct TextElement {
     pub(super) input: Entity<TextInput>,
     pub(super) accessibility: Option<super::accessibility::Geometry>,
+}
+
+pub(super) struct CursorScrollSnapshot {
+    viewport: Bounds<Pixels>,
+    cursor_row: Bounds<Pixels>,
+    offset: gpui::Point<Pixels>,
 }
 
 pub(super) struct PrepaintState {
@@ -33,7 +39,7 @@ impl IntoElement for TextElement {
 }
 
 impl Element for TextElement {
-    type RequestLayoutState = ();
+    type RequestLayoutState = bool;
     type PrepaintState = PrepaintState;
 
     fn id(&self) -> Option<ElementId> {
@@ -53,6 +59,14 @@ impl Element for TextElement {
     ) -> (LayoutId, Self::RequestLayoutState) {
         let input = self.input.read(cx);
         let multiline = input.mode == InputMode::Multiline;
+        let cursor_was_visible = multiline
+            && input.last_cursor_scroll.as_ref().is_some_and(|previous| {
+                let top =
+                    previous.cursor_row.top() + input.scroll_handle.offset().y - previous.offset.y;
+                previous.viewport.size.height > px(0.)
+                    && top >= previous.viewport.top()
+                    && top + previous.cursor_row.size.height <= previous.viewport.bottom()
+            });
         let row_count = if multiline {
             input
                 .last_layout
@@ -65,7 +79,7 @@ impl Element for TextElement {
         let mut style = Style::default();
         style.size.width = relative(1.).into();
         style.size.height = (window.line_height() * row_count as f32).into();
-        (window.request_layout(style, [], cx), ())
+        (window.request_layout(style, [], cx), cursor_was_visible)
     }
 
     fn prepaint(
@@ -232,12 +246,12 @@ impl Element for TextElement {
         _id: Option<&GlobalElementId>,
         _inspector_id: Option<&gpui::InspectorElementId>,
         bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
+        cursor_was_visible: &mut Self::RequestLayoutState,
         prepaint: &mut Self::PrepaintState,
         window: &mut Window,
         cx: &mut App,
     ) {
-        let (focus_handle, disabled, multiline, scroll_handle, scroll_cursor_pending) = {
+        let (focus_handle, disabled, multiline, scroll_handle, mut scroll_cursor_pending) = {
             let input = self.input.read(cx);
             (
                 input.focus_handle.clone(),
@@ -343,10 +357,35 @@ impl Element for TextElement {
             .map(TextLayout::visual_row_count);
         let new_rows = layout.visual_row_count();
         let rows_changed = old_rows != Some(new_rows);
+        let viewport = scroll_handle.bounds();
+        let scroll_offset = scroll_handle.offset();
+        if multiline && !disabled && focus_handle.is_focused(window) && *cursor_was_visible {
+            let input = self.input.read(cx);
+            let reflowed = input.last_layout.as_ref().is_some_and(|previous| {
+                previous.line_height != layout.line_height
+                    || !Rc::ptr_eq(&previous.lines, &layout.lines)
+            });
+            scroll_cursor_pending |= reflowed
+                || input
+                    .last_cursor_scroll
+                    .as_ref()
+                    .is_some_and(|old| old.viewport.size != viewport.size);
+        }
         self.input.update(cx, |input, cx| {
             input.last_layout = Some(layout);
             input.last_bounds = Some(prepaint.text_bounds);
             input.last_viewport_bounds = Some(prepaint.viewport_bounds);
+            if multiline {
+                input.last_cursor_scroll =
+                    prepaint
+                        .cursor_bounds
+                        .map(|cursor_row| CursorScrollSnapshot {
+                            viewport,
+                            cursor_row,
+                            offset: scroll_offset,
+                        });
+                input.scroll_cursor_pending = scroll_cursor_pending;
+            }
             if !multiline {
                 input.single_line_scroll_offset = prepaint.horizontal_offset;
                 if focus_handle.is_focused(window) && scroll_cursor_pending {

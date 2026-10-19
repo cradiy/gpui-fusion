@@ -502,6 +502,7 @@ pub struct TextInput {
     pub(super) scroll_handle: ScrollHandle,
     pub(super) scrollbar_state: ScrollbarState,
     pub(super) scroll_cursor_pending: bool,
+    pub(super) last_cursor_scroll: Option<super::element::CursorScrollSnapshot>,
     pub(super) single_line_scroll_offset: Pixels,
 }
 
@@ -553,6 +554,7 @@ impl TextInput {
             scroll_handle: ScrollHandle::new(),
             scrollbar_state: ScrollbarState::new(),
             scroll_cursor_pending: true,
+            last_cursor_scroll: None,
             single_line_scroll_offset: px(0.),
         }
     }
@@ -1300,6 +1302,7 @@ impl TextInput {
         self.last_layout = None;
         self.last_bounds = None;
         self.last_viewport_bounds = None;
+        self.last_cursor_scroll = None;
         self.stop_selection();
         self.preferred_x = None;
         self.scroll_cursor_pending = true;
@@ -3012,6 +3015,134 @@ mod tests {
                 assert_eq!(input.selected_range, 0..0);
                 assert!(!input.is_selecting);
                 assert!(!input.scrollbar_state.is_dragging());
+            })
+            .unwrap();
+    }
+
+    fn assert_cursor_row_visible(input: &TextInput) {
+        let layout = input.last_layout.as_ref().unwrap();
+        let top = input.last_bounds.unwrap().top()
+            + layout
+                .position_for_caret(input.cursor_offset(), input.caret_affinity)
+                .y;
+        let viewport = input.scroll_handle.bounds();
+        assert!(
+            top >= viewport.top(),
+            "cursor top {top:?}, viewport {viewport:?}"
+        );
+        assert!(
+            top + layout.line_height <= viewport.bottom(),
+            "cursor bottom {:?}, viewport {viewport:?}",
+            top + layout.line_height
+        );
+    }
+
+    #[gpui::test]
+    fn multiline_resize_follows_a_visible_cursor_through_reflow(cx: &mut TestAppContext) {
+        let window = open_input_with_rows(cx, 4, |cx| {
+            TextInput::new(cx).multiline().initial_value(
+                (0..12)
+                    .map(|i| format!("paragraph {i}: abcdefghijklmnopqrstuvwxyz\n"))
+                    .collect::<String>(),
+            )
+        });
+        let mut visual = draw_and_focus(&window, cx);
+        for _ in 0..4 {
+            visual.update(|window, cx| window.draw(cx).clear());
+        }
+        window
+            .update(&mut visual.cx, |view, _, cx| {
+                assert_cursor_row_visible(view.state.read(cx));
+                view.rows = Some(2);
+                cx.notify();
+            })
+            .unwrap();
+        for _ in 0..4 {
+            visual.update(|window, cx| window.draw(cx).clear());
+        }
+        let rows_before = window
+            .update(&mut visual.cx, |view, _, cx| {
+                assert_cursor_row_visible(view.state.read(cx));
+                view.state
+                    .read(cx)
+                    .last_layout
+                    .as_ref()
+                    .unwrap()
+                    .visual_row_count()
+            })
+            .unwrap();
+        visual.simulate_resize(size(px(164.), px(180.)));
+        for _ in 0..4 {
+            visual.update(|window, cx| window.draw(cx).clear());
+        }
+        window
+            .update(&mut visual.cx, |view, _, cx| {
+                assert_cursor_row_visible(view.state.read(cx));
+                assert!(
+                    view.state
+                        .read(cx)
+                        .last_layout
+                        .as_ref()
+                        .unwrap()
+                        .visual_row_count()
+                        > rows_before
+                );
+                assert!(view.changes.borrow().is_empty());
+            })
+            .unwrap();
+        let offset = window
+            .update(&mut visual.cx, |view, window, cx| {
+                window.blur();
+                view.rows = Some(1);
+                cx.notify();
+                view.state.read(cx).scroll_handle.offset()
+            })
+            .unwrap();
+        for _ in 0..4 {
+            visual.update(|window, cx| window.draw(cx).clear());
+        }
+        window
+            .update(&mut visual.cx, |view, _, cx| {
+                assert_eq!(view.state.read(cx).scroll_handle.offset(), offset);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn multiline_resize_preserves_manual_scroll_away_from_cursor(cx: &mut TestAppContext) {
+        let window = open_input_with_rows(cx, 4, |cx| {
+            TextInput::new(cx).multiline().initial_value(
+                (0..20)
+                    .map(|i| format!("entry {i}: abcdefghijklmnopqrstuvwxyz\n"))
+                    .collect::<String>(),
+            )
+        });
+        let mut visual = draw_and_focus(&window, cx);
+        for _ in 0..4 {
+            visual.update(|window, cx| window.draw(cx).clear());
+        }
+        window
+            .update(&mut visual.cx, |view, _, cx| {
+                let input = view.state.read(cx);
+                assert_cursor_row_visible(input);
+                input.scroll_handle.set_offset(point(px(0.), px(-24.)));
+                view.rows = Some(2);
+                cx.notify();
+            })
+            .unwrap();
+        visual.simulate_resize(size(px(164.), px(180.)));
+        for _ in 0..4 {
+            visual.update(|window, cx| window.draw(cx).clear());
+        }
+        window
+            .update(&mut visual.cx, |view, _, cx| {
+                let input = view.state.read(cx);
+                assert_eq!(input.scroll_handle.offset().y, px(-24.));
+                let layout = input.last_layout.as_ref().unwrap();
+                let top = input.last_bounds.unwrap().top()
+                    + layout.position_for_offset(input.cursor_offset()).y;
+                assert!(top > input.scroll_handle.bounds().bottom());
+                assert!(!input.scroll_cursor_pending);
             })
             .unwrap();
     }

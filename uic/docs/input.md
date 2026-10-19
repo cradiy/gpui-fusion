@@ -16,6 +16,11 @@ Use `.multiline()` for a message field and `.password()` for a password field.
 Apply layout, typography, borders, and backgrounds through `Input`'s `Styled`
 methods. Use `InputAppearance` for caret, selection, placeholder, and focus colors.
 
+A focused multiline input keeps the cursor's full line visible when its viewport
+shrinks or text reflows, provided the line was visible before the layout change.
+Scrolling away from the cursor preserves that position through layout changes.
+Unfocused inputs do not scroll to the cursor on resize.
+
 A primary click outside the input clears focus without consuming the click.
 Prefix, suffix and scrollbar content belong to the input's focus boundary.
 Use `.blur_on_click_outside(false)` when a containing composite manages focus

@@ -152,10 +152,15 @@ pub fn color_flow(source: impl Into<ImageSource>) -> ColorFlow {
 
 impl ColorFlow {
     pub fn new(source: impl Into<ImageSource>) -> Self {
+        let source = source.into();
+        let palette = match &source {
+            ImageSource::Render(image) => image_palette(image),
+            _ => None,
+        };
         Self {
             effect: image_effect(source, color_flow_shader()).bg(gpui::rgb(0x2a2834)),
             options: ColorFlowOptions::default(),
-            palette: None,
+            palette,
         }
     }
 
@@ -197,6 +202,61 @@ impl IntoElement for ColorFlow {
     }
 }
 
+// Match the shader's stratified, bilinear BGRA sampling before drawing.
+// Decoded sources need sixteen samples per element instead of per output pixel.
+fn image_palette(image: &gpui::RenderImage) -> Option<ColorFlowPalette> {
+    let bytes = image.as_bytes(0)?;
+    let size = image.size(0);
+    let (width, height) = (size.width.0 as usize, size.height.0 as usize);
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let mut samples = [[0_f32; 4]; 16];
+    let mut low = 1_f32;
+    let mut high = 0_f32;
+    let luminance = |sample: [f32; 4]| sample[0] * 0.2126 + sample[1] * 0.7152 + sample[2] * 0.0722;
+    for (index, sample) in samples.iter_mut().enumerate() {
+        let column = (index % 4) as f32 / 4. + 0.125;
+        let x = column * (width - 1) as f32;
+        let y = (index / 4) as f32 / 4. + column / 4.;
+        let y = y * (height - 1) as f32;
+        let (left, top) = (x.floor() as usize, y.floor() as usize);
+        let (right, bottom) = ((left + 1).min(width - 1), (top + 1).min(height - 1));
+        let read = |x, y, channel| bytes[(y * width + x) * 4 + channel] as f32 / 255.;
+        for (channel, &bgra) in [2, 1, 0, 3].iter().enumerate() {
+            let a = read(left, top, bgra);
+            let b = read(right, top, bgra);
+            let c = read(left, bottom, bgra);
+            let d = read(right, bottom, bgra);
+            let upper = a + (b - a) * x.fract();
+            let lower = c + (d - c) * x.fract();
+            sample[channel] = upper + (lower - upper) * y.fract();
+        }
+        if sample[3] > 0. {
+            low = low.min(luminance(*sample));
+            high = high.max(luminance(*sample));
+        }
+    }
+    let mut bands = [[0_f32; 4]; 4];
+    for sample in samples {
+        let band =
+            (((luminance(sample) - low) / (high - low).max(0.0001) * 4.).clamp(0., 3.)) as usize;
+        for channel in 0..3 {
+            bands[band][channel] += sample[channel] * sample[3];
+        }
+        bands[band][3] += sample[3];
+    }
+    Some(bands.map(|band| ColorFlowPaletteColor {
+        color: Rgba {
+            r: band[0] / band[3].max(0.0001),
+            g: band[1] / band[3].max(0.0001),
+            b: band[2] / band[3].max(0.0001),
+            a: 1.,
+        },
+        weight: band[3] / 16.,
+    }))
+}
+
 /// Returns the portable image-sampling shader used by [`ColorFlow`].
 pub fn color_flow_shader() -> EffectShader {
     EffectShader::wgsl_image(include_str!("shaders/color_flow.wgsl"))
@@ -205,6 +265,88 @@ pub fn color_flow_shader() -> EffectShader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn decoded_palette_matches_fragment_sampling() -> anyhow::Result<()> {
+        use gpui::{
+            Bounds, ContentMask, DevicePixels, EffectQuad, RenderImageParams, ScaledPixels, Scene,
+            point, size,
+        };
+        use gpui_wgpu::WgpuOffscreenRenderer;
+        use std::borrow::Cow;
+
+        let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(32), DevicePixels(48)))?;
+        for dimensions in [(1, 1), (7, 5), (1, 9)] {
+            let buffer = image::RgbaImage::from_fn(dimensions.0, dimensions.1, |x, y| {
+                // RenderImage stores BGRA, including straight alpha.
+                image::Rgba([
+                    (x * 31 + y * 13) as u8,
+                    (x * 17 + y * 29) as u8,
+                    (x * 43 + y * 7) as u8,
+                    ((x + y) % 4 * 85) as u8,
+                ])
+            });
+            let image = gpui::RenderImage::new(smallvec::smallvec![image::Frame::new(buffer)]);
+            let palette = image_palette(&image).unwrap();
+            let tile = renderer
+                .sprite_atlas()
+                .get_or_insert_with(
+                    &RenderImageParams {
+                        image_id: image.id,
+                        frame_index: 0,
+                    }
+                    .into(),
+                    &mut || {
+                        Ok(Some((
+                            image.size(0),
+                            Cow::Borrowed(image.as_bytes(0).unwrap()),
+                        )))
+                    },
+                )?
+                .unwrap();
+            let bounds = Bounds::new(
+                point(ScaledPixels(0.), ScaledPixels(0.)),
+                size(ScaledPixels(32.), ScaledPixels(48.)),
+            );
+            for time in [0., 7., 42.] {
+                let render = |renderer: &mut WgpuOffscreenRenderer, palette| {
+                    let mut scene = Scene::default();
+                    scene.insert_primitive(EffectQuad {
+                        order: 0,
+                        bounds,
+                        effect_bounds: bounds,
+                        content_mask: ContentMask { bounds },
+                        transformation: Default::default(),
+                        corner_radii: Default::default(),
+                        shader: color_flow_shader(),
+                        uniforms: ColorFlowOptions::default().uniforms(palette),
+                        time,
+                        opacity: 1.,
+                        image_tile: Some(tile),
+                        second_image_tile: None,
+                        third_image_tile: None,
+                        fourth_image_tile: None,
+                    });
+                    scene.finish();
+                    renderer.render_rgba(&scene)
+                };
+                let sampled = render(&mut renderer, None)?;
+                let extracted = render(&mut renderer, Some(palette))?;
+                let error = sampled
+                    .iter()
+                    .zip(&extracted)
+                    .map(|(a, b)| a.abs_diff(*b))
+                    .max()
+                    .unwrap();
+                assert!(
+                    error <= 1,
+                    "palette changes output by {error} at {dimensions:?}, {time}s"
+                );
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn named_options_map_to_shader_fields_without_palette_collisions() {

@@ -52,7 +52,7 @@ use crate::linux::{
     DEFAULT_CURSOR_ICON_NAME, LinuxClient, capslock_from_xkb, cursor_style_to_icon_names,
     dispatch_tray_message, get_xkb_compose_state, is_within_click_distance, keystroke_from_xkb,
     keystroke_underlying_dead_key, log_cursor_icon_warning, modifiers_from_xkb, open_uri_internal,
-    platform::{DOUBLE_CLICK_INTERVAL, SCROLL_LINES},
+    platform::SCROLL_LINES,
     reveal_path_internal,
     xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
 };
@@ -508,6 +508,9 @@ impl X11Client {
         handle
             .insert_source(XDPEventSource::new(&common.background_executor), {
                 move |event, _, client| match event {
+                    XDPEvent::DoubleClickInterval(interval) => {
+                        client.with_common(|common| common.double_click_interval = interval);
+                    }
                     XDPEvent::WindowAppearance(appearance) => {
                         client.with_common(|common| common.appearance = appearance);
                         for window in client.0.borrow_mut().windows.values_mut() {
@@ -1186,7 +1189,7 @@ impl X11Client {
                 match button_or_scroll_from_event_detail(event.detail) {
                     Some(ButtonOrScroll::Button(button)) => {
                         let click_elapsed = state.last_click.elapsed();
-                        if click_elapsed < DOUBLE_CLICK_INTERVAL
+                        if click_elapsed < state.common.double_click_interval
                             && state
                                 .last_mouse_button
                                 .is_some_and(|prev_button| prev_button == button)

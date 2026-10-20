@@ -156,6 +156,8 @@ pub(crate) struct LinuxCommon {
     pub(crate) appearance: WindowAppearance,
     pub(crate) auto_hide_scrollbars: bool,
     pub(crate) button_layout: WindowButtonLayout,
+    #[cfg(any(feature = "wayland", feature = "x11"))]
+    pub(crate) double_click_interval: Duration,
     pub(crate) callbacks: PlatformHandlers,
     pub(crate) signal: LoopSignal,
     pub(crate) menus: Vec<OwnedMenu>,
@@ -200,6 +202,8 @@ impl LinuxCommon {
             appearance: WindowAppearance::Light,
             auto_hide_scrollbars: false,
             button_layout: WindowButtonLayout::linux_default(),
+            #[cfg(any(feature = "wayland", feature = "x11"))]
+            double_click_interval: DOUBLE_CLICK_INTERVAL,
             callbacks,
             signal,
             menus: Vec::new(),

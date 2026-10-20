@@ -84,8 +84,8 @@ use super::{
 };
 
 use crate::linux::{
-    DOUBLE_CLICK_INTERVAL, LinuxClient, LinuxCommon, LinuxKeyboardLayout, PIPE_READ_TIMEOUT,
-    SCROLL_LINES, cursor_style_to_icon_names, dispatch_tray_message, get_xkb_compose_state,
+    LinuxClient, LinuxCommon, LinuxKeyboardLayout, PIPE_READ_TIMEOUT, SCROLL_LINES,
+    cursor_style_to_icon_names, dispatch_tray_message, get_xkb_compose_state,
     is_within_click_distance, keystroke_underlying_dead_key, open_uri_internal,
     read_fd_with_timeout, reveal_path_internal,
     wayland::{
@@ -1505,6 +1505,11 @@ impl WaylandClient {
         handle
             .insert_source(XDPEventSource::new(&common.background_executor), {
                 move |event, _, client| match event {
+                    XDPEvent::DoubleClickInterval(interval) => {
+                        if let Some(client) = client.0.upgrade() {
+                            client.borrow_mut().common.double_click_interval = interval;
+                        }
+                    }
                     XDPEvent::WindowAppearance(appearance) => {
                         if let Some(client) = client.0.upgrade() {
                             let mut client = client.borrow_mut();
@@ -2968,7 +2973,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for WaylandClientStatePtr {
                         }
                         let click_elapsed = state.click.last_click.elapsed();
 
-                        if click_elapsed < DOUBLE_CLICK_INTERVAL
+                        if click_elapsed < state.common.double_click_interval
                             && state
                                 .click
                                 .last_mouse_button

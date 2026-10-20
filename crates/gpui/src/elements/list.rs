@@ -1859,6 +1859,73 @@ mod test {
 
     struct TestListView(ListState);
     #[gpui::test]
+    fn scrolling_reaches_last_row_after_resize_and_discovering_wider_content(
+        cx: &mut TestAppContext,
+    ) {
+        struct Rows {
+            state: ListState,
+            width: Rc<Cell<f32>>,
+            last_painted: Rc<Cell<Option<usize>>>,
+        }
+        impl Render for Rows {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let width = self.width.clone();
+                let last_painted = self.last_painted.clone();
+                list(self.state.clone(), move |index, _, _| {
+                    let width = width.clone();
+                    let last_painted = last_painted.clone();
+                    canvas(
+                        |_, _, _| (),
+                        move |bounds, _, _, _| {
+                            width.set(width.get().max(bounds.size.width.as_f32()));
+                            last_painted.set(Some(index));
+                        },
+                    )
+                    .w(px(if index == 12 { 320. } else { 80. }))
+                    .h(px(20.))
+                    .into_any_element()
+                })
+                .w(px(self.width.get()))
+                .h_full()
+            }
+        }
+        let cx = cx.add_empty_window();
+        let state =
+            ListState::new(72, crate::ListAlignment::Top, px(0.)).with_uniform_item_height(px(20.));
+        let width = Rc::new(Cell::new(144.));
+        let last_painted = Rc::new(Cell::new(None));
+        for viewport_width in [144., 96.] {
+            state.scroll_to(gpui::ListOffset {
+                item_ix: 0,
+                offset_in_item: px(0.),
+            });
+            width.set(viewport_width);
+            for _ in 0..40 {
+                last_painted.set(None);
+                cx.draw(
+                    point(px(0.), px(0.)),
+                    size(px(viewport_width), px(80.)),
+                    |_, cx| {
+                        cx.new(|_| Rows {
+                            state: state.clone(),
+                            width: width.clone(),
+                            last_painted: last_painted.clone(),
+                        })
+                        .into_any_element()
+                    },
+                );
+                assert_eq!(state.max_offset_for_scrollbar().y, px(1360.));
+                if last_painted.get() == Some(71) {
+                    break;
+                }
+                state.scroll_by(px(40.));
+            }
+            assert_eq!(width.get(), 320.);
+            assert_eq!(last_painted.get(), Some(71));
+        }
+    }
+
+    #[gpui::test]
     fn uniform_estimate_survives_layout_resize_and_splice(cx: &mut TestAppContext) {
         let cx = cx.add_empty_window();
         let state = ListState::new(128, crate::ListAlignment::Top, px(0.))

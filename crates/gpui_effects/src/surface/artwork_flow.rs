@@ -6,13 +6,13 @@ use gpui::{
     Style, StyleRefinement, Styled, Window, prelude::*,
 };
 
-const THUMBNAIL_SIZE: u32 = 48;
-const CROSSFADE_SECONDS: f32 = 0.7;
+const THUMBNAIL_SIZE: u32 = 40;
+const CROSSFADE_SECONDS: f32 = 5. / 3.;
 
 /// Appearance of a softly layered, image-derived background.
 #[derive(Clone, Copy, Debug, PartialEq, uic_macros::Chainable)]
 pub struct ArtworkFlowOptions {
-    /// Display brightness in `0..=1`.
+    /// Artwork brightness in `0..=1`, before the backdrop overlays.
     pub brightness: f32,
     /// Chroma multiplier; one preserves the source saturation.
     pub saturation: f32,
@@ -27,11 +27,11 @@ pub struct ArtworkFlowOptions {
 impl Default for ArtworkFlowOptions {
     fn default() -> Self {
         Self {
-            brightness: 0.38,
-            saturation: 1.8,
-            contrast: 1.5,
+            brightness: 0.7,
+            saturation: 2.75,
+            contrast: 1.9,
             motion: 1.,
-            dither: 1.,
+            dither: 0.,
         }
     }
 }
@@ -48,36 +48,26 @@ impl ArtworkFlowOptions {
                 blend,
             ],
         );
-        for (index, (speed, phase, radius)) in [
-            (0.037, 0.35, 0.),
-            (-0.061, 2.1, 0.09),
-            (0.049, 4.4, 0.23),
-            (-0.031, 1.3, 0.3),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let angle = time * speed + phase;
+        for (index, speed) in [0.09, -0.24, 0.18, -0.12].into_iter().enumerate() {
+            let angle = time * speed;
             let (sin, cos) = angle.sin_cos();
-            let orbit = time * speed * 0.67 + phase;
-            uniforms.set_slot(
-                index + 1,
-                [
-                    radius * orbit.cos(),
-                    radius * (orbit * 0.83).sin(),
-                    cos,
-                    sin,
+            let center = match index {
+                1 => [-0.1, -0.1],
+                2 => [0.25 * (-angle * 0.75).cos(), 0.25 * (-angle * 0.75).sin()],
+                3 => [
+                    0.05 + 0.25 * (-angle * 0.75).cos(),
+                    0.05 + 0.25 * (-angle * 0.75).sin(),
                 ],
-            );
+                _ => [0., 0.],
+            };
+            uniforms.set_slot(index + 1, [center[0], center[1], cos, sin]);
         }
-        uniforms
-            .with_slot(5, [1.9, 1.25, 0.9, 0.65])
-            .with_slot(6, [0.38, self.dither.clamp(0., 2.), 0., 0.])
+        uniforms.with_slot(5, [1.25, 0.8, 0.5, 0.25])
     }
 }
 
 /// Creates an animated backdrop that preserves the source image's broad color regions.
-/// A stable ID caches the small blurred image and retains artwork-change crossfades.
+/// A stable ID caches the small image and retains artwork-change crossfades.
 /// Supply elapsed seconds with [`ArtworkFlow::time`]; the element does not run a timer.
 pub fn artwork_flow(id: impl Into<ElementId>, source: impl Into<ImageSource>) -> ArtworkFlow {
     ArtworkFlow {
@@ -147,7 +137,7 @@ impl ArtworkState {
     fn blend(&self, now: Instant) -> f32 {
         let t = (now.saturating_duration_since(self.changed_at).as_secs_f32() / CROSSFADE_SECONDS)
             .min(1.);
-        t * t * (3. - 2. * t)
+        t
     }
 
     fn update(&mut self, source: &Arc<RenderImage>, now: Instant) {
@@ -199,9 +189,8 @@ fn prepare_artwork(source: &RenderImage) -> Option<Arc<RenderImage>> {
             (upper + (lower - upper) * y.fract()).round() as u8
         }))
     });
-    // Filter premultiplied BGRA so transparent texels cannot introduce color halos.
-    let mut blurred = image::imageops::blur(&image, 4.5);
-    for pixel in blurred.pixels_mut() {
+    let mut thumbnail = image;
+    for pixel in thumbnail.pixels_mut() {
         let alpha = pixel[3] as f32;
         for channel in 0..3 {
             pixel[channel] = if alpha > 0. {
@@ -212,7 +201,7 @@ fn prepare_artwork(source: &RenderImage) -> Option<Arc<RenderImage>> {
         }
     }
     Some(Arc::new(RenderImage::new(smallvec::smallvec![
-        image::Frame::new(blurred)
+        image::Frame::new(thumbnail)
     ])))
 }
 
@@ -323,10 +312,26 @@ impl Element for ArtworkFlow {
         let effect = PaintEffect::new(bounds, artwork_flow_shader())
             .image(current, 0)
             .second_image(previous, 0)
-            .uniforms(self.options.uniforms(self.time, blend))
-            .corner_radii(radii);
+            .uniforms(
+                self.options
+                    .uniforms(self.time, blend)
+                    .with_slot(6, [900. * window.raster_scale_factor(), -3.25, 0., 0.]),
+            );
+        let passes = processing_passes(
+            self.options,
+            window.raster_scale_factor(),
+            [
+                f32::from(radii.top_left),
+                f32::from(radii.top_right),
+                f32::from(radii.bottom_right),
+                f32::from(radii.bottom_left),
+            ]
+            .map(|r| r * window.raster_scale_factor()),
+        );
         style.paint(bounds, window, cx, move |window, _| {
-            let _ = window.paint_effect(effect);
+            window.with_subtree_effect_chain(bounds, &passes, 1., |window| {
+                let _ = window.paint_effect(effect);
+            });
         });
     }
 }
@@ -334,6 +339,56 @@ impl Element for ArtworkFlow {
 /// Image-layer compositing shader; the second image is the outgoing artwork.
 pub fn artwork_flow_shader() -> EffectShader {
     EffectShader::wgsl_two_images(include_str!("shaders/artwork_flow.wgsl"))
+}
+
+fn processing_passes(
+    options: ArtworkFlowOptions,
+    scale: f32,
+    corners: [f32; 4],
+) -> Vec<gpui::SubtreeEffectPass> {
+    let pass = |shader, uniforms| gpui::SubtreeEffectPass {
+        shader,
+        uniforms,
+        time: 0.,
+        images: Default::default(),
+        bloom: None,
+        feedback: None,
+        distance_field: None,
+        particles: None,
+        particle_transition: None,
+    };
+    let mut passes = Vec::with_capacity(9);
+    for offset in [5.5, 10.5, 20.5, 10.5, 40.5, 20.5, 80.5, 40.5] {
+        passes.push(pass(
+            artwork_flow_blur_shader(),
+            EffectUniforms::new().with_slot(0, [offset * scale, 0., 0., 0.]),
+        ));
+    }
+    passes.push(pass(
+        artwork_flow_color_shader(),
+        EffectUniforms::new()
+            .with_slot(
+                0,
+                [
+                    options.brightness.clamp(0., 1.),
+                    options.saturation.max(0.),
+                    options.contrast.max(0.),
+                    options.dither.clamp(0., 2.),
+                ],
+            )
+            .with_slot(1, corners),
+    ));
+    passes
+}
+
+/// Four-corner Kawase sampling over the previously composited artwork.
+pub fn artwork_flow_blur_shader() -> EffectShader {
+    EffectShader::wgsl_image(include_str!("shaders/artwork_flow_blur.wgsl"))
+}
+
+/// Final color adjustment, backdrop overlays and corner clipping.
+pub fn artwork_flow_color_shader() -> EffectShader {
+    EffectShader::wgsl_image(include_str!("shaders/artwork_flow_color.wgsl"))
 }
 
 #[cfg(test)]
@@ -396,81 +451,123 @@ mod tests {
         use gpui_wgpu::WgpuOffscreenRenderer;
         use std::borrow::Cow;
 
-        let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(64), DevicePixels(96)))?;
-        let current = prepare_artwork(&image(|x, y| {
-            image::Rgba([
-                if x < 8 { 240 } else { 20 },
-                (y * 14) as u8,
-                if x < 8 { 10 } else { 220 },
-                255,
-            ])
-        }))
-        .unwrap();
-        let previous = prepare_artwork(&image(|_, _| image::Rgba([210, 120, 30, 255]))).unwrap();
-        let upload = |image: &RenderImage| {
-            renderer
-                .sprite_atlas()
-                .get_or_insert_with(
-                    &RenderImageParams {
-                        image_id: image.id,
-                        frame_index: 0,
-                    }
-                    .into(),
-                    &mut || {
-                        Ok(Some((
-                            image.size(0),
-                            Cow::Borrowed(image.as_bytes(0).unwrap()),
-                        )))
+        for (width, height) in [(64, 96), (96, 64)] {
+            let mut renderer =
+                WgpuOffscreenRenderer::new(size(DevicePixels(width), DevicePixels(height)))?;
+            let current = prepare_artwork(&image(|x, y| {
+                image::Rgba([
+                    if x < 8 { 240 } else { 20 },
+                    (y * 14) as u8,
+                    if x < 8 { 10 } else { 220 },
+                    255,
+                ])
+            }))
+            .unwrap();
+            let previous =
+                prepare_artwork(&image(|_, _| image::Rgba([210, 120, 30, 255]))).unwrap();
+            let upload = |image: &RenderImage| {
+                renderer
+                    .sprite_atlas()
+                    .get_or_insert_with(
+                        &RenderImageParams {
+                            image_id: image.id,
+                            frame_index: 0,
+                        }
+                        .into(),
+                        &mut || {
+                            Ok(Some((
+                                image.size(0),
+                                Cow::Borrowed(image.as_bytes(0).unwrap()),
+                            )))
+                        },
+                    )
+                    .map(|tile| tile.unwrap())
+            };
+            let current = upload(&current)?;
+            let previous = upload(&previous)?;
+            let bounds = Bounds::new(
+                point(ScaledPixels(0.), ScaledPixels(0.)),
+                size(ScaledPixels(width as f32), ScaledPixels(height as f32)),
+            );
+            let mut render = |time, blend, motion| {
+                let mut content = Scene::default();
+                content.insert_primitive(EffectQuad {
+                    order: 0,
+                    bounds,
+                    effect_bounds: bounds,
+                    content_mask: ContentMask { bounds },
+                    transformation: Default::default(),
+                    corner_radii: Default::default(),
+                    shader: artwork_flow_shader(),
+                    uniforms: ArtworkFlowOptions::default()
+                        .motion(motion)
+                        .uniforms(time, blend)
+                        .with_slot(6, [90., -3.25, 0., 0.]),
+                    time: 0.,
+                    opacity: 1.,
+                    image_tile: Some(current),
+                    second_image_tile: Some(previous),
+                    third_image_tile: None,
+                    fourth_image_tile: None,
+                });
+                content.finish();
+                let mut passes = processing_passes(ArtworkFlowOptions::default(), 0.1, [0.; 4]);
+                let last = passes.pop().unwrap();
+                let mut scene = Scene::default();
+                scene.insert_primitive(gpui::Primitive::SubtreeLayer(gpui::SubtreeLayer {
+                    scene: std::rc::Rc::new(content),
+                    second_scene: None,
+                    scene3d: None,
+                    intermediate_effects: passes.into(),
+                    composite: EffectQuad {
+                        order: 0,
+                        bounds,
+                        effect_bounds: bounds,
+                        content_mask: ContentMask { bounds },
+                        transformation: Default::default(),
+                        corner_radii: Default::default(),
+                        shader: last.shader,
+                        uniforms: last.uniforms,
+                        time: 0.,
+                        opacity: 1.,
+                        image_tile: None,
+                        second_image_tile: None,
+                        third_image_tile: None,
+                        fourth_image_tile: None,
                     },
-                )
-                .map(|tile| tile.unwrap())
-        };
-        let current = upload(&current)?;
-        let previous = upload(&previous)?;
-        let bounds = Bounds::new(
-            point(ScaledPixels(0.), ScaledPixels(0.)),
-            size(ScaledPixels(64.), ScaledPixels(96.)),
-        );
-        let mut render = |time, blend, motion| {
-            let mut scene = Scene::default();
-            scene.insert_primitive(EffectQuad {
-                order: 0,
-                bounds,
-                effect_bounds: bounds,
-                content_mask: ContentMask { bounds },
-                transformation: Default::default(),
-                corner_radii: Default::default(),
-                shader: artwork_flow_shader(),
-                uniforms: ArtworkFlowOptions::default()
-                    .motion(motion)
-                    .uniforms(time, blend),
-                time: 0.,
-                opacity: 1.,
-                image_tile: Some(current),
-                second_image_tile: Some(previous),
-                third_image_tile: None,
-                fourth_image_tile: None,
-            });
-            scene.finish();
-            renderer.render_rgba(&scene)
-        };
-        let first = render(0., 1., 1.)?;
-        let later = render(20., 1., 1.)?;
-        assert!(
-            first
-                .iter()
-                .zip(&later)
-                .filter(|(a, b)| a.abs_diff(**b) > 5)
-                .count()
-                > first.len() / 10
-        );
-        assert_eq!(render(0., 1., 0.)?, render(20., 1., 0.)?);
-        let outgoing = render(0., 0., 1.)?;
-        let middle = render(0., 0.5, 1.)?;
-        assert_ne!(outgoing, first);
-        assert_ne!(middle, outgoing);
-        assert_ne!(middle, first);
-        assert!(first.chunks_exact(4).all(|pixel| pixel[3] == 255));
+                }));
+                scene.finish();
+                renderer.render_rgba(&scene)
+            };
+            let first = render(0., 1., 1.)?;
+            let later = render(20., 1., 1.)?;
+            assert!(
+                first
+                    .iter()
+                    .zip(&later)
+                    .filter(|(a, b)| a.abs_diff(**b) > 5)
+                    .count()
+                    > first.len() / 10
+            );
+            assert_eq!(render(0., 1., 0.)?, render(20., 1., 0.)?);
+            let outgoing = render(0., 0., 1.)?;
+            if width > height {
+                for channel in 0..3 {
+                    let values = outgoing.chunks_exact(4).map(|pixel| pixel[channel]);
+                    let minimum = values.clone().min().unwrap();
+                    let maximum = values.max().unwrap();
+                    assert!(
+                        maximum - minimum <= 1,
+                        "Kawase passes must preserve an opaque constant field at the edges: channel {channel}, {minimum}..{maximum}"
+                    );
+                }
+            }
+            let middle = render(0., 0.5, 1.)?;
+            assert_ne!(outgoing, first);
+            assert_ne!(middle, outgoing);
+            assert_ne!(middle, first);
+            assert!(first.chunks_exact(4).all(|pixel| pixel[3] == 255));
+        }
         Ok(())
     }
 }

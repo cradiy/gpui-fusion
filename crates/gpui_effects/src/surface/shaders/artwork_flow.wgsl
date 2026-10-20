@@ -1,41 +1,40 @@
 fn artwork_sample(input: EffectInput, uv: vec2<f32>, blend: f32) -> vec4<f32> {
-    let current = sample_effect_image(input, uv);
+    let centered_uv = (uv * input.image_size - vec2<f32>(0.5)) / max(input.image_size - vec2<f32>(1.0), vec2<f32>(1.0));
+    let current = sample_effect_image(input, centered_uv);
     if (blend >= 1.0) { return current; }
-    let previous = sample_effect_second_image(input, uv);
+    let inset = vec2<f32>(0.5) / input.second_image_size;
+    let previous = sample_effect_second_image(input, clamp(uv, inset, vec2<f32>(1.0) - inset));
     let alpha = mix(previous.a, current.a, blend);
     let premultiplied = mix(previous.rgb * previous.a, current.rgb * current.a, blend);
     return vec4<f32>(premultiplied / max(alpha, 0.0001), alpha);
 }
 
-fn artwork_layer(input: EffectInput, p: vec2<f32>, pose: vec4<f32>, span: f32, blend: f32) -> vec4<f32> {
-    let delta = p - pose.xy;
-    let local = vec2<f32>(pose.z * delta.x + pose.w * delta.y,
-        -pose.w * delta.x + pose.z * delta.y) / span + vec2<f32>(0.5);
-    let edge = min(min(local.x, local.y), min(1.0 - local.x, 1.0 - local.y));
-    let mask = smoothstep(0.0, 0.22, edge);
-    let sample = artwork_sample(input, clamp(local, vec2<f32>(0.0), vec2<f32>(1.0)), blend);
-    return vec4<f32>(sample.rgb, sample.a * mask);
+fn compose_artwork(input: EffectInput, p: vec2<f32>, params: EffectParams) -> vec4<f32> {
+    var combined = vec4<f32>(0.0);
+    for (var i = 0u; i < 4u; i += 1u) {
+        let pose = params.slots[i + 1u];
+        var center = pose.xy;
+        if (i == 1u) { center.y *= input.size.y / input.size.x; }
+        let delta = p - center;
+        let uv = vec2<f32>(dot(delta, vec2<f32>(pose.z, pose.w)),
+            dot(delta, vec2<f32>(-pose.w, pose.z))) / params.slots[5][i] + vec2<f32>(0.5);
+        if (all(uv >= vec2<f32>(0.0)) && all(uv <= vec2<f32>(1.0))) {
+            let layer = artwork_sample(input, uv, params.slots[0].w);
+            combined = vec4<f32>(layer.rgb * layer.a, layer.a) + combined * (1.0 - layer.a);
+        }
+    }
+    return vec4<f32>(combined.rgb / max(combined.a, 0.000001), combined.a);
 }
 
 fn effect(input: EffectInput, params: EffectParams) -> vec4<f32> {
-    let p = (input.uv - vec2<f32>(0.5)) * input.size / max(input.size.x, input.size.y);
-    // A broad, bounded bend avoids recognizable square edges in the rotating layers.
-    let bend = 0.8 * max(0.0, 0.7 - dot(p, p));
-    let warped = vec2<f32>(p.x - bend * p.y, p.y + bend * p.x) / sqrt(1.0 + bend * bend);
-    var color = vec3<f32>(0.0);
-    let spans = params.slots[5];
-    for (var i = 0u; i < 4u; i += 1u) {
-        let layer = artwork_layer(input, warped, params.slots[i + 1u], spans[i], params.slots[0].w);
-        let opacity = select(0.58, 1.0, i == 0u);
-        color = mix(color, layer.rgb, layer.a * opacity);
-    }
-    let luminance = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
-    color = mix(vec3<f32>(luminance), color, params.slots[0].y);
-    color = clamp((color - vec3<f32>(0.5)) * params.slots[0].z + vec3<f32>(0.5), vec3<f32>(0.0), vec3<f32>(1.0));
-    color *= params.slots[0].x;
-    let edge = input.uv - vec2<f32>(0.5);
-    color *= 1.0 - params.slots[6].x * smoothstep(0.02, 0.5, dot(edge, edge));
-    let noise = fract(52.9829189 * fract(dot(floor(input.position), vec2<f32>(0.06711056, 0.00583715)))) - 0.5;
-    color = clamp(color + vec3<f32>(noise * params.slots[6].y / 255.0), vec3<f32>(0.0), vec3<f32>(1.0));
-    return vec4<f32>(color, 1.0);
+    var pixel = (input.uv - vec2<f32>(0.5)) * input.size;
+    let remaining = max(0.0, 1.0 - length(pixel) / params.slots[6].x);
+    let angle = params.slots[6].y * remaining * remaining;
+    let c = cos(angle);
+    let s = sin(angle);
+    pixel = vec2<f32>(c * pixel.x - s * pixel.y, s * pixel.x + c * pixel.y);
+    let limit = max(input.size * 0.5 - vec2<f32>(0.5), vec2<f32>(0.0));
+    pixel = clamp(pixel, -limit, limit);
+    // Pull the composed layers through the twist before subsequent image-space blurs.
+    return compose_artwork(input, pixel / input.size.x, params);
 }

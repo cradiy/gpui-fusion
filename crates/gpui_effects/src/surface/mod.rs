@@ -12,7 +12,10 @@ mod liquid_glass_content;
 mod material;
 mod point_gradient;
 
-pub use artwork_flow::{ArtworkFlow, ArtworkFlowOptions, artwork_flow, artwork_flow_shader};
+pub use artwork_flow::{
+    ArtworkFlow, ArtworkFlowOptions, artwork_flow, artwork_flow_blur_shader,
+    artwork_flow_color_shader, artwork_flow_shader,
+};
 pub use backdrop::*;
 pub use builtins::*;
 pub use color_flow::{

@@ -15,11 +15,17 @@ let background = artwork_flow("ambient-artwork", image_source)
     .size_full();
 ```
 
-A new decoded image is downsampled to 48 by 48 pixels, blurred once with
-premultiplied alpha, and cached. Four transformed layers are composited in one
-paint effect. Changing artwork crossfades for 700 ms; another change during a
-fade retains the visible image mixture. Pending image loads retain the last
-prepared image.
+A decoded image is downsampled to 40 by 40 pixels and cached without blur.
+Four independently rotating layers use width ratios of 1.25, 0.8, 0.5 and 0.25;
+the two smaller layers orbit the center. A radial twist remaps the composite
+with radius 900 logical pixels and angle -3.25 radians. Eight ordered Kawase
+passes then use diagonal offsets 5.5, 10.5, 20.5, 10.5, 40.5, 20.5, 80.5 and
+40.5 logical pixels. Color adjustment follows the blur, with default saturation
+2.75, contrast 1.9 and brightness 0.7. The filtered artwork is composited over
+white, followed by 50% black and 5% white overlays. Dithering is disabled by default.
+
+Artwork changes crossfade for 5/3 seconds; another change during a fade retains
+the visible image mixture. Pending image loads retain the last prepared image.
 
 The caller supplies elapsed seconds and schedules motion updates. Holding time
 constant pauses motion; `motion(0.)` fixes the transforms. Artwork crossfades

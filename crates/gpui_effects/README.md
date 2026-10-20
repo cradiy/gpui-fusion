@@ -29,6 +29,7 @@ pipeline and `gpui_effects` providing higher-level components and presets.
 - [Fluted glass](docs/fluted_glass.md): repeating rib refraction with crisp foreground content.
 - [Timed text](docs/timed_text.md): arbitrary character/word timings, gradient
   reveal, grouped lift/scale emphasis, and playback-clock integration.
+- [Artwork flow](docs/artwork_flow.md): cached artwork layers with caller-controlled motion and artwork crossfades.
 - [Color flow](docs/color_flow.md): image-derived flowing light and brightness configuration.
 - [Subtree effects](docs/subtree_effect.md): blur, wave, color adjustment and Bloom for element subtrees.
 - [Subtree transitions](docs/subtree_transition.md): blur fades, crossfades, soft wipes and textured dissolves between two UI subtrees.

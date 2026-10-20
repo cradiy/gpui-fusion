@@ -19,6 +19,7 @@ fn built_in_effect_shaders_are_valid_wgsl() {
         gpui_effects::plasma_shader(),
         gpui_effects::color_orbs_shader(),
         gpui_effects::color_flow_shader(),
+        gpui_effects::artwork_flow_shader(),
         gpui_effects::holographic_shader(),
         gpui_effects::holographic_mask_shader(),
         gpui_effects::holographic_image_shader(),
@@ -230,6 +231,7 @@ fn assert_effect_translates_to_msl_and_hlsl(shader: gpui::EffectShader) {
 fn built_in_effect_translates_to_msl_and_hlsl() {
     for shader in [
         gpui_effects::color_flow_shader(),
+        gpui_effects::artwork_flow_shader(),
         gpui_effects::holographic_shader(),
         gpui_effects::holographic_mask_shader(),
         gpui_effects::holographic_image_shader(),

@@ -1,5 +1,6 @@
 //! Backgrounds, gradients, glass and surface materials.
 
+mod artwork_flow;
 mod backdrop;
 mod builtins;
 mod color_flow;
@@ -11,6 +12,7 @@ mod liquid_glass_content;
 mod material;
 mod point_gradient;
 
+pub use artwork_flow::{ArtworkFlow, ArtworkFlowOptions, artwork_flow, artwork_flow_shader};
 pub use backdrop::*;
 pub use builtins::*;
 pub use color_flow::{

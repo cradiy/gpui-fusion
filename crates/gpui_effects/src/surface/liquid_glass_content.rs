@@ -63,6 +63,7 @@ impl LiquidGlassRegion {
                 ],
             )
             .with_slot(3, [color.r, color.g, color.b, color.a])
+            .with_slot(5, [deformation.ellipticity, 0., 0., 0.])
     }
 }
 

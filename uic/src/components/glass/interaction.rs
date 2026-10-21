@@ -3,8 +3,8 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     Along, App, Axis, Bounds, DispatchPhase, Entity, HitboxBehavior, HitboxId, IntoElement,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Window, canvas,
-    prelude::*, px,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, TouchId, TouchPhase,
+    Window, canvas, prelude::*, px,
 };
 
 use super::motion::Motion;
@@ -22,6 +22,7 @@ pub(super) struct State {
     pub axis: Axis,
     capture: Option<HitboxId>,
     press: Option<Press>,
+    touch: Option<TouchId>,
 }
 
 struct Press {
@@ -37,6 +38,7 @@ impl State {
             axis: Axis::Horizontal,
             capture: None,
             press: None,
+            touch: None,
         }
     }
 
@@ -45,8 +47,55 @@ impl State {
             window.release_pointer();
         }
         self.press = None;
+        self.touch = None;
         self.motion.cancel_press();
         self.motion.pointer = None;
+    }
+
+    fn begin(&mut self, position: Point<Pixels>, target: Bounds<Pixels>, selected: bool) {
+        self.motion.begin_press(Instant::now());
+        self.motion.pointer = Some(position);
+        self.press = Some(Press {
+            start: position,
+            bounds: if selected {
+                self.motion.current_bounds().unwrap_or(target)
+            } else {
+                target
+            },
+            dragging: false,
+        });
+    }
+
+    fn finish<T: Clone + PartialEq>(
+        &mut self,
+        position: Point<Pixels>,
+        root: Bounds<Pixels>,
+        options: &[OptionGeometry<T>],
+        selected: &T,
+    ) -> Option<T> {
+        self.move_lens(position, root, options);
+        let press = self.press.take();
+        self.touch = None;
+        let center = self
+            .motion
+            .drag_bounds
+            .map(|b| b.center().along(self.axis) + root.origin.along(self.axis));
+        self.motion.drag_bounds = None;
+        self.motion.pressed = false;
+        if !press?.dragging {
+            return None;
+        }
+        let center = center?;
+        let option = options
+            .iter()
+            .filter(|o| !o.disabled && o.bounds.get().is_some())
+            .min_by(|a, b| {
+                let distance = |o: &OptionGeometry<T>| {
+                    f32::from((o.bounds.get().unwrap().center().along(self.axis) - center).abs())
+                };
+                distance(a).total_cmp(&distance(b))
+            })?;
+        (&option.value != selected).then(|| option.value.clone())
     }
 
     fn move_lens<T>(
@@ -78,6 +127,37 @@ impl State {
     }
 }
 
+fn option_at<T>(
+    position: Point<Pixels>,
+    root: Bounds<Pixels>,
+    options: &[OptionGeometry<T>],
+    axis: Axis,
+) -> Option<(usize, Bounds<Pixels>)> {
+    if !root.contains(&position) {
+        return None;
+    }
+    if let Some((index, option, bounds)) = options.iter().enumerate().find_map(|(index, option)| {
+        option
+            .bounds
+            .get()
+            .filter(|b| b.contains(&position))
+            .map(|b| (index, option, b))
+    }) {
+        return (!option.disabled).then_some((index, bounds));
+    }
+    options
+        .iter()
+        .enumerate()
+        .filter(|(_, option)| !option.disabled)
+        .filter_map(|(index, option)| option.bounds.get().map(|bounds| (index, bounds)))
+        .min_by(|(_, a), (_, b)| {
+            let distance = |bounds: &Bounds<Pixels>| {
+                f32::from((bounds.center().along(axis) - position.along(axis)).abs())
+            };
+            distance(a).total_cmp(&distance(b))
+        })
+}
+
 pub(super) fn interaction<T: Clone + PartialEq + 'static>(
     state: Entity<State>,
     options: Rc<Vec<OptionGeometry<T>>>,
@@ -107,6 +187,87 @@ pub(super) fn interaction<T: Clone + PartialEq + 'static>(
             if !enabled {
                 return;
             }
+            let touch_state = state.clone();
+            let touch_options = options.clone();
+            let touch_selected = selected.clone();
+            let touch_callback = callback.clone();
+            let touch_hitbox = hitbox.clone();
+            window.on_touch_event(move |event, phase, window, cx| {
+                if event.phase == TouchPhase::Started {
+                    if !phase.bubble()
+                        || window.default_prevented()
+                        || !touch_hitbox.is_hovered(window)
+                        || !bounds.contains(&event.position)
+                    {
+                        return;
+                    }
+                    if touch_state.read(cx).press.is_some() {
+                        if touch_state.read(cx).touch.is_some() {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                        }
+                        return;
+                    }
+                    let Some((index, option_bounds)) = option_at(
+                        event.position,
+                        bounds,
+                        &touch_options,
+                        touch_state.read(cx).axis,
+                    ) else {
+                        return;
+                    };
+                    window.capture_pointer(touch_hitbox.id);
+                    touch_state.update(cx, |state, cx| {
+                        state.touch = Some(event.id);
+                        state.begin(
+                            event.position,
+                            Bounds::new(option_bounds.origin - bounds.origin, option_bounds.size),
+                            touch_options[index].value == touch_selected,
+                        );
+                        cx.notify();
+                    });
+                    if touch_options[index].value != touch_selected
+                        && let Some(callback) = &touch_callback
+                    {
+                        callback(touch_options[index].value.clone(), window, cx);
+                    }
+                } else {
+                    if !phase.capture() || touch_state.read(cx).touch != Some(event.id) {
+                        return;
+                    }
+                    let value = touch_state.update(cx, |state, cx| {
+                        let value = match event.phase {
+                            TouchPhase::Moved => {
+                                state.move_lens(event.position, bounds, &touch_options);
+                                None
+                            }
+                            TouchPhase::Ended => {
+                                window.release_pointer();
+                                state.finish(
+                                    event.position,
+                                    bounds,
+                                    &touch_options,
+                                    &touch_selected,
+                                )
+                            }
+                            TouchPhase::Cancelled => {
+                                state.cancel(window);
+                                None
+                            }
+                            TouchPhase::Started => unreachable!(),
+                        };
+                        cx.notify();
+                        value
+                    });
+                    if let Some(value) = value
+                        && let Some(callback) = &touch_callback
+                    {
+                        callback(value, window, cx);
+                    }
+                }
+                window.prevent_default();
+                cx.stop_propagation();
+            });
             let down_state = state.clone();
             let down_options = options.clone();
             let down_hitbox = hitbox.clone();
@@ -116,38 +277,25 @@ pub(super) fn interaction<T: Clone + PartialEq + 'static>(
                 if phase != DispatchPhase::Bubble
                     || event.button != MouseButton::Left
                     || !down_hitbox.is_hovered(window)
+                    || down_state.read(cx).touch.is_some()
                 {
                     return;
                 }
-                let Some((index, option_bounds)) = down_options
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, o)| !o.disabled)
-                    .find_map(|(i, o)| {
-                        o.bounds
-                            .get()
-                            .filter(|b| b.contains(&event.position))
-                            .map(|b| (i, b))
-                    })
-                else {
+                let Some((index, option_bounds)) = option_at(
+                    event.position,
+                    bounds,
+                    &down_options,
+                    down_state.read(cx).axis,
+                ) else {
                     return;
                 };
                 window.capture_pointer(down_hitbox.id);
                 down_state.update(cx, |state, cx| {
-                    state.motion.begin_press(Instant::now());
-                    state.motion.pointer = Some(event.position);
-                    let target =
-                        Bounds::new(option_bounds.origin - bounds.origin, option_bounds.size);
-                    let local = if down_options[index].value == down_selected {
-                        state.motion.current_bounds().unwrap_or(target)
-                    } else {
-                        target
-                    };
-                    state.press = Some(Press {
-                        start: event.position,
-                        bounds: local,
-                        dragging: false,
-                    });
+                    state.begin(
+                        event.position,
+                        Bounds::new(option_bounds.origin - bounds.origin, option_bounds.size),
+                        down_options[index].value == down_selected,
+                    );
                     cx.notify();
                 });
                 if down_options[index].value != down_selected
@@ -164,6 +312,7 @@ pub(super) fn interaction<T: Clone + PartialEq + 'static>(
                 if phase == DispatchPhase::Capture
                     && event.dragging()
                     && window.captured_hitbox() == Some(move_hitbox.id)
+                    && move_state.read(cx).touch.is_none()
                 {
                     move_state.update(cx, |state, cx| {
                         state.move_lens(event.position, bounds, &move_options);
@@ -176,38 +325,15 @@ pub(super) fn interaction<T: Clone + PartialEq + 'static>(
                 if phase != DispatchPhase::Capture
                     || event.button != MouseButton::Left
                     || window.captured_hitbox() != Some(hitbox.id)
+                    || state.read(cx).touch.is_some()
                 {
                     return;
                 }
                 window.release_pointer();
                 let value = state.update(cx, |state, cx| {
-                    state.move_lens(event.position, bounds, &options);
-                    let press = state.press.take();
-                    let axis = state.axis;
-                    let center = state
-                        .motion
-                        .drag_bounds
-                        .map(|b| b.center().along(axis) + bounds.origin.along(axis));
-                    state.motion.drag_bounds = None;
-                    state.motion.pressed = false;
+                    let value = state.finish(event.position, bounds, &options, &selected);
                     cx.notify();
-                    let press = press?;
-                    if !press.dragging {
-                        return None;
-                    }
-                    let center = center?;
-                    let option = options
-                        .iter()
-                        .filter(|o| !o.disabled && o.bounds.get().is_some())
-                        .min_by(|a, b| {
-                            let distance = |o: &OptionGeometry<T>| {
-                                f32::from(
-                                    (o.bounds.get().unwrap().center().along(axis) - center).abs(),
-                                )
-                            };
-                            distance(a).total_cmp(&distance(b))
-                        })?;
-                    (option.value != selected).then(|| option.value.clone())
+                    value
                 });
                 if let Some(value) = value
                     && let Some(callback) = &callback

@@ -40,8 +40,12 @@ fn shared_shadows_preserve_inset_blur_and_clipping() -> anyhow::Result<()> {
                 bounds: bounds(x + 12., y + 8., 88., 80.),
             },
             color: rgb(0xffffff).into(),
-            element_bounds: bounds(x + 8., y + 8., 96., 80.),
-            element_corner_radii: Corners::all(ScaledPixels(16.)),
+            element_bounds: if index < 2 {
+                bounds(x + 24., y + 24., 64., 48.)
+            } else {
+                bounds(x + 8., y + 8., 96., 80.)
+            },
+            element_corner_radii: Corners::all(ScaledPixels(if index < 2 { 10. } else { 16. })),
             inset: u32::from(index >= 2),
             pad: 0,
         });
@@ -50,8 +54,9 @@ fn shared_shadows_preserve_inset_blur_and_clipping() -> anyhow::Result<()> {
     let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(256), DevicePixels(192)))?;
     let pixels = renderer.render_rgba(&scene)?;
     let red = |x: usize, y: usize| pixels[(y * 256 + x) * 4];
-    assert_eq!(red(56, 48), 255, "sharp outer shadow center");
-    assert!(red(184, 48) > 250, "blurred outer shadow center");
+    assert_eq!(red(56, 48), 0, "sharp outer shadow excludes the element");
+    assert_eq!(red(184, 48), 0, "blurred outer shadow excludes the element");
+    assert!(red(154, 26) > 0, "outer shadow follows the rounded corner");
     assert_eq!(red(20, 48), 0, "sharp shadow has no tail");
     assert!(red(148, 48) > 0, "blurred shadow has a tail");
     for x in [0, 128] {

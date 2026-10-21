@@ -4,6 +4,8 @@ use gpui::{
     Rgba, StatefulInteractiveElement, StyleRefinement, Styled, Window, div, hsla, point, px,
 };
 
+use super::liquid_glass_lens::{LiquidGlassLensAppearance, paint_liquid_glass_lens};
+
 const OPTICS_SLOT: usize = 0;
 const TINT_SLOT: usize = 1;
 const SURFACE_SLOT: usize = 2;
@@ -22,6 +24,8 @@ pub struct LiquidGlassDeformation {
     pub bulge: Pixels,
     /// Signed displacement of the secondary contour wave, in logical pixels.
     pub ripple: Pixels,
+    /// Blend from the rounded rectangle to an ellipse, in `0..=1`.
+    pub ellipticity: f32,
 }
 
 impl LiquidGlassDeformation {
@@ -31,6 +35,7 @@ impl LiquidGlassDeformation {
             focus: point(self.focus.x.clamp(0., 1.), self.focus.y.clamp(0., 1.)),
             bulge: self.bulge.clamp(-limit, limit),
             ripple: self.ripple.clamp(-limit, limit),
+            ellipticity: self.ellipticity.clamp(0., 1.),
         }
     }
 }
@@ -44,6 +49,10 @@ pub struct LiquidGlassAppearance {
     pub clarity: f32,
     /// Maximum inward background displacement, in logical pixels.
     pub refraction: Pixels,
+    /// Refract the interior as well as the curved edge. Disabled by default.
+    pub full_refraction: bool,
+    /// Compress sampled highlights while preserving scene detail and RGB ratios.
+    pub compress_highlights: bool,
     /// Width of the curved edge region, in logical pixels.
     pub thickness: Pixels,
     /// Relative RGB separation at refracted edges in `0..=0.1`; zero disables it.
@@ -79,6 +88,8 @@ impl LiquidGlassAppearance {
             blur_radius: px(8.0),
             clarity: 0.22,
             refraction: px(18.0),
+            full_refraction: false,
+            compress_highlights: false,
             thickness: px(16.0),
             dispersion: 0.015,
             tint: hsla(0.0, 0.0, 1.0, 0.12),
@@ -116,7 +127,7 @@ impl LiquidGlassAppearance {
         }
     }
 
-    fn uniforms(self, corners: Corners<Pixels>, scale: f32) -> EffectUniforms {
+    pub(super) fn uniforms(self, corners: Corners<Pixels>, scale: f32) -> EffectUniforms {
         let tint: Rgba = self.tint.into();
         EffectUniforms::new()
             .with_slot(
@@ -181,7 +192,12 @@ impl Default for LiquidGlassAppearance {
 /// foreground colors, padding, shadows, and interaction use the normal Div APIs.
 pub struct LiquidGlass {
     div: Div,
-    appearance: LiquidGlassAppearance,
+    material: GlassMaterial,
+}
+
+enum GlassMaterial {
+    Pane(LiquidGlassAppearance),
+    Lens(LiquidGlassLensAppearance),
 }
 
 impl LiquidGlass {
@@ -192,12 +208,20 @@ impl LiquidGlass {
     pub fn with_appearance(appearance: LiquidGlassAppearance) -> Self {
         Self {
             div: div(),
-            appearance,
+            material: GlassMaterial::Pane(appearance),
+        }
+    }
+
+    /// A convex lens with a clear center and a folded, dispersive edge.
+    pub fn with_lens(appearance: LiquidGlassLensAppearance) -> Self {
+        Self {
+            div: div(),
+            material: GlassMaterial::Lens(appearance),
         }
     }
 
     pub fn appearance(mut self, appearance: LiquidGlassAppearance) -> Self {
-        self.appearance = appearance;
+        self.material = GlassMaterial::Pane(appearance);
         self
     }
 
@@ -244,11 +268,22 @@ impl IntoElement for LiquidGlass {
 
 impl RenderOnce for LiquidGlass {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let appearance = self.appearance;
+        let material = self.material;
         self.div.on_paint_before_children(
             move |bounds: Bounds<Pixels>, style, window: &mut Window, _| {
                 let corners = style.corner_radii.to_pixels(window.rem_size());
-                paint_liquid_glass(bounds, corners, appearance, window);
+                match material {
+                    GlassMaterial::Pane(appearance) => {
+                        paint_liquid_glass(bounds, corners, appearance, window)
+                    }
+                    GlassMaterial::Lens(appearance) => paint_liquid_glass_lens(
+                        bounds,
+                        corners,
+                        appearance,
+                        Default::default(),
+                        window,
+                    ),
+                }
             },
         )
     }
@@ -285,6 +320,39 @@ pub fn paint_deformed_liquid_glass(
     deformation: LiquidGlassDeformation,
     window: &mut Window,
 ) {
+    let scale = window.raster_scale_factor();
+    let uniforms = appearance.uniforms(corners.clamp_radii_for_quad_size(bounds.size), scale);
+    let sampling_reach = if appearance.edge_tint_strength > 0. {
+        appearance.edge_sample_distance.max(px(0.)) * 1.5
+    } else {
+        px(0.)
+    };
+    paint_glass_shader(
+        bounds,
+        deformation,
+        appearance.blur_radius,
+        sampling_reach,
+        if appearance.compress_highlights {
+            liquid_glass_compressed_shader(appearance.full_refraction)
+        } else if appearance.full_refraction {
+            liquid_glass_full_surface_shader()
+        } else {
+            liquid_glass_shader()
+        },
+        uniforms,
+        window,
+    );
+}
+
+pub(super) fn paint_glass_shader(
+    bounds: Bounds<Pixels>,
+    deformation: LiquidGlassDeformation,
+    blur_radius: Pixels,
+    sampling_reach: Pixels,
+    shader: BackdropShader,
+    uniforms: EffectUniforms,
+    window: &mut Window,
+) {
     if bounds.size.width <= px(0.) || bounds.size.height <= px(0.) {
         return;
     }
@@ -292,8 +360,7 @@ pub fn paint_deformed_liquid_glass(
     let bulge = deformation.bulge;
     let ripple = deformation.ripple;
     let scale = window.raster_scale_factor();
-    let padding = bulge.abs() + ripple.abs() + px(1. / scale);
-    let uniforms = appearance.uniforms(corners.clamp_radii_for_quad_size(bounds.size), scale);
+    let padding = bulge.abs() + ripple.abs() + sampling_reach.max(px(0.)) + px(1. / scale);
     let light = uniforms.slots()[LIGHT_SLOT];
     let center = bounds.center();
     let uniforms = uniforms
@@ -306,7 +373,7 @@ pub fn paint_deformed_liquid_glass(
             [
                 bounds.size.width.as_f32() * scale,
                 bounds.size.height.as_f32() * scale,
-                1.,
+                1. + deformation.ellipticity,
                 center.y.as_f32() * scale,
             ],
         )
@@ -320,12 +387,8 @@ pub fn paint_deformed_liquid_glass(
             ],
         );
     window.paint_backdrop_effect(
-        PaintBackdropEffect::new(
-            bounds.dilate(padding),
-            appearance.blur_radius.max(px(0.)),
-            liquid_glass_shader(),
-        )
-        .uniforms(uniforms),
+        PaintBackdropEffect::new(bounds.dilate(padding), blur_radius.max(px(0.)), shader)
+            .uniforms(uniforms),
     );
 }
 
@@ -334,8 +397,42 @@ pub fn liquid_glass_shader() -> BackdropShader {
     BackdropShader::wgsl(concat!(
         include_str!("shaders/liquid_glass_shape.wgsl"),
         "\n",
-        include_str!("shaders/liquid_glass.wgsl")
+        include_str!("shaders/liquid_glass.wgsl"),
+        "\n",
+        "fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> { return liquid_glass_material(input, params, false, false); }"
     ))
+}
+
+/// Backdrop refraction across the entire surface, including its interior.
+pub fn liquid_glass_full_surface_shader() -> BackdropShader {
+    BackdropShader::wgsl(concat!(
+        include_str!("shaders/liquid_glass_shape.wgsl"),
+        "\n",
+        include_str!("shaders/liquid_glass.wgsl"),
+        "\n",
+        "fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> { return liquid_glass_material(input, params, true, false); }"
+    ))
+}
+
+/// Clear scene sampling with monotonic highlight compression and preserved RGB ratios.
+pub fn liquid_glass_compressed_shader(full_refraction: bool) -> BackdropShader {
+    if full_refraction {
+        BackdropShader::wgsl(concat!(
+            include_str!("shaders/liquid_glass_shape.wgsl"),
+            "\n",
+            include_str!("shaders/liquid_glass.wgsl"),
+            "\n",
+            "fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> { return liquid_glass_material(input, params, true, true); }"
+        ))
+    } else {
+        BackdropShader::wgsl(concat!(
+            include_str!("shaders/liquid_glass_shape.wgsl"),
+            "\n",
+            include_str!("shaders/liquid_glass.wgsl"),
+            "\n",
+            "fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> { return liquid_glass_material(input, params, false, true); }"
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -449,7 +546,14 @@ mod tests {
 
     #[test]
     fn glass_shaders_are_valid_wgsl() {
-        for shader in [liquid_glass_shader(), crate::fluted_glass_shader()] {
+        for shader in [
+            liquid_glass_shader(),
+            liquid_glass_full_surface_shader(),
+            liquid_glass_compressed_shader(false),
+            liquid_glass_compressed_shader(true),
+            crate::fluted_glass_shader(),
+            crate::liquid_glass_lens_shader(),
+        ] {
             let source = gpui::compose_backdrop_shader_wgsl(&shader);
             let module = naga::front::wgsl::parse_str(&source)
                 .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)));

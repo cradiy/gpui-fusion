@@ -191,7 +191,7 @@ impl Render for Demo {
                     .min_h(px(440.))
                     .w_full()
                     .rounded(px(28.))
-                    .bg(rgb(if self.dark { 0x303030 } else { 0xa8a8a8 }))
+                    .bg(rgb(if self.dark { 0x16171b } else { 0xa8a8a8 }))
                     .flex()
                     .items_center()
                     .justify_center()

@@ -61,19 +61,29 @@ fn vs_backdrop(
 fn fs_blur(input: BackdropVarying) -> @location(0) vec4<f32> {
     let instance = b_backdrops[input.instance_id];
     let uv = input.position.xy / max(instance.content_mask.size, vec2<f32>(1.0));
-    let step = instance.direction * instance.blur_radius
-        / max(globals.viewport_size, vec2<f32>(1.0)) * 0.25;
-
-    var color = sample_backdrop(uv) * 0.227027;
-    color += sample_backdrop(uv + step * 1.0) * 0.1945946;
-    color += sample_backdrop(uv - step * 1.0) * 0.1945946;
-    color += sample_backdrop(uv + step * 2.0) * 0.1216216;
-    color += sample_backdrop(uv - step * 2.0) * 0.1216216;
-    color += sample_backdrop(uv + step * 3.0) * 0.054054;
-    color += sample_backdrop(uv - step * 3.0) * 0.054054;
-    color += sample_backdrop(uv + step * 4.0) * 0.016216;
-    color += sample_backdrop(uv - step * 4.0) * 0.016216;
-    return color;
+    let dimensions = vec2<f32>(textureDimensions(t_backdrop));
+    let radius = max(instance.blur_radius, 0.0)
+        * dot(abs(instance.direction), dimensions / max(globals.viewport_size, vec2<f32>(1.0)));
+    if (radius <= 0.0) {
+        return sample_backdrop(uv);
+    }
+    // Sample the whole Gaussian support in source texels. Pair adjacent taps
+    // through bilinear filtering; scaling a sparse kernel repeats fine detail.
+    let sigma = max(radius * 0.4375, 0.001);
+    let limit = i32(ceil(radius));
+    var color = vec4<f32>(0.0);
+    var total_weight = 0.0;
+    for (var tap = -limit; tap <= limit; tap += 2) {
+        let first = f32(tap);
+        let second = first + 1.0;
+        let w0 = exp(-0.5 * first * first / (sigma * sigma));
+        let w1 = select(0.0, exp(-0.5 * second * second / (sigma * sigma)), tap + 1 <= limit);
+        let weight = w0 + w1;
+        let offset = (first * w0 + second * w1) / max(weight, 0.000001);
+        color += sample_backdrop(uv + instance.direction * offset / dimensions) * weight;
+        total_weight += weight;
+    }
+    return color / max(total_weight, 0.000001);
 }
 
 fn corner_radius(point: vec2<f32>, radii: vec4<f32>) -> f32 {

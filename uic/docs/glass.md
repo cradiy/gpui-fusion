@@ -55,6 +55,8 @@ layout, uniformly scaling width and height.
   Each surface scales uniformly about its own center, including corner radii.
   Both share the press spring, which can slightly overshoot the held scale.
   Ancestor clipping still applies. Labels and hit regions retain their layout size.
+- `selection_horizontal_outset` extends both horizontal sides of the lens without
+  changing option layout. It defaults to zero and follows the press scale.
 - `animated(false)` disables motion interpolation.
 - `disabled(true)` prevents pointer activation.
 
@@ -67,12 +69,17 @@ Pair `dark()` with a light foreground color using `text_color`.
 
 The track is painted first, followed by the options and finally the selection
 lens. The lens samples both the background and the painted options, so icons,
-text, emoji, and images participate in edge refraction, dispersion, and material
-shading. The center keeps its original geometry. The curved band is capped at
-10% of the lens's shorter dimension and scales with the pressed lens. Refraction
-is limited relative to this band, including dispersion, to keep interior strokes
-from folding into repeated edge images. Content bends as the band passes over
-it during dragging; content outside the lens retains its original geometry.
+text, emoji, and images participate in refraction and dispersion while pressed.
+Refraction, dispersion, magnification, and scene reflection fade with the press
+spring and stop at rest; the stationary lens retains its tint and rim.
+Transmission reach is limited relative
+to the curved band, including the dispersed channels, to keep sampled scene
+coordinates ordered across the edge.
+
+The light and dark presets use a subtle neutral dark tint for the selected lens.
+Holding preserves most of this tint and uniformly enlarges the rounded contour. Grazing-angle reflection samples the surrounding scene and strengthens
+under pressure. Its color follows that scene. Highlights remain confined to a
+narrow rim.
 
 Before refraction, text and monochrome SVGs use `selected_text` within the lens
 region. Their source colors remain unchanged outside it. Color and glyph shape

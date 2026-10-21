@@ -316,3 +316,112 @@ fn pointer_selection_preserves_host_focus_and_keyboard_events(cx: &mut TestAppCo
         })
         .unwrap();
 }
+
+#[gpui::test]
+fn native_touch_owns_drag_skips_disabled_and_cancels_without_committing(cx: &mut TestAppContext) {
+    use gpui::{Pixels, PlatformInput, Point, TouchEvent, TouchId, TouchPhase};
+
+    fn touch(
+        visual: &mut VisualTestContext,
+        id: u64,
+        phase: TouchPhase,
+        position: Point<Pixels>,
+    ) -> bool {
+        visual.update(|window, cx| {
+            let result = window.dispatch_event(
+                PlatformInput::Touch(TouchEvent {
+                    id: TouchId(id),
+                    phase,
+                    position,
+                    force: None,
+                }),
+                cx,
+            );
+            window.draw(cx).clear();
+            result.default_prevented
+        })
+    }
+
+    for vertical in [false, true] {
+        let window = cx.open_window(size(px(650.), px(360.)), |_, _| Demo {
+            selected: 0,
+            vertical,
+            disabled: false,
+            changes: Vec::new(),
+        });
+        let mut visual = VisualTestContext::from_window(window.into(), cx);
+        visual.update(|window, cx| {
+            window.activate_window();
+            window.draw(cx).clear();
+        });
+        visual.background_executor.run_until_parked();
+        let first = visual.debug_bounds("uic-glass-segment-0").unwrap();
+        let disabled = visual.debug_bounds("uic-glass-segment-1").unwrap().center();
+        let last = visual.debug_bounds("uic-glass-segment-3").unwrap().center();
+        let outside = point(px(640.), px(350.));
+
+        assert!(!touch(&mut visual, 31, TouchPhase::Started, disabled));
+        assert!(!touch(&mut visual, 31, TouchPhase::Ended, disabled));
+        assert!(touch(&mut visual, 32, TouchPhase::Started, first.center()));
+        assert!(touch(&mut visual, 33, TouchPhase::Started, last));
+        assert!(!touch(&mut visual, 33, TouchPhase::Cancelled, last));
+        assert!(touch(&mut visual, 32, TouchPhase::Moved, disabled));
+        window
+            .update(&mut visual.cx, |this, window, _| {
+                assert!(this.changes.is_empty());
+                assert!(window.captured_hitbox().is_some());
+            })
+            .unwrap();
+        assert!(touch(&mut visual, 32, TouchPhase::Moved, outside));
+        assert!(touch(&mut visual, 32, TouchPhase::Ended, outside));
+        window
+            .update(&mut visual.cx, |this, window, _| {
+                assert_eq!(this.changes, [3]);
+                assert!(window.captured_hitbox().is_none());
+            })
+            .unwrap();
+
+        assert!(touch(&mut visual, 34, TouchPhase::Started, first.center()));
+        assert!(touch(&mut visual, 34, TouchPhase::Moved, last));
+        assert!(touch(&mut visual, 34, TouchPhase::Cancelled, last));
+        window
+            .update(&mut visual.cx, |this, window, _| {
+                assert_eq!(this.changes, [3, 0]);
+                assert!(window.captured_hitbox().is_none());
+            })
+            .unwrap();
+
+        let padding = if vertical {
+            first.center() - point(px(0.), first.size.height / 2. + px(3.))
+        } else {
+            first.center() - point(first.size.width / 2. + px(3.), px(0.))
+        };
+        assert!(touch(&mut visual, 35, TouchPhase::Started, padding));
+        assert!(touch(&mut visual, 35, TouchPhase::Moved, last));
+        assert!(touch(&mut visual, 35, TouchPhase::Ended, last));
+        window
+            .update(&mut visual.cx, |this, _, _| {
+                assert_eq!(this.changes, [3, 0, 3]);
+            })
+            .unwrap();
+
+        assert!(touch(&mut visual, 36, TouchPhase::Started, first.center()));
+        window
+            .update(&mut visual.cx, |this, _, cx| {
+                this.disabled = true;
+                cx.notify();
+            })
+            .unwrap();
+        visual.update(|window, cx| {
+            window.draw(cx).clear();
+            assert!(window.captured_hitbox().is_none());
+        });
+        assert!(!touch(&mut visual, 36, TouchPhase::Moved, last));
+        assert!(!touch(&mut visual, 36, TouchPhase::Ended, last));
+        window
+            .update(&mut visual.cx, |this, _, _| {
+                assert_eq!(this.changes, [3, 0, 3, 0]);
+            })
+            .unwrap();
+    }
+}

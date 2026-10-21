@@ -44,7 +44,11 @@ pub(super) fn check(renderer: &mut WgpuOffscreenRenderer) -> anyhow::Result<()> 
                         bounds: region(0., 0., 160., 160.),
                     },
                     color: rgb(0xffffff).into(),
-                    element_bounds: region(0., 0., 160., 160.),
+                    element_bounds: if inset == 0 {
+                        region(0., 0., 0., 0.)
+                    } else {
+                        region(0., 0., 160., 160.)
+                    },
                     element_corner_radii: Corners::default(),
                     inset,
                     pad: 0,

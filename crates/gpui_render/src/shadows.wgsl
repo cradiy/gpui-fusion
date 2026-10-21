@@ -8,8 +8,7 @@ struct Shadow {
     corner_radii: Corners,
     content_mask: Bounds,
     color: Hsla,
-    // Only consulted when `inset == 1u`: the element's own bounds, used as a rounded-rect
-    // clip so the shadow never escapes the element.
+    // The element silhouette clips inset shadows inside and drop shadows outside.
     element_bounds: Bounds,
     element_corner_radii: Corners,
     // 0 = drop shadow, 1 = inset shadow.
@@ -105,6 +104,10 @@ fn fs_shadow(input: ShadowVarying) -> @location(0) vec4<f32> {
         let element_distance = quad_sdf((input.position.xy + globals.viewport_origin), shadow.element_bounds,
                                         shadow.element_corner_radii);
         alpha *= saturate(0.5 - element_distance);
+    } else {
+        let element_distance = quad_sdf((input.position.xy + globals.viewport_origin), shadow.element_bounds,
+                                        shadow.element_corner_radii);
+        alpha *= saturate(0.5 + element_distance);
     }
 
     return blend_color(input.color, alpha);

@@ -23,7 +23,7 @@ fn glass_border_reflection(sampled: vec3<f32>, lift: f32) -> vec3<f32> {
     return rgb * (mix(peak, 1.0, lift) / peak);
 }
 
-fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
+fn liquid_glass_material(input: BackdropInput, params: BackdropParams, full_refraction: bool, compress_highlights: bool) -> vec4<f32> {
     let optics = params.slots[0];
     let tint = params.slots[1];
     let surface = params.slots[2];
@@ -37,15 +37,15 @@ fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
         input.position - vec2<f32>(light.w, params.slots[6].w), deformed);
     let shape_size = select(input.size, params.slots[6].xy, deformed);
     let deformation = select(vec4<f32>(0.0), params.slots[7], deformed);
-    let distance = glass_contour(p, shape_size, radii, deformation);
+    let distance = glass_contour(p, shape_size, radii, deformation, max(params.slots[6].z - 1.0, 0.0));
     let inside = max(-distance, 0.0);
 
     // The distance gradient follows straight edges and each individual corner.
     let gradient = vec2<f32>(
-        glass_contour(p + vec2<f32>(0.5, 0.0), shape_size, radii, deformation)
-            - glass_contour(p - vec2<f32>(0.5, 0.0), shape_size, radii, deformation),
-        glass_contour(p + vec2<f32>(0.0, 0.5), shape_size, radii, deformation)
-            - glass_contour(p - vec2<f32>(0.0, 0.5), shape_size, radii, deformation),
+        glass_contour(p + vec2<f32>(0.5, 0.0), shape_size, radii, deformation, max(params.slots[6].z - 1.0, 0.0))
+            - glass_contour(p - vec2<f32>(0.5, 0.0), shape_size, radii, deformation, max(params.slots[6].z - 1.0, 0.0)),
+        glass_contour(p + vec2<f32>(0.0, 0.5), shape_size, radii, deformation, max(params.slots[6].z - 1.0, 0.0))
+            - glass_contour(p - vec2<f32>(0.0, 0.5), shape_size, radii, deformation, max(params.slots[6].z - 1.0, 0.0)),
     );
     let normal = gradient / max(length(gradient), 0.0001);
     let thickness = min(optics.w, min(shape_size.x, shape_size.y) * 0.45);
@@ -63,7 +63,13 @@ fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
     // compress and fold the sampled image inside the lens edge. Bound the reach
     // by the surface size, including dispersion, rather than flattening the lens.
     let refraction = min(optics.z, min(shape_size.x, shape_size.y) * 0.45 / (1.0 + surface.z));
-    let displacement = -lens_direction * refraction * curvature;
+    var displacement = -lens_direction * refraction * curvature;
+    if (full_refraction) {
+        // A continuous converging field magnifies scene detail throughout the
+        // interior and joins the curved edge without a flat central region.
+        let body_displacement = -radial * refraction * 0.6;
+        displacement = mix(body_displacement, -lens_direction * refraction, curvature);
+    }
     // Preserve detail in the lens edge while retaining the configured center blur.
     let clarity = mix(surface.w, 1.0, curvature * 0.9);
     let red_displacement = displacement * (1.0 + surface.z);
@@ -80,6 +86,10 @@ fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
 
     let luminance = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
     color = mix(vec3<f32>(luminance), color, optics.x) * optics.y;
+    if (compress_highlights) {
+        let peak = max(max(color.r, color.g), color.b);
+        color /= 1.0 + 2.0 * peak;
+    }
     color = mix(color, tint.rgb, clamp(tint.a, 0.0, 1.0));
 
     var direction = vec2<f32>(-0.6, -0.8);

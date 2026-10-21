@@ -2,11 +2,13 @@ use scheduler::Instant;
 use std::{cell::Cell, rc::Rc};
 
 use gpui::{
-    AnyElement, App, Axis, Bounds, BoxShadow, ElementId, FlexDirection, IntoElement, Pixels,
-    RenderOnce, Role, SharedString, StyleRefinement, Styled, Window, canvas, div, fill, hsla,
-    point, prelude::*, px, rgb,
+    AnyElement, App, Axis, Bounds, ElementId, FlexDirection, IntoElement, Pixels, RenderOnce, Role,
+    SharedString, StyleRefinement, Styled, Window, canvas, div, fill, point, prelude::*, px, rgb,
 };
-use gpui_effects::{LiquidGlassRegion, liquid_glass_content, paint_liquid_glass};
+use gpui_effects::{
+    LiquidGlassDeformation, LiquidGlassRegion, liquid_glass_content, paint_liquid_glass,
+    paint_liquid_glass_lens,
+};
 
 use super::{
     GlassSegmentedAppearance,
@@ -21,7 +23,7 @@ struct OptionItem<T> {
 }
 
 /// A controlled, single-selection glass control with an interruptible indicator.
-/// Option layout stays fixed while the moving glass refracts its painted content. Give each
+/// Option layout stays fixed while the moving glass refracts the background and its painted content. Give each
 /// control a stable ID and update the selected value in `on_change`.
 /// Selection and keyboard policy are owned by the caller; this control handles pointers.
 #[derive(IntoElement)]
@@ -34,6 +36,7 @@ pub struct GlassSegmentedControl<T: Clone + PartialEq + 'static> {
     disabled: bool,
     animated: bool,
     press_scales: PressScales,
+    selection_horizontal_outset: Pixels,
     reduced_transparency: bool,
     appearance: GlassSegmentedAppearance,
     style: StyleRefinement,
@@ -50,6 +53,7 @@ impl<T: Clone + PartialEq + 'static> GlassSegmentedControl<T> {
             disabled: false,
             animated: true,
             press_scales: PressScales::default(),
+            selection_horizontal_outset: px(0.),
             reduced_transparency: false,
             appearance: GlassSegmentedAppearance::default(),
             style: StyleRefinement::default()
@@ -117,6 +121,18 @@ impl<T: Clone + PartialEq + 'static> GlassSegmentedControl<T> {
             "selection press scale must be in 1.0..=2.0"
         );
         self.press_scales.selection = scale;
+        self
+    }
+
+    /// Extends both horizontal sides of the selected lens, without changing option layout.
+    /// Defaults to zero. The outset follows the lens's press scale.
+    #[track_caller]
+    pub fn selection_horizontal_outset(mut self, outset: Pixels) -> Self {
+        assert!(
+            outset >= px(0.),
+            "selection horizontal outset must be nonnegative"
+        );
+        self.selection_horizontal_outset = outset;
         self
     }
 
@@ -227,13 +243,14 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for GlassSegmentedControl<T> {
         let reduced = self.reduced_transparency || !window.supports_backdrop_blur();
         let animated = self.animated;
         let press_scales = self.press_scales;
+        let selection_horizontal_outset = self.selection_horizontal_outset;
         let disabled = self.disabled;
         let lens = Rc::new(Cell::new(None));
         let lens_to_paint = lens.clone();
         let painted = div().on_paint_before_children(move |bounds, style, window, cx| {
-            lens.set(None);
             root_bounds.set(Some(bounds));
             content_region.set(None);
+            lens.set(None);
             let corners = style
                 .corner_radii
                 .to_pixels(window.rem_size())
@@ -269,15 +286,18 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for GlassSegmentedControl<T> {
             let surface_corners = corners
                 .map(|radius| *radius * surface_scale)
                 .clamp_radii_for_quad_size(surface_bounds.size);
-            if reduced {
-                window.paint_quad(fill(surface_bounds, fallback).corner_radii(surface_corners));
-            } else {
-                let mut surface = appearance.surface;
-                surface.thickness *= surface_scale;
-                surface.refraction *= surface_scale;
-                paint_liquid_glass(surface_bounds, surface_corners, surface, window);
-            }
+            let paint_surface = |window: &mut Window| {
+                if reduced {
+                    window.paint_quad(fill(surface_bounds, fallback).corner_radii(surface_corners));
+                } else {
+                    let mut surface = appearance.surface;
+                    surface.thickness *= surface_scale;
+                    surface.refraction *= surface_scale;
+                    paint_liquid_glass(surface_bounds, surface_corners, surface, window);
+                }
+            };
             let Some(visual) = visual else {
+                paint_surface(window);
                 return;
             };
             if visual.moving && window.is_window_active() {
@@ -285,10 +305,25 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for GlassSegmentedControl<T> {
             }
             let mut selected = visual.bounds;
             selected.origin += bounds.origin;
+            let horizontal_outset = selection_horizontal_outset * visual.scale;
+            selected.origin.x -= horizontal_outset;
+            selected.size.width += horizontal_outset * 2.;
             let selected_corners = corners
                 .map(|radius| (*radius - px(4.)).max(px(0.)) * visual.scale)
                 .clamp_radii_for_quad_size(selected.size);
-            content_region.set(Some(LiquidGlassRegion {
+            let focus = pointer.map_or(point(0.5, 0.5), |pointer| {
+                point(
+                    ((pointer.x - selected.left()) / selected.size.width).clamp(0., 1.),
+                    ((pointer.y - selected.top()) / selected.size.height).clamp(0., 1.),
+                )
+            });
+            let deformation = LiquidGlassDeformation {
+                focus,
+                bulge: px(2.5 * visual.pressure),
+                ripple: px(1.2 * visual.pressure),
+                ellipticity: 0.,
+            };
+            let region = LiquidGlassRegion {
                 bounds: if reduced {
                     Bounds::from_corners(
                         window.pixel_snap_point(selected.origin),
@@ -298,29 +333,27 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for GlassSegmentedControl<T> {
                     selected
                 },
                 corner_radii: selected_corners,
-                deformation: Default::default(),
-            }));
-            window.paint_drop_shadows(
-                selected,
-                selected_corners,
-                &[BoxShadow::new(
-                    px(0.),
-                    px(2.5 + visual.pressure * 3.5),
-                    hsla(0.6, 0.2, 0.05, 0.1 + visual.pressure * 0.06),
-                )
-                .blur_radius(px(7. + visual.pressure * 9.))],
-            );
+                deformation: if reduced {
+                    Default::default()
+                } else {
+                    deformation
+                },
+            };
+            content_region.set(Some(region));
             let mut optics = appearance.selection;
-            optics.highlight *= 1. + visual.pressure * 0.12;
-            optics.thickness = (optics.thickness.max(px(0.)) * visual.scale)
-                .min(selected.size.width.min(selected.size.height) * 0.1);
-            // Smoothstep's maximum slope is 1.5 / thickness. Keep every color
-            // channel below that fold threshold so edge sampling cannot repeat
-            // interior strokes. The flat center retains zero displacement.
-            let dispersion = optics.dispersion.clamp(0., 0.1);
-            optics.refraction = (optics.refraction.max(px(0.)) * visual.scale)
-                .min(optics.thickness * 0.5 / (1. + dispersion));
-            optics.tint.a *= 1. - visual.pressure * 0.15;
+            optics.highlight *= 0.7 + visual.pressure * 0.6;
+            optics.edge_shadow *= visual.pressure * visual.pressure;
+            optics.fresnel *= visual.pressure;
+            optics.dispersion =
+                (optics.dispersion + visual.pressure * 0.02).min(0.1) * visual.pressure;
+            optics.thickness *= visual.scale * (1. + visual.pressure * 0.3);
+            optics.refraction *= visual.scale * (1. + visual.pressure * 0.5) * visual.pressure;
+            optics.edge_refraction *= visual.scale * (1. + visual.pressure * 0.5) * visual.pressure;
+            optics.edge_width *= visual.scale * (1. + visual.pressure * 0.3);
+            optics.rim_width *= visual.scale;
+            optics.magnification =
+                1. + (optics.magnification - 1. + visual.pressure * 0.025) * visual.pressure;
+            optics.tint.a *= 1. - visual.pressure * 0.25;
             if let Some(pointer) = pointer {
                 let local = pointer - selected.center();
                 optics.light_direction = point(
@@ -329,13 +362,14 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for GlassSegmentedControl<T> {
                     -0.8,
                 );
             }
+            paint_surface(window);
             if reduced {
                 window.paint_quad(
                     fill(selected, optics.tint.composite_over(fallback))
                         .corner_radii(selected_corners),
                 );
             } else {
-                lens.set(Some((selected, selected_corners, optics)));
+                lens.set(Some((selected, selected_corners, optics, deformation)));
             }
         });
         let mut root = painted
@@ -349,8 +383,8 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for GlassSegmentedControl<T> {
                 canvas(
                     |_, _, _| (),
                     move |_, _, window, _| {
-                        if let Some((bounds, corners, optics)) = lens_to_paint.get() {
-                            paint_liquid_glass(bounds, corners, optics, window);
+                        if let Some((bounds, corners, optics, deformation)) = lens_to_paint.get() {
+                            paint_liquid_glass_lens(bounds, corners, optics, deformation, window);
                         }
                     },
                 )

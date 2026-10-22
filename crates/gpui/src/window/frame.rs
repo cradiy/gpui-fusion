@@ -14,7 +14,7 @@ use crate::{
     Scene, TabStopMap, TextStyleRefinement, point, profiler, px,
 };
 use anyhow::Result;
-use collections::FxHashMap;
+use collections::{FxHashMap, FxHashSet};
 use itertools::FoldWhile::{Continue, Done};
 use itertools::Itertools;
 use scheduler::Instant;
@@ -40,6 +40,7 @@ pub(crate) struct DeferredDraw {
     pub(super) anchor_mapping: crate::PointerMapping,
     pub(super) prepaint_range: Range<PrepaintStateIndex>,
     pub(super) paint_range: Range<PaintIndex>,
+    accessed_entities: FxHashSet<EntityId>,
 }
 
 pub(crate) struct Frame {
@@ -754,34 +755,45 @@ impl Window {
                 let prepaint_start = self.prepaint_index();
                 let previous_anchor_mapping =
                     mem::replace(&mut self.deferred_anchor_mapping, anchor_mapping);
-                if let Some(render) = overlay {
-                    element = self.with_rendered_view(current_view, |window| {
-                        window.with_rem_size(Some(rem_size), |window| {
-                            render(window, cx).map(|mut element| {
-                                element.prepaint_as_root(
-                                    Point::default(),
-                                    window.viewport_size().into(),
-                                    window,
-                                    cx,
-                                );
-                                element
-                            })
-                        })
-                    });
-                } else if let Some(element) = element.as_mut() {
-                    self.with_rendered_view(current_view, |window| {
-                        window.with_rem_size(Some(rem_size), |window| {
-                            window.with_absolute_element_offset(absolute_offset, |window| {
-                                element.prepaint(window, cx);
-                            });
-                        });
-                    })
-                } else {
-                    self.reuse_prepaint(reused_range);
+                let replay = overlay.is_none() && element.is_none();
+                if replay {
+                    cx.entities.extend_accessed(
+                        &self.next_frame.deferred_draws[deferred_draw_ix].accessed_entities,
+                    );
                 }
+                let ((), accessed) = cx.detect_accessed_entities(|cx| {
+                    if let Some(render) = overlay {
+                        element = self.with_rendered_view(current_view, |window| {
+                            window.with_rem_size(Some(rem_size), |window| {
+                                render(window, cx).map(|mut element| {
+                                    element.prepaint_as_root(
+                                        Point::default(),
+                                        window.viewport_size().into(),
+                                        window,
+                                        cx,
+                                    );
+                                    element
+                                })
+                            })
+                        });
+                    } else if let Some(element) = element.as_mut() {
+                        self.with_rendered_view(current_view, |window| {
+                            window.with_rem_size(Some(rem_size), |window| {
+                                window.with_absolute_element_offset(absolute_offset, |window| {
+                                    element.prepaint(window, cx);
+                                });
+                            });
+                        })
+                    } else {
+                        self.reuse_prepaint(reused_range);
+                    }
+                });
                 let prepaint_end = self.prepaint_index();
                 let deferred_draw = &mut self.next_frame.deferred_draws[deferred_draw_ix];
                 deferred_draw.element = element;
+                if !replay {
+                    deferred_draw.accessed_entities = accessed;
+                }
                 deferred_draw.prepaint_range = prepaint_start..prepaint_end;
                 self.deferred_anchor_mapping = previous_anchor_mapping;
             }
@@ -818,13 +830,16 @@ impl Window {
             );
             let content_mask = deferred_draw.content_mask;
             if let Some(element) = deferred_draw.element.as_mut() {
-                self.with_rendered_view(deferred_draw.current_view, |window| {
-                    window.with_content_mask(content_mask, |window| {
-                        window.with_rem_size(Some(deferred_draw.rem_size), |window| {
-                            element.paint(window, cx);
-                        });
+                let ((), accessed) = cx.detect_accessed_entities(|cx| {
+                    self.with_rendered_view(deferred_draw.current_view, |window| {
+                        window.with_content_mask(content_mask, |window| {
+                            window.with_rem_size(Some(deferred_draw.rem_size), |window| {
+                                element.paint(window, cx);
+                            });
+                        })
                     })
-                })
+                });
+                deferred_draw.accessed_entities.extend(accessed);
             } else if deferred_draw.overlay.is_none() {
                 self.reuse_paint(deferred_draw.paint_range.clone());
             }
@@ -934,6 +949,7 @@ impl Window {
                     overlay: deferred_draw.overlay.clone(),
                     prepaint_range: deferred_draw.prepaint_range.clone(),
                     paint_range: deferred_draw.paint_range.clone(),
+                    accessed_entities: deferred_draw.accessed_entities.clone(),
                 }),
         );
     }
@@ -1139,6 +1155,7 @@ impl Window {
             priority,
             element: Some(element),
             overlay: None,
+            accessed_entities: FxHashSet::default(),
             absolute_offset,
             anchor_mapping: if self.pointer_mapping.is_identity() {
                 self.deferred_anchor_mapping.clone()
@@ -1166,6 +1183,7 @@ impl Window {
             priority,
             element: None,
             overlay: Some(render),
+            accessed_entities: FxHashSet::default(),
             absolute_offset: Point::default(),
             anchor_mapping: if self.pointer_mapping.is_identity() {
                 self.deferred_anchor_mapping.clone()

@@ -75,7 +75,7 @@ impl PcmOutput {
         let supported = device.default_output_config().map_err(|error| {
             audio_output_error("failed to query the default audio output format", error)
         })?;
-        let config: StreamConfig = supported.clone().into();
+        let config: StreamConfig = supported.into();
         let device_channels = config.channels;
         let device_sample_rate = config.sample_rate;
         let shared = Arc::new(AudioQueue::new());

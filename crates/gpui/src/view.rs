@@ -310,6 +310,7 @@ struct ViewElementCacheKey {
     bounds: Bounds<Pixels>,
     content_mask: ContentMask<Pixels>,
     text_style: TextStyle,
+    opacity: f32,
     subtree_effect: bool,
     scale_factor: f32,
     raster_scale_factor: f32,
@@ -417,6 +418,8 @@ impl<V: View> Element for ViewElement<V> {
                             && element_state.cache_key.bounds == bounds
                             && element_state.cache_key.content_mask == content_mask
                             && element_state.cache_key.text_style == text_style
+                            && element_state.cache_key.opacity.to_bits()
+                                == window.element_opacity().to_bits()
                             && element_state.cache_key.subtree_effect == subtree_effect
                             && element_state.cache_key.scale_factor == window.scale_factor()
                             && element_state.cache_key.raster_scale_factor
@@ -485,6 +488,7 @@ impl<V: View> Element for ViewElement<V> {
                                     bounds,
                                     content_mask,
                                     text_style,
+                                    opacity: window.element_opacity(),
                                     subtree_effect,
                                     scale_factor: window.scale_factor(),
                                     raster_scale_factor: window.raster_scale_factor(),
@@ -529,13 +533,20 @@ impl<V: View> Element for ViewElement<V> {
                             let mut element_state = element_state.unwrap();
 
                             let paint_start = window.paint_index();
+                            let opacity = window.element_opacity();
 
                             if let Some(element) = element {
                                 let refreshing = mem::replace(&mut window.refreshing, true);
-                                element.paint(window, cx);
+                                let ((), accessed) =
+                                    cx.detect_accessed_entities(|cx| element.paint(window, cx));
+                                element_state.accessed_entities.extend(accessed);
+                                element_state.cache_key.opacity = opacity;
                                 window.refreshing = refreshing;
                             } else {
                                 window.reuse_paint(element_state.paint_range.clone());
+                                if element_state.cache_key.opacity.to_bits() != opacity.to_bits() {
+                                    window.request_animation_frame();
+                                }
                             }
 
                             let paint_end = window.paint_index();

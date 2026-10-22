@@ -324,6 +324,7 @@ mod affine_deferred;
 mod affine_ime;
 mod affine_tooltip;
 mod cached_a11y;
+mod cached_dependencies;
 mod deferred_overlay;
 mod element_bounds;
 mod prepaint_retry;

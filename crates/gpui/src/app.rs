@@ -1123,15 +1123,12 @@ impl App {
         &mut self,
         callback: impl FnOnce(&mut App) -> R,
     ) -> (R, FxHashSet<EntityId>) {
-        let accessed_entities_start = self.entities.accessed_entities.get_mut().clone();
+        let previous = std::mem::take(self.entities.accessed_entities.get_mut());
         let result = callback(self);
-        let entities_accessed_in_callback = self
-            .entities
-            .accessed_entities
-            .get_mut()
-            .difference(&accessed_entities_start)
-            .copied()
-            .collect::<FxHashSet<EntityId>>();
+        let entities_accessed_in_callback =
+            std::mem::replace(self.entities.accessed_entities.get_mut(), previous);
+        self.entities
+            .extend_accessed(&entities_accessed_in_callback);
         (result, entities_accessed_in_callback)
     }
 

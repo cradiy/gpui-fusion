@@ -145,6 +145,9 @@ pub(super) fn selection_quads(
     }
     let mut quads = Vec::new();
     for row in rows(layout, align) {
+        if row.range.is_empty() {
+            continue;
+        }
         let end = row.line_start + row.layout.len;
         let mut newline = row.newline && selected.start <= end && selected.end > end;
         let local = selected.start.saturating_sub(row.line_start)
@@ -654,22 +657,30 @@ mod tests {
     }
 
     #[crate::test]
-    fn selectable_text_highlights_wrapped_and_empty_lines(cx: &mut TestAppContext) {
+    fn selectable_text_skips_empty_row_highlights_but_copies_newlines(cx: &mut TestAppContext) {
         let (window, mut visual) = setup(cx, TextAlign::Right);
-        window
+        let expected = window
             .update(&mut visual.cx, |view, _, _| {
                 let rows = rows(&view.layout, view.align);
                 assert!(rows.len() > 4);
+                assert!(rows.iter().any(|row| row.range.is_empty()));
                 let quads =
                     selection_quads(&view.layout, 0..view.text.len(), view.align, crate::blue());
-                assert_eq!(quads.len(), rows.len());
-                for (quad, row) in quads.iter().zip(&rows) {
+                let visible_rows: Vec<_> =
+                    rows.iter().filter(|row| !row.range.is_empty()).collect();
+                assert_eq!(quads.len(), visible_rows.len());
+                for (quad, row) in quads.iter().zip(visible_rows) {
                     assert_eq!(quad.bounds.origin, row.origin);
                     assert!(quad.bounds.size.width > px(0.));
                     assert_eq!(quad.bounds.size.height, row.height);
                 }
+                view.text.to_string()
             })
             .unwrap();
+        let start = position(window, &mut visual, 0);
+        visual.simulate_click(start, Default::default());
+        visual.simulate_keystrokes(&crate::platform_shortcut("ctrl-a"));
+        assert_eq!(copy(&mut visual), Some(expected));
     }
 
     #[crate::test]

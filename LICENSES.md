@@ -38,7 +38,7 @@ First-party packages outside the Apache-2.0 scope are authored by
 
 These include `gpui_3d`, `gpui_3d_effects`, `gpui_3d_gltf`, `gpui_android`,
 `gpui_automation`, `gpui_effects`, `gpui_inspector`, `gpui_io`, `gpui_media`,
-`gpui_media_backend`, `gpui_media_core`, `gpui_notifications`, `gpui_render`,
+`gpui_media_backend`, `gpui_media_core`, `gpui_notifications`, `gpui_render`, `gpui_richtext`,
 `gpui_wayland_source`, `uic`, `uic-macros`, and the standalone example packages
 outside the Apache-2.0 scope.
 

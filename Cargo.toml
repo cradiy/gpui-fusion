@@ -26,6 +26,7 @@ members = [
   "crates/gpui_web",
   "crates/gpui_wgpu",
   "crates/gpui_render",
+  "crates/gpui_richtext",
   "crates/scheduler",
   "crates/sum_tree",
   "crates/gpui_windows",
@@ -76,6 +77,7 @@ gpui_platform = { path = "crates/gpui_platform", default-features = false }
 gpui_web = { path = "crates/gpui_web", default-features = false }
 gpui_wgpu = { path = "crates/gpui_wgpu" }
 gpui_render = { path = "crates/gpui_render" }
+gpui_richtext = { path = "crates/gpui_richtext" }
 gpui_windows = { path = "crates/gpui_windows", default-features = false }
 gpui_tokio = { path = "crates/gpui_tokio" }
 gpui_util = { path = "crates/gpui_util" }

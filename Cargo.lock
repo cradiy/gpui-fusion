@@ -2914,6 +2914,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui_richtext"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui",
+ "gpui_platform",
+]
+
+[[package]]
 name = "gpui_shared_string"
 version = "0.1.0"
 dependencies = [

@@ -35,6 +35,7 @@ pub mod split_pane;
 pub mod swipe_actions;
 pub mod tabs;
 pub mod tags_input;
+pub mod text_view;
 pub mod toast;
 pub mod tree_picker;
 pub mod ui;

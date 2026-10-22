@@ -1202,6 +1202,7 @@ impl Element for InteractiveText {
                         self.click_listener.take(),
                         ranges,
                         window,
+                        cx,
                     );
                 } else if let Some(click_listener) = self.click_listener.take() {
                     let mouse_position = window.mouse_position();

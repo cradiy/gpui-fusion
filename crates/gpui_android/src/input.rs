@@ -5,6 +5,7 @@ use gpui::{
 use std::ops::Range;
 
 pub(crate) struct InputState {
+    pub editable: bool,
     pub epoch: u64,
     pub mode: TextInputMode,
     pub purpose: TextInputPurpose,
@@ -29,7 +30,8 @@ impl AndroidWindow {
         let mut handler = self.handler.borrow_mut().take();
         let focus = handler.as_mut().and_then(|handler| {
             handler
-                .query_accepts_text_input()
+                .selected_text_range(true)
+                .is_some()
                 .then(|| handler.input_focus_id())
                 .flatten()
         });
@@ -114,6 +116,7 @@ impl AndroidWindow {
             };
             let caret_bounds = (anchor == head).then_some(head_bounds).flatten();
             Some(InputState {
+                editable: handler.query_accepts_text_input(),
                 epoch,
                 mode,
                 purpose: self.input_purpose.get(),
@@ -188,6 +191,9 @@ impl AndroidWindow {
         let edited = self
             .with_input(|handler, current| {
                 if epoch != current {
+                    return false;
+                }
+                if !handler.query_accepts_text_input() && !matches!(operation, 2 | 3) {
                     return false;
                 }
                 let Some(selection) = handler.selected_text_range(false) else {

@@ -1079,6 +1079,10 @@ impl Counter {
             .flex_col()
             .gap_5()
             .child(div().text_size(window.scaled_font_size(px(30.))).child("GPUI on Android"))
+            .child(uic::components::text_view::TextView::new(
+                "reading-sample",
+                "Long-press to select this passage and copy it.\n只读文本支持选择与复制。🌿",
+            ).text_size(px(18.)).line_height(px(28.)).p_4().rounded_lg().bg(rgb(surface)))
             .child(div()
                 .id("system-font-sample")
                 .role(Role::Status)

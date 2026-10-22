@@ -22,6 +22,7 @@ use std::{
 type Entry = fn() -> ExitCode;
 static ENTRY: OnceLock<Entry> = OnceLock::new();
 static VM: OnceLock<Arc<JavaVM>> = OnceLock::new();
+const TEXT_INPUT_STATE_CONSTRUCTOR: &str = "(JLjava/lang/String;IIIIIZZZIZZI[F[F[F[FZ)V";
 
 thread_local! {
     static SESSIONS: RefCell<HashMap<i64, Rc<Session>>> = RefCell::default();
@@ -986,7 +987,21 @@ pub(crate) fn window(id: i64) -> Result<Rc<crate::window::AndroidWindow>> {
 pub(crate) fn call<T: Default>(env: &mut JNIEnv, f: impl FnOnce(&mut JNIEnv) -> Result<T>) -> T {
     let scope = deferred::Scope::enter();
     let outcome = catch_unwind(AssertUnwindSafe(|| f(env)));
+    // Deferred host calls must not run with a Java exception pending.
+    let exception = env
+        .exception_occurred()
+        .ok()
+        .filter(|error| !error.is_null());
+    if exception.is_some() {
+        let _ = env.exception_clear();
+    }
     drop(scope);
+    if let Some(exception) = exception {
+        if !env.exception_check().unwrap_or(true) {
+            let _ = env.throw(exception);
+        }
+        return T::default();
+    }
     match outcome {
         Ok(Ok(value)) => value,
         outcome => {
@@ -1003,7 +1018,9 @@ pub(crate) fn call<T: Default>(env: &mut JNIEnv, f: impl FnOnce(&mut JNIEnv) -> 
                 Ok(Ok(_)) => unreachable!(),
             };
             log::error!("{error}");
-            let _ = env.throw_new("java/lang/IllegalStateException", error);
+            if !env.exception_check().unwrap_or(true) {
+                let _ = env.throw_new("java/lang/IllegalStateException", error);
+            }
             T::default()
         }
     }
@@ -1023,6 +1040,18 @@ extern "system" fn create(
             CURRENT.with(|current| current.borrow().is_none()),
             "nested Android launch"
         );
+        if let Err(error) = env.get_method_id(
+            "dev/gpui/android/TextInputState",
+            "<init>",
+            TEXT_INPUT_STATE_CONSTRUCTOR,
+        ) {
+            if env.exception_check()? {
+                env.exception_clear()?;
+            }
+            anyhow::bail!(
+                "Android host does not match gpui_android: {error}. Rebuild/install gpuiforge from the matching source, run gpuiforge sync android, then rebuild the APK."
+            );
+        }
         let context = env
             .call_method(&host, "requireContext", "()Landroid/content/Context;", &[])?
             .l()?;
@@ -1240,7 +1269,7 @@ extern "system" fn input_state(mut env: JNIEnv, _: JClass, id: jlong) -> jobject
         Ok(env
             .new_object(
                 "dev/gpui/android/TextInputState",
-                "(JLjava/lang/String;IIIIIZZZIZZI[F[F[F[F)V",
+                TEXT_INPUT_STATE_CONSTRUCTOR,
                 &[
                     JValue::Long(state.epoch as i64),
                     JValue::Object(&text),
@@ -1272,6 +1301,7 @@ extern "system" fn input_state(mut env: JNIEnv, _: JClass, id: jlong) -> jobject
                     JValue::Object(&editor),
                     JValue::Object(&anchor),
                     JValue::Object(&head),
+                    JValue::Bool(state.editable as u8),
                 ],
             )?
             .into_raw())

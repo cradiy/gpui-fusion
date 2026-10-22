@@ -11,6 +11,8 @@ use std::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
+mod platform;
+
 pub(super) struct TextSelection {
     pub focus: FocusHandle,
     text: SharedString,
@@ -190,8 +192,35 @@ pub(super) fn register_handlers(
     click: Option<ClickListener>,
     ranges: Vec<Range<usize>>,
     window: &mut Window,
+    cx: &App,
 ) {
     let rows = Rc::new(rows(&layout, window.text_style().text_align));
+    let focus = selection.borrow().focus.clone();
+    window.handle_input(
+        &focus,
+        platform::SelectionInput::new(selection.clone(), rows.clone(), hitbox.bounds),
+        cx,
+    );
+    window.on_mouse_event({
+        let state = selection.clone();
+        let rows = rows.clone();
+        let hitbox = hitbox.clone();
+        move |event: &crate::TextInputFocusEvent, phase, window, cx| {
+            if phase.bubble() && hitbox.is_hovered(window) {
+                let index = index_at(&rows, event.position);
+                let focus = {
+                    let mut state = state.borrow_mut();
+                    state.anchor = index;
+                    state.head = index;
+                    state.focus.clone()
+                };
+                window.focus(&focus, cx);
+                window.refresh();
+                window.prevent_default();
+                cx.stop_propagation();
+            }
+        }
+    });
     let hovered = character_at(&rows, window.mouse_position());
     window.set_cursor_style(
         if hovered.is_some_and(|index| ranges.iter().any(|range| range.contains(&index))) {
@@ -231,7 +260,9 @@ pub(super) fn register_handlers(
             down.set(None);
             window.focus(&focus, cx);
             window.refresh();
-            window.prevent_default();
+            if !cfg!(target_os = "android") {
+                window.prevent_default();
+            }
             cx.stop_propagation();
         }
     });
@@ -259,12 +290,25 @@ pub(super) fn register_handlers(
             let index = index_at(&rows, event.position);
             let focus = {
                 let mut state = state.borrow_mut();
-                if !event.modifiers.shift {
-                    state.anchor = index;
+                if event.click_count >= 2 {
+                    let range = state
+                        .text
+                        .split_word_bound_indices()
+                        .find(|(start, word)| (*start..*start + word.len()).contains(&index))
+                        .map(|(start, word)| start..start + word.len())
+                        .unwrap_or(index..index);
+                    state.anchor = range.start;
+                    state.head = range.end;
+                    state.dragging = false;
+                    state.dragged = true;
+                } else {
+                    if !event.modifiers.shift {
+                        state.anchor = index;
+                    }
+                    state.head = index;
+                    state.dragging = true;
+                    state.dragged = event.modifiers.shift;
                 }
-                state.head = index;
-                state.dragging = true;
-                state.dragged = event.modifiers.shift;
                 state.focus.clone()
             };
             down.set(character_at(&rows, event.position));
@@ -538,6 +582,40 @@ mod tests {
             .update(&mut visual.cx, |view, _, _| view.text.to_string())
             .unwrap();
         assert_eq!(copy(&mut visual), Some(text));
+    }
+
+    #[crate::test]
+    fn system_selection_is_utf16_and_cannot_modify_read_only_text(cx: &mut TestAppContext) {
+        use crate::PlatformWindow;
+        let (window, mut visual) = setup(cx, TextAlign::Left);
+        let at = position(window, &mut visual, 5);
+        visual.simulate_click(at, Default::default());
+        visual.update(|window, cx| {
+            window.draw(cx).clear();
+        });
+        let mut platform = cx.test_window(window.into());
+        let mut input = platform
+            .take_input_handler()
+            .expect("focused selection registers a system handler");
+        assert!(!input.query_accepts_text_input());
+        input.set_selected_text_range(Range { start: 9, end: 5 });
+        let selection = input.selected_text_range(false).unwrap();
+        assert_eq!(selection.range, 5..9);
+        assert!(selection.reversed);
+        assert_eq!(
+            input.text_for_range(selection.range, &mut None).as_deref(),
+            Some("中文😀")
+        );
+        assert!(input.bounds_for_range(5..5).is_some());
+        assert!(input.bounds_for_range(9..9).is_some());
+        input.replace_text_in_range(None, "replacement");
+        input.replace_and_mark_text_in_range(None, "composition", None);
+        assert_eq!(
+            input.text_for_range(5..9, &mut None).as_deref(),
+            Some("中文😀")
+        );
+        platform.set_input_handler(input);
+        assert_eq!(copy(&mut visual).as_deref(), Some("中文😀"));
     }
 
     #[crate::test]

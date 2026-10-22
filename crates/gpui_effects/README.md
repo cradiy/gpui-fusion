@@ -6,6 +6,7 @@ pipeline and `gpui_effects` providing higher-level components and presets.
 
 ## Guides
 
+- [Path flow](docs/path_flow.md): distance-based path lights.
 - [Surface grain](docs/grain.md): static monochrome or colored texture beneath surface content.
 - [Halftone](docs/halftone.md): monochrome dot screening with adjustable ink, paper and source blending.
 - [Gradient map](docs/gradient_map.md): editable multi-stop color ramps driven by source luminance.

@@ -7,6 +7,7 @@ mod layout_transition;
 mod motion;
 mod number;
 mod particle_transition;
+mod path_flow;
 mod presence;
 mod scroll_reveal;
 mod selection_indicator;
@@ -32,6 +33,7 @@ pub use motion::{
 };
 pub use number::{AnimatedNumber, animated_number};
 pub use particle_transition::{ParticleTransitionOptions, subtree_particle_transition};
+pub use path_flow::{FlowPath, PathFlowOptions, path_flow};
 pub use presence::{AnimatedPresence, PresenceFrame, PresencePhase, animated_presence};
 pub use scroll_reveal::{ScrollReveal, scroll_reveal};
 pub use selection_indicator::{SelectionIndicator, selection_indicator};

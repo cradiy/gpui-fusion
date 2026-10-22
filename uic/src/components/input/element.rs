@@ -157,10 +157,13 @@ impl Element for TextElement {
         let wrap_width = multiline.then_some(bounds.size.width);
         let mut layout = TextLayout::shape(
             display_text,
-            font_size,
             runs,
-            wrap_width,
-            window.line_height(),
+            super::state::TextLayoutSettings {
+                font_size,
+                wrap_width,
+                line_height: window.line_height(),
+                tab_size: input.tab_size,
+            },
             window.text_system(),
             input.last_layout.as_ref(),
         );

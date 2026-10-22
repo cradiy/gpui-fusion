@@ -41,14 +41,17 @@ fn accessible_rows_follow_graphemes_wraps_and_empty_lines() {
     for width in [gpui::px(48.), gpui::px(128.)] {
         let layout = TextLayout::shape(
             text.clone(),
-            gpui::px(16.),
             vec![gpui::TextRun {
                 len: text.len(),
                 font: gpui::font("Lilex"),
                 ..Default::default()
             }],
-            Some(width),
-            gpui::px(24.),
+            super::state::TextLayoutSettings {
+                font_size: gpui::px(16.),
+                wrap_width: Some(width),
+                line_height: gpui::px(24.),
+                tab_size: 4,
+            },
             &shaper,
             None,
         );

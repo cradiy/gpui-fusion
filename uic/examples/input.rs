@@ -16,7 +16,7 @@ impl InputExample {
         let notes = (1..=24)
             .map(|line| {
                 format!(
-                    "Line {line:02}: Edit this text, scroll with the mouse wheel, or drag the scrollbar to explore the document."
+                    "{line:02}\tEdit this text, scroll with the mouse wheel, or drag the scrollbar to explore the document."
                 )
             })
             .collect::<Vec<_>>()
@@ -27,6 +27,7 @@ impl InputExample {
             notes: cx.new(|cx| {
                 TextInput::new(cx)
                     .multiline()
+                    .tab_size(8)
                     .initial_value(notes)
             }),
             draft: cx.new(|cx| {

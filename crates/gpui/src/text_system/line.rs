@@ -369,6 +369,17 @@ pub struct WrappedLine {
 }
 
 impl WrappedLine {
+    /// Places tabs at multiples of `stop` pixels from the left edge of each visual row.
+    /// Recomputes wrapping and caret geometry without changing text or byte offsets.
+    /// Nonpositive or nonfinite stops leave the layout unchanged.
+    /// The resulting layout is not line-clamped.
+    pub fn with_tab_stops(mut self, stop: Pixels) -> Self {
+        if stop > px(0.) && f32::from(stop).is_finite() && self.text.contains('\t') {
+            self.layout = Arc::new(self.layout.with_tab_stops(&self.text, stop));
+        }
+        self
+    }
+
     /// The length of the underlying, unwrapped layout, in utf-8 bytes.
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {

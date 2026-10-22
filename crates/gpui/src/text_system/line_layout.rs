@@ -359,6 +359,103 @@ pub struct WrapBoundary {
 }
 
 impl WrappedLineLayout {
+    pub(super) fn with_tab_stops(&self, text: &str, stop: Pixels) -> Self {
+        let source = &self.unwrapped_layout;
+        let breaks = LineBreaks::new(text);
+        let glyphs: Vec<_> = source
+            .runs
+            .iter()
+            .enumerate()
+            .flat_map(|(run_ix, run)| {
+                run.glyphs
+                    .iter()
+                    .enumerate()
+                    .map(move |(glyph_ix, glyph)| (WrapBoundary { run_ix, glyph_ix }, glyph))
+            })
+            .collect();
+        let mut clusters = Vec::new();
+        for (ix, (_, glyph)) in glyphs.iter().enumerate() {
+            if ix == 0 || glyphs[ix - 1].1.index != glyph.index {
+                clusters.push(ix);
+            }
+        }
+        clusters.push(glyphs.len());
+        let mut runs = source.runs.clone();
+        let mut boundaries = SmallVec::new();
+        let mut row_start = 0;
+        let mut origin = px(0.);
+        let count = clusters.len() - 1;
+        let width_at = |ix: usize, x: Pixels| {
+            let glyph = glyphs[clusters[ix]].1;
+            if text.as_bytes()[glyph.index] == b'\t' {
+                stop * ((x / stop).floor() + 1.) - x
+            } else {
+                let next_x = glyphs
+                    .get(clusters[ix + 1])
+                    .map_or(source.width, |(_, g)| g.position.x);
+                next_x - glyph.position.x
+            }
+        };
+        while row_start < count {
+            let mut x = px(0.);
+            let mut candidate = None;
+            let mut row_end = count;
+            for ix in row_start..count {
+                let glyph = glyphs[clusters[ix]].1;
+                let logical = if glyph.is_rtl {
+                    glyph.cluster_end
+                } else {
+                    glyph.index
+                };
+                if ix > row_start && breaks.can_wrap(logical) {
+                    candidate = Some(ix);
+                }
+                let next_x = x + width_at(ix, x);
+                if self.wrap_width.is_some_and(|width| next_x > width)
+                    && ix > row_start
+                    && breaks.is_grapheme_boundary(logical)
+                {
+                    row_end = candidate.unwrap_or(ix);
+                    break;
+                }
+                x = next_x;
+            }
+            x = px(0.);
+            for ix in row_start..row_end {
+                let first = glyphs[clusters[ix]].1;
+                let width = width_at(ix, x);
+                let is_tab = text.as_bytes()[first.index] == b'\t';
+                for (offset, (boundary, original)) in
+                    glyphs[clusters[ix]..clusters[ix + 1]].iter().enumerate()
+                {
+                    let glyph = &mut runs[boundary.run_ix].glyphs[boundary.glyph_ix];
+                    glyph.position.x = origin + x + original.position.x - first.position.x;
+                    if is_tab {
+                        glyph.advance = if offset == 0 { width } else { px(0.) };
+                    }
+                }
+                x += width;
+            }
+            origin += x;
+            row_start = row_end;
+            if row_start < count {
+                boundaries.push(glyphs[clusters[row_start]].0);
+            }
+        }
+        Self {
+            unwrapped_layout: Arc::new(LineLayout {
+                font_size: source.font_size,
+                width: origin,
+                ascent: source.ascent,
+                descent: source.descent,
+                runs,
+                len: source.len,
+            }),
+            wrap_boundaries: boundaries,
+            wrap_width: self.wrap_width,
+        }
+    }
+
     /// The length of the underlying text, in utf8 bytes.
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
@@ -1202,6 +1299,62 @@ impl AsCacheKeyRef for CacheKeyRef<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tab_stops_replace_native_width_and_preserve_cluster_geometry() {
+        let text = "é\t界\t";
+        for native_tab_width in [0., 9., 72.] {
+            let mut x = px(0.);
+            let glyphs = text
+                .char_indices()
+                .map(|(index, ch)| {
+                    let advance = px(if ch == '\t' { native_tab_width } else { 9. });
+                    let glyph = ShapedGlyph {
+                        id: GlyphId(0),
+                        position: point(x, px(0.)),
+                        index,
+                        cluster_end: index + ch.len_utf8(),
+                        advance,
+                        is_rtl: false,
+                        is_emoji: false,
+                    };
+                    x += advance;
+                    glyph
+                })
+                .collect();
+            let mut layout = make_layout(glyphs);
+            layout.len = text.len();
+            layout.width = x;
+            let original = WrappedLineLayout {
+                unwrapped_layout: Arc::new(layout),
+                wrap_boundaries: SmallVec::new(),
+                wrap_width: None,
+            };
+            let expanded = original.with_tab_stops(text, px(27.));
+            let line = &expanded.unwrapped_layout;
+            assert_eq!(line.width, px(54.));
+            assert_eq!(line.selection_ranges(2..3), vec![px(9.)..px(27.)]);
+            assert_eq!(line.caret_for_x(px(12.)).index, 2);
+            assert_eq!(line.caret_for_x(px(24.)).index, 3);
+            assert_eq!(line.x_for_index(text.len()), px(54.));
+            assert_eq!(original.unwrapped_layout.width, x);
+
+            let wrapped = WrappedLineLayout {
+                wrap_width: Some(px(39.)),
+                ..original
+            }
+            .with_tab_stops(text, px(27.));
+            assert_eq!(wrapped.wrap_boundaries.len(), 1);
+            assert_eq!(
+                wrapped.position_for_index(3, px(18.)).unwrap(),
+                point(px(0.), px(18.))
+            );
+            assert_eq!(
+                wrapped.position_for_index(text.len(), px(18.)).unwrap(),
+                point(px(27.), px(18.))
+            );
+        }
+    }
     use crate::GlyphId;
 
     fn bidi_layout() -> LineLayout {

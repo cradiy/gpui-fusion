@@ -21,6 +21,13 @@ shrinks or text reflows, provided the line was visible before the layout change.
 Scrolling away from the cursor preserves that position through layout changes.
 Unfocused inputs do not scroll to the cursor on resize.
 
+Use `TextInput::tab_size(spaces)` to configure tab stops, or
+`set_tab_size(spaces, cx)` to change them at runtime. The default is four space
+widths in the input's font; zero is treated as one. Stops are measured from the
+left edge of each visual row and restart after soft wrapping. The text retains
+its tab characters when editing or copying. This setting controls text layout,
+not the Tab key's focus-navigation binding.
+
 A primary click outside the input clears focus without consuming the click.
 Prefix, suffix and scrollbar content belong to the input's focus boundary.
 Use `.blur_on_click_outside(false)` when a containing composite manages focus

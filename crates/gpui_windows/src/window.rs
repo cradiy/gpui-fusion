@@ -104,6 +104,7 @@ pub(crate) struct WindowsWindowInner {
     pub(crate) parent_hwnd: Option<HWND>,
     pub(crate) popup: Option<crate::popup::WindowsPopup>,
     pub(crate) owned_popups: RefCell<Vec<Weak<WindowsWindowInner>>>,
+    window_icon: Cell<Option<crate::icon::OwnedIcon>>,
 }
 
 impl WindowsWindowState {
@@ -323,6 +324,7 @@ impl WindowsWindowInner {
             parent_hwnd: context.parent_hwnd,
             popup: context.popup.take(),
             owned_popups: RefCell::new(Vec::new()),
+            window_icon: Cell::new(None),
         }))
     }
 
@@ -658,6 +660,24 @@ impl WindowsWindow {
             }));
         }
 
+        if let Some(image) = params.icon.as_deref() {
+            match crate::icon::create_icon(image.width(), image.height(), image.as_raw()) {
+                Ok(icon) => {
+                    this.window_icon.set(Some(crate::icon::OwnedIcon(icon)));
+                    unsafe {
+                        for size in [ICON_BIG, ICON_SMALL] {
+                            SendMessageW(
+                                hwnd,
+                                WM_SETICON,
+                                Some(WPARAM(size as usize)),
+                                Some(LPARAM(icon.0 as isize)),
+                            );
+                        }
+                    }
+                }
+                Err(error) => log::warn!("Failed to create window icon: {error:#}"),
+            }
+        }
         Ok(Self(this))
     }
 }

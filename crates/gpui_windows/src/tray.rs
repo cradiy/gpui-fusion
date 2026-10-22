@@ -1,23 +1,18 @@
 use anyhow::{Context as _, Result, anyhow};
 use gpui::{Action, Menu, MenuItem, TrayIcon, TrayId, TrayOptions};
-use std::{ffi::c_void, mem, ptr};
+use std::mem;
 use windows::{
     Win32::{
         Foundation::{HWND, LPARAM, POINT, WPARAM},
-        Graphics::Gdi::{
-            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateBitmap, CreateDIBSection, DIB_RGB_COLORS,
-            DeleteObject, HGDIOBJ,
-        },
         UI::{
             Shell::{
                 NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
                 NIM_SETVERSION, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
             },
             WindowsAndMessaging::{
-                AppendMenuW, CreateIconIndirect, CreatePopupMenu, DestroyIcon, DestroyMenu, HICON,
-                HMENU, ICONINFO, MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING,
-                PostMessageW, SetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
-                WM_NULL,
+                AppendMenuW, CreatePopupMenu, DestroyIcon, DestroyMenu, HICON, HMENU, MF_CHECKED,
+                MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, PostMessageW, SetForegroundWindow,
+                TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NULL,
             },
         },
     },
@@ -208,56 +203,7 @@ fn create_icon(icon: &TrayIcon) -> Result<HICON> {
         .iter()
         .max_by_key(|image| image.width.saturating_mul(image.height))
         .ok_or_else(|| anyhow!("tray icon has no image representations"))?;
-    let bitmap_info = BITMAPINFO {
-        bmiHeader: BITMAPINFOHEADER {
-            biSize: mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: image.width as i32,
-            biHeight: -(image.height as i32),
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB.0,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let mut bits = ptr::null_mut::<c_void>();
-    let color = unsafe { CreateDIBSection(None, &bitmap_info, DIB_RGB_COLORS, &mut bits, None, 0) }
-        .context("creating tray icon color bitmap")?;
-    if bits.is_null() {
-        let _ = unsafe { DeleteObject(HGDIOBJ(color.0)) };
-        return Err(anyhow!("CreateDIBSection returned a null pixel buffer"));
-    }
-
-    let target = unsafe { std::slice::from_raw_parts_mut(bits.cast::<u8>(), image.rgba.len()) };
-    for (source, target) in image.rgba.chunks_exact(4).zip(target.chunks_exact_mut(4)) {
-        let alpha = source[3] as u16;
-        let premultiply = |channel: u8| ((channel as u16 * alpha + 127) / 255) as u8;
-        target.copy_from_slice(&[
-            premultiply(source[2]),
-            premultiply(source[1]),
-            premultiply(source[0]),
-            source[3],
-        ]);
-    }
-
-    let mask = unsafe { CreateBitmap(image.width as i32, image.height as i32, 1, 1, None) };
-    if mask.is_invalid() {
-        let _ = unsafe { DeleteObject(HGDIOBJ(color.0)) };
-        return Err(anyhow!("creating tray icon mask bitmap failed"));
-    }
-    let icon = unsafe {
-        CreateIconIndirect(&ICONINFO {
-            fIcon: true.into(),
-            hbmMask: mask,
-            hbmColor: color,
-            ..Default::default()
-        })
-    };
-    unsafe {
-        let _ = DeleteObject(HGDIOBJ(mask.0));
-        let _ = DeleteObject(HGDIOBJ(color.0));
-    }
-    icon.context("creating tray icon")
+    crate::icon::create_icon(image.width, image.height, &image.rgba)
 }
 
 fn wide(value: &str) -> Vec<u16> {

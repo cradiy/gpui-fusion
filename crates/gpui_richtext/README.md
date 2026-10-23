@@ -9,6 +9,7 @@ interactions. This crate renders documents; it does not provide an editor.
 - Build content with [`compose`](src/compose.rs) and `Document`.
 - Register node types and compile documents with `Registry`.
 - Display the result with `RichText`.
+- Optional features: `markdown` for parsing and `syntax-highlighting` for code colors.
 - See the [document example](examples/document.rs) for application setup.
 
 ```sh

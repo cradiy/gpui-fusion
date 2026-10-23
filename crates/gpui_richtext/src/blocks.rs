@@ -18,8 +18,38 @@ impl HeadingLevel {
 /// A heading containing inline children.
 pub struct Heading(pub HeadingLevel);
 
+/// Heading metrics relative to the inherited body font size.
+#[derive(Clone, Copy, Debug)]
+pub struct HeadingStyle {
+    pub font_scale: f32,
+    /// Line height as a multiple of the heading's font size.
+    pub line_height: f32,
+}
+
+impl HeadingStyle {
+    pub fn defaults() -> [Self; 6] {
+        [2., 1.65, 1.35, 1.15, 1., 0.9].map(|font_scale| Self {
+            font_scale,
+            line_height: 1.3,
+        })
+    }
+}
+
 /// A quoted paragraph containing inline children.
 pub struct Quote;
+
+/// A quotation containing block nodes, including nested quotations.
+pub struct BlockQuote;
+/// A list entry containing paragraphs and nested block nodes.
+pub struct ListEntry(pub ListMarker);
+/// A thematic break between blocks.
+pub struct Rule;
+/// A block image loaded through the application's GPUI asset and HTTP sources.
+#[derive(Clone, Debug)]
+pub struct Image {
+    pub source: gpui::SharedString,
+    pub alt: gpui::SharedString,
+}
 
 /// A read-only list marker included in projected and copied text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -406,6 +406,18 @@ pub struct StyledText {
     line_top_spacing: Vec<(usize, Pixels)>,
     line_indents: Vec<TextLineIndent>,
     empty_line_heights: Vec<(usize, Pixels)>,
+    line_typography: Vec<TextLineTypography>,
+}
+
+/// Typography for a newline-delimited source line, including its soft wraps.
+#[derive(Clone, Copy, Debug)]
+pub struct TextLineTypography {
+    /// UTF-8 byte offset of the first character in the source line.
+    pub line_start: usize,
+    /// Font size used for shaping and painting this line.
+    pub font_size: Pixels,
+    /// Height of each visual row, including wrapped continuations.
+    pub line_height: Pixels,
 }
 
 /// A source-line gutter shared by its first and wrapped continuation rows.
@@ -432,6 +444,7 @@ impl StyledText {
             line_top_spacing: Vec::new(),
             line_indents: Vec::new(),
             empty_line_heights: Vec::new(),
+            line_typography: Vec::new(),
         }
     }
 
@@ -460,6 +473,14 @@ impl StyledText {
     /// Nonempty lines and nonpositive or nonfinite heights are ignored.
     pub fn with_empty_line_heights(mut self, heights: Vec<(usize, Pixels)>) -> Self {
         self.empty_line_heights = heights;
+        self
+    }
+
+    /// Override source-line typography while retaining continuous selection.
+    /// Invalid offsets and nonpositive or nonfinite metrics are ignored.
+    /// Overrides do not apply when text-overflow truncation is active.
+    pub fn with_line_typography(mut self, typography: Vec<TextLineTypography>) -> Self {
+        self.line_typography = typography;
         self
     }
 
@@ -628,6 +649,7 @@ impl Element for StyledText {
                 line_top_spacing: std::mem::take(&mut self.line_top_spacing),
                 line_indents: std::mem::take(&mut self.line_indents),
                 empty_line_heights: std::mem::take(&mut self.empty_line_heights),
+                line_typography: std::mem::take(&mut self.line_typography),
             },
             window,
             cx,
@@ -691,6 +713,7 @@ struct TextLayoutOptions {
     line_top_spacing: Vec<(usize, Pixels)>,
     line_indents: Vec<TextLineIndent>,
     empty_line_heights: Vec<(usize, Pixels)>,
+    line_typography: Vec<TextLineTypography>,
 }
 
 impl TextLayoutInner {
@@ -715,6 +738,7 @@ impl TextLayout {
             line_top_spacing,
             line_indents,
             empty_line_heights,
+            line_typography,
         } = options;
         let text_style = window.text_style();
         let font_size = text_style.font_size.to_pixels(window.rem_size());
@@ -801,14 +825,33 @@ impl TextLayout {
                 };
                 let len = text.len();
 
+                let typography: std::collections::HashMap<_, _> = line_typography
+                    .iter()
+                    .filter(|metrics| {
+                        truncate_width.is_none()
+                            && metrics.line_start <= text.len()
+                            && (metrics.line_start == 0
+                                || text.as_bytes().get(metrics.line_start - 1) == Some(&b'\n'))
+                            && metrics.font_size > Pixels::ZERO
+                            && f32::from(metrics.font_size).is_finite()
+                            && metrics.line_height > Pixels::ZERO
+                            && f32::from(metrics.line_height).is_finite()
+                    })
+                    .map(|metrics| (metrics.line_start, *metrics))
+                    .collect();
+                let line_sizes = typography
+                    .iter()
+                    .map(|(start, metrics)| (*start, metrics.font_size))
+                    .collect();
                 let Some(mut lines) = window
                     .text_system()
-                    .shape_text(
+                    .shape_text_with_line_sizes(
                         text.clone(),
                         font_size,
                         &runs,
                         wrap_width,            // Wrap if we know the width.
                         text_style.line_clamp, // Limit the number of lines if line_clamp is set.
+                        &line_sizes,
                     )
                     .log_err()
                 else {
@@ -882,8 +925,12 @@ impl TextLayout {
                                 && *height > Pixels::ZERO
                                 && f32::from(*height).is_finite()
                         })
-                        .unwrap_or(line_height);
-                    if !heights.is_empty() {
+                        .unwrap_or_else(|| {
+                            typography
+                                .get(&line_start)
+                                .map_or(line_height, |metrics| metrics.line_height)
+                        });
+                    if !heights.is_empty() || !typography.is_empty() {
                         resolved_heights.push(row_height);
                     }
                     line_start += line.len() + 1;

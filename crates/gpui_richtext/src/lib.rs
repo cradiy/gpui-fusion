@@ -1,18 +1,25 @@
 //! Extensible read-only text documents and a selectable GPUI presentation.
 //!
-//! Text flows use uniform typography metrics; table cells wrap independently.
-//! Embedded objects, arbitrary block layouts, and virtualization are not provided.
+//! Headings support distinct typography metrics; table cells wrap independently.
+//! Images render as blocks; arbitrary inline objects and virtualization are not provided.
 
 mod blocks;
 mod code_block;
 pub mod compose;
 mod document;
+#[cfg(feature = "markdown")]
+pub mod markdown;
 mod projection;
 mod styles;
+#[cfg(feature = "syntax-highlighting")]
+pub mod syntax;
 mod table;
 mod view;
+pub use blocks::{BlockQuote, Image, ListEntry, Rule};
 
-pub use blocks::{Heading, HeadingLevel, ListItem, ListMarker, Quote, TaskMarkerStyle};
+pub use blocks::{
+    Heading, HeadingLevel, HeadingStyle, ListItem, ListMarker, Quote, TaskMarkerStyle,
+};
 pub use code_block::{CodeBlock, CodeBlockLabels, CodeBlockStyle};
 pub use compose::NodeTree;
 pub use document::{Document, Node, NodeId};

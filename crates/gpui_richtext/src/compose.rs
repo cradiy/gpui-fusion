@@ -60,6 +60,21 @@ pub fn heading(level: crate::HeadingLevel) -> NodeTree {
 pub fn quote() -> NodeTree {
     node(crate::Quote)
 }
+pub fn block_quote() -> NodeTree {
+    node(crate::BlockQuote)
+}
+pub fn list_entry(marker: crate::ListMarker) -> NodeTree {
+    node(crate::ListEntry(marker))
+}
+pub fn rule() -> NodeTree {
+    node(crate::Rule)
+}
+pub fn image(source: impl Into<SharedString>, alt: impl Into<SharedString>) -> NodeTree {
+    node(crate::Image {
+        source: source.into(),
+        alt: alt.into(),
+    })
+}
 pub fn bullet_item() -> NodeTree {
     node(crate::ListItem(crate::ListMarker::Bullet))
 }

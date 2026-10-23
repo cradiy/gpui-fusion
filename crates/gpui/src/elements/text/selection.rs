@@ -287,19 +287,26 @@ pub(super) fn register_handlers(
         let hitbox = hitbox.clone();
         let down = mouse_down.clone();
         move |event: &MouseDownEvent, phase, window, cx| {
-            if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+            if event.button != MouseButton::Left {
                 return;
             }
-            if !hitbox.is_hovered(window) {
+            if phase == DispatchPhase::Capture && !hitbox.is_hovered(window) {
                 let mut state = state.borrow_mut();
+                let changed = !state.range().is_empty() || state.dragging;
                 state.anchor = 0;
                 state.head = 0;
                 state.dragging = false;
+                state.dragged = false;
                 if state.focus.is_focused(window) {
                     window.blur();
                 }
                 down.set(None);
-                window.refresh();
+                if changed {
+                    window.refresh();
+                }
+                return;
+            }
+            if phase != DispatchPhase::Bubble || !hitbox.is_hovered(window) {
                 return;
             }
             let index = index_at(&rows, event.position);
@@ -540,6 +547,77 @@ mod tests {
         let rows = rows(&layout, TextAlign::Right);
         assert_eq!(index_at(&rows, point(px(299.), px(55.))), 1);
         assert_eq!(character_at(&rows, point(px(285.), px(55.))), Some(3));
+    }
+
+    #[crate::test]
+    fn line_typography_preserves_wrapped_hit_testing_and_selection(cx: &mut TestAppContext) {
+        let (_, mut visual) = setup(cx, TextAlign::Left);
+        let source = "Aperture\n\n光谱 measurements across bands\nNotes";
+        let large_start = source.find('光').unwrap();
+        for width in [300., 110.] {
+            let text = StyledText::new(source).with_line_typography(vec![
+                crate::TextLineTypography {
+                    line_start: 0,
+                    font_size: px(28.),
+                    line_height: px(38.),
+                },
+                crate::TextLineTypography {
+                    line_start: large_start,
+                    font_size: px(22.),
+                    line_height: px(32.),
+                },
+            ]);
+            let layout = text.layout().clone();
+            visual.draw(
+                point(px(0.), px(0.)),
+                size(
+                    crate::AvailableSpace::Definite(px(width)),
+                    crate::AvailableSpace::MinContent,
+                ),
+                move |_, _| {
+                    div()
+                        .w(px(width))
+                        .text_size(px(16.))
+                        .line_height(px(24.))
+                        .whitespace_normal()
+                        .child(text)
+                },
+            );
+            let visual_rows = rows(&layout, TextAlign::Left);
+            assert!(visual_rows.len() > 4);
+            for row in &visual_rows {
+                let (font_size, height) = if row.line_start == 0 {
+                    (28., 38.)
+                } else if row.line_start == large_start {
+                    (22., 32.)
+                } else {
+                    (16., 24.)
+                };
+                assert_eq!(row.layout.font_size, px(font_size));
+                assert_eq!(row.height, px(height));
+                if !row.range.is_empty() {
+                    assert_eq!(
+                        index_at(&visual_rows, row.origin + point(px(0.1), row.height / 2.)),
+                        row.range.start
+                    );
+                    let quads = selection_quads(
+                        &layout,
+                        row.range.clone(),
+                        TextAlign::Left,
+                        crate::black(),
+                    );
+                    assert!(!quads.is_empty());
+                    assert!(
+                        quads
+                            .iter()
+                            .all(|quad| quad.bounds.size.height == row.height)
+                    );
+                }
+            }
+            for pair in visual_rows.windows(2) {
+                assert_eq!(pair[1].origin.y, pair[0].origin.y + pair[0].height);
+            }
+        }
     }
 
     #[crate::test]
@@ -871,6 +949,50 @@ mod tests {
         visual.simulate_click(start, Default::default());
         visual.simulate_keystrokes(&crate::platform_shortcut("ctrl-a"));
         assert_eq!(copy(&mut visual), Some(expected));
+    }
+
+    #[crate::test]
+    fn selecting_another_text_clears_previous_highlights(cx: &mut TestAppContext) {
+        struct Pair;
+        impl Render for Pair {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .flex()
+                    .flex_col()
+                    .text_size(px(16.))
+                    .line_height(px(24.))
+                    .child(
+                        InteractiveText::new("first", StyledText::new("Copper"))
+                            .selectable(crate::black()),
+                    )
+                    .child(
+                        InteractiveText::new("second", StyledText::new("Silver"))
+                            .selectable(crate::black()),
+                    )
+            }
+        }
+        let window = cx.open_window(size(px(300.), px(200.)), |_, _| Pair);
+        let mut visual = VisualTestContext::from_window(window.into(), cx);
+        visual.update(|window, cx| {
+            window.draw(cx).clear();
+        });
+        for y in [12., 36., 12.] {
+            visual.simulate_click(point(px(4.), px(y)), Default::default());
+            visual.update(|window, cx| {
+                window.draw(cx).clear();
+                assert!(window.rendered_frame.scene.quads.is_empty());
+            });
+            visual.simulate_keystrokes(&crate::platform_shortcut("ctrl-a"));
+            visual.update(|window, cx| {
+                window.draw(cx).clear();
+                assert_eq!(window.rendered_frame.scene.quads.len(), 1);
+            });
+        }
+        visual.simulate_click(point(px(250.), px(150.)), Default::default());
+        visual.update(|window, cx| {
+            window.draw(cx).clear();
+            assert!(window.rendered_frame.scene.quads.is_empty());
+        });
     }
 
     #[crate::test]

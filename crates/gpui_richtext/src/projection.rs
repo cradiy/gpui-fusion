@@ -20,6 +20,13 @@ pub struct Paragraph;
 
 /// The semantic contribution of a registered payload type.
 pub enum Contribution {
+    Rule,
+    Image(crate::Image),
+    BlockQuote(InlineStyle),
+    ListEntry {
+        marker: ListMarker,
+        style: InlineStyle,
+    },
     Table(crate::Table),
     TableRow {
         header: bool,
@@ -53,6 +60,9 @@ pub enum Contribution {
 
 #[derive(Default)]
 struct Compilation {
+    indent: usize,
+    quote_depth: usize,
+    quote_path: Vec<NodeId>,
     text: String,
     spans: Vec<TextSpan>,
     links: Vec<LinkSpan>,
@@ -104,6 +114,9 @@ impl Compilation {
             push(offset..block.text.len(), HighlightStyle::default());
         }
         self.blocks.push(BlockSpan {
+            indent: self.indent,
+            quote_depth: self.quote_depth,
+            quote_path: self.quote_path.clone(),
             node: id,
             range: start..self.text.len(),
             kind: BlockKind::Code {
@@ -123,9 +136,19 @@ type Resolver = Box<dyn Fn(&dyn Any) -> Result<Contribution>>;
 #[derive(Default)]
 pub struct Registry {
     resolvers: HashMap<TypeId, Resolver>,
+    #[cfg(feature = "syntax-highlighting")]
+    highlighter: Option<Arc<crate::syntax::SyntaxHighlighter>>,
 }
 
 impl Registry {
+    #[cfg(feature = "syntax-highlighting")]
+    pub fn syntax_highlighter(
+        mut self,
+        highlighter: Option<Arc<crate::syntax::SyntaxHighlighter>>,
+    ) -> Self {
+        self.highlighter = highlighter;
+        self
+    }
     pub fn new() -> Self {
         Self::default()
     }
@@ -137,6 +160,23 @@ impl Registry {
     /// Register standard nodes with application-supplied inline style presets.
     pub fn with_theme(theme: TextTheme) -> Self {
         let mut registry = Self::new();
+        #[cfg(feature = "syntax-highlighting")]
+        {
+            registry.highlighter = Some(Arc::new(crate::syntax::SyntaxHighlighter::default()));
+        }
+        registry.register::<crate::Rule>(|_| Ok(Contribution::Rule));
+        registry.register::<crate::Image>(|image| Ok(Contribution::Image(image.clone())));
+        let quote_style = theme.quote.clone();
+        registry.register::<crate::BlockQuote>(move |_| {
+            Ok(Contribution::BlockQuote(quote_style.clone()))
+        });
+        let list_style = theme.list_item.clone();
+        registry.register::<crate::ListEntry>(move |entry| {
+            Ok(Contribution::ListEntry {
+                marker: entry.0,
+                style: list_style.clone(),
+            })
+        });
         registry.register::<crate::Table>(|table| Ok(Contribution::Table(table.clone())));
         registry.register::<crate::TableRow>(move |row| {
             Ok(Contribution::TableRow {
@@ -251,6 +291,10 @@ impl Registry {
             != matches!(
                 contribution,
                 Contribution::Paragraph(_)
+                    | Contribution::Rule
+                    | Contribution::Image(_)
+                    | Contribution::BlockQuote(_)
+                    | Contribution::ListEntry { .. }
                     | Contribution::Table(_)
                     | Contribution::Heading { .. }
                     | Contribution::Quote(_)
@@ -265,6 +309,86 @@ impl Registry {
             );
         }
         match contribution {
+            leaf @ (Contribution::Rule | Contribution::Image(_)) => {
+                if !node.children.is_empty() {
+                    bail!("leaf block {id:?} cannot have children");
+                }
+                let start = output.start_block();
+                let kind = match leaf {
+                    Contribution::Image(image) => {
+                        output.text.push_str(&image.alt);
+                        BlockKind::Image(image)
+                    }
+                    _ => BlockKind::Rule,
+                };
+                output.blocks.push(BlockSpan {
+                    node: id,
+                    range: start..output.text.len(),
+                    kind,
+                    indent: output.indent,
+                    quote_depth: output.quote_depth,
+                    quote_path: output.quote_path.clone(),
+                });
+            }
+            Contribution::BlockQuote(style) => {
+                output.quote_depth += 1;
+                output.quote_path.push(id);
+                for child in &node.children {
+                    self.append(document, *child, true, inherited.inherit(&style), output)?;
+                }
+                output.quote_depth -= 1;
+                output.quote_path.pop();
+            }
+            Contribution::ListEntry { marker, style } => {
+                let style = inherited.inherit(&style);
+                let start = output.start_block();
+                output.text.push_str(&marker.text());
+                output.spans.push(TextSpan {
+                    node: id,
+                    range: start..output.text.len(),
+                    style: style.highlight,
+                    font_family: style.font_family.clone(),
+                });
+                let first_paragraph = node.children.first().copied().filter(|child| {
+                    matches!(
+                        self.resolve_node(document, *child),
+                        Ok(Contribution::Paragraph(_))
+                    )
+                });
+                if let Some(first) = first_paragraph {
+                    let Contribution::Paragraph(paragraph_style) =
+                        self.resolve_node(document, first)?
+                    else {
+                        unreachable!()
+                    };
+                    for child in &document.nodes[&first].children {
+                        self.append(
+                            document,
+                            *child,
+                            false,
+                            style.inherit(&paragraph_style.into()),
+                            output,
+                        )?;
+                    }
+                }
+                output.blocks.push(BlockSpan {
+                    node: id,
+                    range: start..output.text.len(),
+                    kind: BlockKind::ListItem { marker },
+                    indent: output.indent,
+                    quote_depth: output.quote_depth,
+                    quote_path: output.quote_path.clone(),
+                });
+                output.indent += 1;
+                for child in node
+                    .children
+                    .iter()
+                    .skip(usize::from(first_paragraph.is_some()))
+                {
+                    self.append(document, *child, true, style.clone(), output)?;
+                }
+                output.indent -= 1;
+            }
             Contribution::Table(table) => {
                 self.append_table(document, id, table, inherited, output)?
             }
@@ -324,6 +448,9 @@ impl Registry {
                     self.append(document, *child, false, style.clone(), output)?;
                 }
                 output.blocks.push(BlockSpan {
+                    indent: output.indent,
+                    quote_depth: output.quote_depth,
+                    quote_path: output.quote_path.clone(),
                     node: id,
                     range: start..output.text.len(),
                     kind,
@@ -333,6 +460,17 @@ impl Registry {
                 if !node.children.is_empty() {
                     bail!("code block {id:?} cannot have children");
                 }
+                #[cfg(feature = "syntax-highlighting")]
+                let block = {
+                    let mut block = block;
+                    if block.highlights.is_empty()
+                        && let Some(language) = &block.language
+                        && let Some(highlighter) = &self.highlighter
+                    {
+                        block.highlights = highlighter.highlight(&block.text, language)?;
+                    }
+                    block
+                };
                 output.code_block(id, block, inherited.inherit(&style))?;
             }
             Contribution::Inline(style) => {
@@ -487,6 +625,9 @@ impl Registry {
             });
         }
         output.blocks.push(BlockSpan {
+            indent: output.indent,
+            quote_depth: output.quote_depth,
+            quote_path: output.quote_path.clone(),
             node: id,
             range: start..output.text.len(),
             kind: BlockKind::Table(crate::TableBlock { columns, rows }),
@@ -528,7 +669,10 @@ pub(crate) struct RowProjection {
 
 pub(crate) enum RenderPart {
     Text(CellProjection),
+    Embed(BlockSpan),
     Table {
+        indent: usize,
+        quote_depth: usize,
         node: NodeId,
         columns: Vec<crate::TableColumn>,
         rows: Vec<RowProjection>,
@@ -538,6 +682,9 @@ pub(crate) enum RenderPart {
 /// A leaf block's range, excluding separators inserted between blocks.
 #[derive(Clone, Debug)]
 pub struct BlockSpan {
+    pub indent: usize,
+    pub quote_depth: usize,
+    pub(crate) quote_path: Vec<NodeId>,
     pub node: NodeId,
     pub range: Range<usize>,
     pub kind: BlockKind,
@@ -545,6 +692,8 @@ pub struct BlockSpan {
 
 #[derive(Clone, Debug)]
 pub enum BlockKind {
+    Rule,
+    Image(crate::Image),
     Table(crate::TableBlock),
     Paragraph,
     Heading { level: HeadingLevel },
@@ -606,8 +755,10 @@ impl Projection {
                 .iter()
                 .take_while(|block| block.range.start <= range.end)
                 .filter(|block| {
-                    !matches!(block.kind, BlockKind::Table(_))
-                        && block.range.start >= range.start
+                    !matches!(
+                        block.kind,
+                        BlockKind::Table(_) | BlockKind::Rule | BlockKind::Image(_)
+                    ) && block.range.start >= range.start
                         && block.range.end <= range.end
                 })
                 .map(|block| {
@@ -621,19 +772,23 @@ impl Projection {
     }
 
     fn prepare_parts(&mut self) {
-        if !self
-            .blocks
-            .iter()
-            .any(|block| matches!(block.kind, BlockKind::Table(_)))
-        {
+        if !self.blocks.iter().any(|block| {
+            matches!(
+                block.kind,
+                BlockKind::Table(_) | BlockKind::Rule | BlockKind::Image(_)
+            )
+        }) {
             return;
         }
         let mut parts = Vec::new();
         let mut first = 0;
         for (index, block) in self.blocks.iter().enumerate() {
-            let BlockKind::Table(table) = &block.kind else {
+            if !matches!(
+                block.kind,
+                BlockKind::Table(_) | BlockKind::Rule | BlockKind::Image(_)
+            ) {
                 continue;
-            };
+            }
             if first < index {
                 let start = &self.blocks[first];
                 parts.push(RenderPart::Text(CellProjection {
@@ -642,27 +797,33 @@ impl Projection {
                     projection: self.slice(start.range.start..self.blocks[index - 1].range.end),
                 }));
             }
-            parts.push(RenderPart::Table {
-                node: block.node,
-                columns: table.columns.clone(),
-                rows: table
-                    .rows
-                    .iter()
-                    .map(|row| RowProjection {
-                        node: row.node,
-                        header: row.header,
-                        cells: row
-                            .cells
-                            .iter()
-                            .map(|cell| CellProjection {
-                                node: cell.node,
-                                offset: cell.range.start,
-                                projection: self.slice(cell.range.clone()),
-                            })
-                            .collect(),
-                    })
-                    .collect(),
-            });
+            if let BlockKind::Table(table) = &block.kind {
+                parts.push(RenderPart::Table {
+                    indent: block.indent,
+                    quote_depth: block.quote_depth,
+                    node: block.node,
+                    columns: table.columns.clone(),
+                    rows: table
+                        .rows
+                        .iter()
+                        .map(|row| RowProjection {
+                            node: row.node,
+                            header: row.header,
+                            cells: row
+                                .cells
+                                .iter()
+                                .map(|cell| CellProjection {
+                                    node: cell.node,
+                                    offset: cell.range.start,
+                                    projection: self.slice(cell.range.clone()),
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                });
+            } else {
+                parts.push(RenderPart::Embed(block.clone()));
+            }
             first = index + 1;
         }
         if first < self.blocks.len() {

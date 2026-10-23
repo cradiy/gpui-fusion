@@ -142,7 +142,14 @@ impl Default for TextTheme {
                 ..Default::default()
             }
             .into(),
-            code_block: InlineStyle::default(),
+            code_block: InlineStyle {
+                highlight: HighlightStyle {
+                    font_style: Some(FontStyle::Normal),
+                    font_weight: Some(FontWeight::NORMAL),
+                    ..Default::default()
+                },
+                font_family: Some("monospace".into()),
+            },
         }
     }
 }

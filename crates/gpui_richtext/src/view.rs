@@ -33,6 +33,7 @@ impl CopyFeedback {
 type LinkListener = Rc<dyn Fn(&LinkSpan, &mut gpui::Window, &mut gpui::App)>;
 type LinkTooltipBuilder =
     Rc<dyn Fn(&LinkSpan, &mut gpui::Window, &mut gpui::App) -> Option<gpui::AnyView>>;
+type ImageResolver = Rc<dyn Fn(&crate::Image) -> gpui::ImageSource>;
 
 /// Selectable rich text over a compiled node document.
 ///
@@ -55,6 +56,8 @@ pub struct RichText {
     task_marker_style: crate::TaskMarkerStyle,
     block_spacing: gpui::Pixels,
     table_style: crate::TableStyle,
+    heading_styles: [crate::HeadingStyle; 6],
+    image_source: Option<ImageResolver>,
 }
 
 impl RichText {
@@ -74,6 +77,8 @@ impl RichText {
             task_marker_style: crate::TaskMarkerStyle::default(),
             block_spacing: gpui::px(10.),
             table_style: crate::TableStyle::default(),
+            heading_styles: crate::HeadingStyle::defaults(),
+            image_source: None,
         }
     }
 
@@ -115,6 +120,12 @@ impl RichText {
         self
     }
 
+    /// Metrics for H1 through H6. Nonpositive or nonfinite values retain body metrics.
+    pub fn heading_styles(mut self, styles: [crate::HeadingStyle; 6]) -> Self {
+        self.heading_styles = styles;
+        self
+    }
+
     /// Supply localized tooltips and the copy button's accessible action name.
     pub fn code_block_labels(mut self, labels: CodeBlockLabels) -> Self {
         self.code_block_labels = Some(labels);
@@ -152,6 +163,17 @@ impl RichText {
 impl Styled for RichText {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
+    }
+}
+
+impl RichText {
+    /// Resolve document image destinations to assets, file paths, URLs or decoded images.
+    pub fn image_source(
+        mut self,
+        resolver: impl Fn(&crate::Image) -> gpui::ImageSource + 'static,
+    ) -> Self {
+        self.image_source = Some(Rc::new(resolver));
+        self
     }
 }
 
@@ -218,8 +240,11 @@ impl RenderOnce for RichText {
                 BlockKind::ListItem { marker } => (marker.text().len(), list_indent),
                 BlockKind::Quote => (0, gpui::px(16.)),
                 BlockKind::Code { .. } => (0, padding),
+                _ if block.indent > 0 || block.quote_depth > 0 => (0, gpui::px(0.)),
                 _ => continue,
             };
+            let width =
+                width + gpui::px(block.indent as f32 * 24. + block.quote_depth as f32 * 16.);
             indents.push(gpui::TextLineIndent {
                 line_start: block.range.start,
                 prefix_len,
@@ -233,13 +258,40 @@ impl RenderOnce for RichText {
                 });
             }
         }
-        let quote_ranges: Vec<_> = self
-            .projection
-            .blocks()
-            .iter()
-            .filter(|block| matches!(block.kind, BlockKind::Quote))
-            .map(|block| block.range.clone())
-            .collect();
+        let mut quote_ranges = Vec::new();
+        let blocks = self.projection.blocks();
+        let depth = |block: &crate::BlockSpan| {
+            block.quote_depth + usize::from(matches!(block.kind, BlockKind::Quote))
+        };
+        for level in 0..blocks.iter().map(depth).max().unwrap_or(0) {
+            let quote_id = |block: &crate::BlockSpan| {
+                block.quote_path.get(level).copied().unwrap_or(block.node)
+            };
+            let mut index = 0;
+            while index < blocks.len() {
+                let first = &blocks[index];
+                if depth(first) <= level {
+                    index += 1;
+                    continue;
+                }
+                let mut end = index;
+                while end + 1 < blocks.len()
+                    && depth(&blocks[end + 1]) > level
+                    && blocks[end + 1].indent == first.indent
+                    && quote_id(&blocks[end + 1]) == quote_id(first)
+                {
+                    end += 1;
+                }
+                quote_ranges.push((
+                    first.range.start..blocks[end].range.end,
+                    first.indent,
+                    level,
+                    matches!(first.kind, BlockKind::Code { .. }),
+                    matches!(blocks[end].kind, BlockKind::Code { .. }),
+                ));
+                index = end + 1;
+            }
+        }
         let code_ranges: Vec<_> = self
             .projection
             .blocks()
@@ -250,6 +302,29 @@ impl RenderOnce for RichText {
         let styled_text = self
             .projection
             .styled_text()
+            .with_line_typography({
+                let body_size = marker_text_style.font_size.to_pixels(window.rem_size());
+                let mut typography = Vec::new();
+                for block in self.projection.blocks() {
+                    if let BlockKind::Heading { level } = block.kind {
+                        let style = self.heading_styles[level.index()];
+                        let font_size = body_size * style.font_scale;
+                        let line_height = font_size * style.line_height;
+                        for start in std::iter::once(block.range.start).chain(
+                            self.projection.text()[block.range.clone()]
+                                .match_indices('\n')
+                                .map(|(offset, _)| block.range.start + offset + 1),
+                        ) {
+                            typography.push(gpui::TextLineTypography {
+                                line_start: start,
+                                font_size,
+                                line_height,
+                            });
+                        }
+                    }
+                }
+                typography
+            })
             .with_empty_line_heights(
                 self.projection
                     .blocks()
@@ -325,11 +400,11 @@ impl RenderOnce for RichText {
                                 };
                                 let block_bounds = gpui::Bounds::new(
                                     gpui::point(
-                                        bounds.left(),
+                                        start.x - padding,
                                         start.y - vertical_padding - header_spacing,
                                     ),
                                     gpui::size(
-                                        bounds.size.width,
+                                        (bounds.right() - start.x + padding).max(gpui::px(0.)),
                                         end.y - start.y
                                             + layout.line_height()
                                             + header_spacing
@@ -345,20 +420,36 @@ impl RenderOnce for RichText {
                                     gpui::BorderStyle::default(),
                                 ));
                             }
-                            for range in quote_ranges {
+                            for (range, indent, level, starts_code, ends_code) in quote_ranges {
                                 let Some(start) = layout.position_for_index(range.start) else {
                                     continue;
                                 };
                                 let Some(end) = layout.position_for_index(range.end) else {
                                     continue;
                                 };
+                                let top = start.y
+                                    - if starts_code {
+                                        header_spacing + vertical_padding
+                                    } else {
+                                        gpui::px(0.)
+                                    };
+                                let bottom = end.y
+                                    + layout.line_height()
+                                    + if ends_code {
+                                        vertical_padding
+                                    } else {
+                                        gpui::px(0.)
+                                    };
                                 window.paint_quad(gpui::fill(
                                     gpui::Bounds::new(
-                                        gpui::point(bounds.left(), start.y),
-                                        gpui::size(
-                                            gpui::px(3.),
-                                            end.y - start.y + layout.line_height(),
+                                        gpui::point(
+                                            bounds.left()
+                                                + gpui::px(
+                                                    indent as f32 * 24. + level as f32 * 16.,
+                                                ),
+                                            top,
                                         ),
+                                        gpui::size(gpui::px(3.), bottom - top),
                                     ),
                                     quote_color,
                                 ));
@@ -487,7 +578,7 @@ impl RenderOnce for RichText {
                                         .into_any_element()
                                 };
                                 let mut header = div()
-                                    .w(bounds.size.width)
+                                    .w((bounds.right() - start.x + padding).max(gpui::px(0.)))
                                     .flex()
                                     .items_center()
                                     .justify_between()
@@ -547,14 +638,16 @@ impl RenderOnce for RichText {
                                     .into_any_element();
                                 header.layout_as_root(
                                     gpui::size(
-                                        gpui::AvailableSpace::Definite(bounds.size.width),
+                                        gpui::AvailableSpace::Definite(
+                                            (bounds.right() - start.x + padding).max(gpui::px(0.)),
+                                        ),
                                         gpui::AvailableSpace::Definite(header_height),
                                     ),
                                     window,
                                     cx,
                                 );
                                 header.prepaint_at(
-                                    gpui::point(bounds.left(), start.y - header_spacing),
+                                    gpui::point(start.x - padding, start.y - header_spacing),
                                     window,
                                     cx,
                                 );
@@ -618,7 +711,32 @@ impl RichText {
                 crate::projection::RenderPart::Text(cell) => {
                     surface = surface.child(self.fragment(cell).w_full());
                 }
+                crate::projection::RenderPart::Embed(block) => {
+                    let content = match &block.kind {
+                        BlockKind::Rule => div()
+                            .w_full()
+                            .h(gpui::px(1.))
+                            .bg(self.quote_border_color)
+                            .into_any_element(),
+                        BlockKind::Image(image) => {
+                            let alt = image.alt.clone();
+                            let source = self.image_source.as_ref().map_or_else(
+                                || image.source.clone().into(),
+                                |resolve| resolve(image),
+                            );
+                            gpui::img(source)
+                                .max_w_full()
+                                .with_fallback(move || div().child(alt.clone()).into_any_element())
+                                .into_any_element()
+                        }
+                        _ => unreachable!(),
+                    };
+                    surface =
+                        surface.child(self.block_surface(content, block.indent, block.quote_depth));
+                }
                 crate::projection::RenderPart::Table {
+                    indent,
+                    quote_depth,
                     node,
                     columns,
                     rows,
@@ -712,17 +830,42 @@ impl RichText {
                         table = table.child(row_view);
                     }
                     surface = surface.child(
-                        div()
-                            .id(("table-scroll", node.0 as usize))
-                            .w_full()
-                            .min_w_0()
-                            .overflow_x_scroll()
-                            .child(table),
+                        self.block_surface(
+                            div()
+                                .id(("table-scroll", node.0 as usize))
+                                .w_full()
+                                .min_w_0()
+                                .overflow_x_scroll()
+                                .child(table)
+                                .into_any_element(),
+                            *indent,
+                            *quote_depth,
+                        ),
                     );
                 }
             }
         }
         surface.into_any_element()
+    }
+
+    fn block_surface(
+        &self,
+        mut content: gpui::AnyElement,
+        indent: usize,
+        quote_depth: usize,
+    ) -> gpui::AnyElement {
+        for _ in 0..quote_depth {
+            content = div()
+                .pl(gpui::px(13.))
+                .border_l(gpui::px(3.))
+                .border_color(self.quote_border_color)
+                .child(content)
+                .into_any_element();
+        }
+        div()
+            .pl(gpui::px(indent as f32 * 24.))
+            .child(content)
+            .into_any_element()
     }
 }
 

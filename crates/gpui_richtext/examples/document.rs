@@ -4,9 +4,11 @@ use gpui::{
 };
 use gpui_richtext::{
     CodeBlock, Contribution, Document, HeadingLevel, LinkSpan, Projection, Registry, RichText,
+    Table, TableColumn,
     compose::{
         bullet_item, code, emphasis, group, hard_break, heading, link, mark, node, numbered_item,
-        paragraph, quote, strikethrough, strong, task_item, text, underline,
+        paragraph, quote, strikethrough, strong, table_cell, table_header, table_row, task_item,
+        text, underline,
     },
 };
 use std::sync::Arc;
@@ -32,6 +34,27 @@ fn document() -> Arc<Projection> {
     let document =
         Document::from_roots([
             heading(HeadingLevel::H1).child(text("Observation journal")),
+            node(Table::new().columns([
+                TableColumn::flex(1.),
+                TableColumn::fixed(px(110.)).align(gpui::TextAlign::Right),
+                TableColumn::flex(2.),
+            ]))
+                .child(table_header()
+                    .child(table_cell().child(text("Site")))
+                    .child(table_cell().child(text("Elevation")))
+                    .child(table_cell().child(text("Notes"))))
+                .child(table_row()
+                    .child(table_cell().child(link("site:ridge").child(text("Ridge station"))))
+                    .child(table_cell().child(text("1,240 m")))
+                    .child(table_cell().child(text("Open horizon with little artificial light; exposed to wind."))))
+                .child(table_row()
+                    .child(table_cell().child(text("Lake shelter")))
+                    .child(table_cell().child(text("680 m")))
+                    .child(table_cell().child(strong().child(text("Limited access"))).child(hard_break()).child(text("Approach from the eastern path."))))
+                .child(table_row()
+                    .child(table_cell().child(text("Valley terrace")))
+                    .child(table_cell().child(text("215 m")))
+                    .child(table_cell().child(text("Level ground; trees obscure the southern sky.")))),
             quote().child(text("A useful observation records uncertainty as carefully as the result.")),
             heading(HeadingLevel::H3).child(text("Before the session")),
             bullet_item().child(text("Check the weather forecast.")),

@@ -42,6 +42,18 @@ pub fn text(value: impl Into<SharedString>) -> NodeTree {
 pub fn paragraph() -> NodeTree {
     node(Paragraph)
 }
+pub fn table() -> NodeTree {
+    node(crate::Table::default())
+}
+pub fn table_row() -> NodeTree {
+    node(crate::TableRow::default())
+}
+pub fn table_header() -> NodeTree {
+    node(crate::TableRow { header: true })
+}
+pub fn table_cell() -> NodeTree {
+    node(crate::TableCell)
+}
 pub fn heading(level: crate::HeadingLevel) -> NodeTree {
     node(crate::Heading(level))
 }

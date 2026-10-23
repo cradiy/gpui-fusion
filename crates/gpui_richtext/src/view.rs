@@ -4,6 +4,7 @@ use gpui::{
     AnimationExt, ElementId, Hsla, InteractiveText, IntoElement, Refineable, RenderOnce,
     StyleRefinement, Styled, div,
 };
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,15 +30,16 @@ impl CopyFeedback {
     }
 }
 
-type LinkListener = Box<dyn Fn(&LinkSpan, &mut gpui::Window, &mut gpui::App)>;
+type LinkListener = Rc<dyn Fn(&LinkSpan, &mut gpui::Window, &mut gpui::App)>;
 type LinkTooltipBuilder =
-    Box<dyn Fn(&LinkSpan, &mut gpui::Window, &mut gpui::App) -> Option<gpui::AnyView>>;
+    Rc<dyn Fn(&LinkSpan, &mut gpui::Window, &mut gpui::App) -> Option<gpui::AnyView>>;
 
-/// A uniform-size selectable text flow over a compiled node document.
+/// Selectable rich text over a compiled node document.
 ///
 /// Use a stable ID and reuse the projection between frames. Surface and inherited
 /// typography use `Styled`. Selection uses GPUI's read-only system integration.
-#[derive(IntoElement)]
+/// Table cells and surrounding text sections have independent selections.
+#[derive(Clone, IntoElement)]
 pub struct RichText {
     id: ElementId,
     projection: Arc<Projection>,
@@ -52,6 +54,7 @@ pub struct RichText {
     quote_border_color: Hsla,
     task_marker_style: crate::TaskMarkerStyle,
     block_spacing: gpui::Pixels,
+    table_style: crate::TableStyle,
 }
 
 impl RichText {
@@ -70,6 +73,7 @@ impl RichText {
             quote_border_color: gpui::rgba(0x64748b66).into(),
             task_marker_style: crate::TaskMarkerStyle::default(),
             block_spacing: gpui::px(10.),
+            table_style: crate::TableStyle::default(),
         }
     }
 
@@ -106,6 +110,11 @@ impl RichText {
         self
     }
 
+    pub fn table_style(mut self, style: crate::TableStyle) -> Self {
+        self.table_style = style;
+        self
+    }
+
     /// Supply localized tooltips and the copy button's accessible action name.
     pub fn code_block_labels(mut self, labels: CodeBlockLabels) -> Self {
         self.code_block_labels = Some(labels);
@@ -125,7 +134,7 @@ impl RichText {
         builder: impl Fn(&LinkSpan, &mut gpui::Window, &mut gpui::App) -> Option<gpui::AnyView>
         + 'static,
     ) -> Self {
-        self.link_tooltip = Some(Box::new(builder));
+        self.link_tooltip = Some(Rc::new(builder));
         self
     }
 
@@ -135,7 +144,7 @@ impl RichText {
         mut self,
         listener: impl Fn(&LinkSpan, &mut gpui::Window, &mut gpui::App) + 'static,
     ) -> Self {
-        self.on_link_click = Some(Box::new(listener));
+        self.on_link_click = Some(Rc::new(listener));
         self
     }
 }
@@ -148,6 +157,9 @@ impl Styled for RichText {
 
 impl RenderOnce for RichText {
     fn render(self, window: &mut gpui::Window, _: &mut gpui::App) -> impl IntoElement {
+        if !self.projection.parts.is_empty() {
+            return self.render_parts();
+        }
         let mut surface = div().whitespace_normal();
         surface.style().refine(&self.style);
         let header_height = gpui::px(36.);
@@ -289,12 +301,12 @@ impl RenderOnce for RichText {
             );
         }
         if code_ranges.is_empty() && quote_ranges.is_empty() && markers.is_empty() {
-            return surface.child(text);
+            return surface.child(text).into_any_element();
         }
         let style = self.code_block_style;
         let labels = self.code_block_labels;
         let task_layout = layout.clone();
-        surface.child(
+        let content = surface.child(
             div()
                 .id(id)
                 .relative()
@@ -561,7 +573,142 @@ impl RenderOnce for RichText {
                     .left_0()
                     .size_full(),
                 ),
-        )
+        );
+        content.into_any_element()
+    }
+}
+
+impl RichText {
+    fn fragment(&self, cell: &crate::projection::CellProjection) -> Self {
+        let mut child = self.clone();
+        child.id = ("richtext-fragment", cell.node.0 as usize).into();
+        child.projection = cell.projection.clone();
+        child.style = StyleRefinement::default();
+        let offset = cell.offset;
+        if let Some(listener) = self.on_link_click.clone() {
+            child.on_link_click = Some(Rc::new(move |link, window, cx| {
+                let mut link = link.clone();
+                link.range = link.range.start + offset..link.range.end + offset;
+                listener(&link, window, cx);
+            }));
+        }
+        if let Some(builder) = self.link_tooltip.clone() {
+            child.link_tooltip = Some(Rc::new(move |link, window, cx| {
+                let mut link = link.clone();
+                link.range = link.range.start + offset..link.range.end + offset;
+                builder(&link, window, cx)
+            }));
+        }
+        child
+    }
+
+    fn render_parts(&self) -> gpui::AnyElement {
+        let mut surface = div()
+            .id(self.id.clone())
+            .flex()
+            .flex_col()
+            .gap(self.block_spacing);
+        surface.style().refine(&self.style);
+        let style = &self.table_style;
+        for part in &self.projection.parts {
+            match part {
+                crate::projection::RenderPart::Text(cell) => {
+                    surface = surface.child(self.fragment(cell).w_full());
+                }
+                crate::projection::RenderPart::Table {
+                    node,
+                    columns,
+                    rows,
+                } => {
+                    let padding = gpui::size(
+                        style.cell_padding.width.max(gpui::px(0.)),
+                        style.cell_padding.height.max(gpui::px(0.)),
+                    );
+                    let minimum = style
+                        .min_column_width
+                        .max(padding.width * 2. + gpui::px(1.));
+                    let min_width: gpui::Pixels = columns
+                        .iter()
+                        .map(|column| match column.width {
+                            crate::ColumnWidth::Fixed(width) => {
+                                width.max(padding.width * 2. + gpui::px(1.))
+                            }
+                            crate::ColumnWidth::Flex(_) => minimum,
+                        })
+                        .sum();
+                    let all_fixed = columns
+                        .iter()
+                        .all(|column| matches!(column.width, crate::ColumnWidth::Fixed(_)));
+                    let min_width = min_width + gpui::px(2.);
+                    let mut table = div()
+                        .w_full()
+                        .when(all_fixed, |table| table.w(min_width))
+                        .min_w(min_width)
+                        .flex()
+                        .flex_col()
+                        .border_1()
+                        .border_color(style.border_color)
+                        .rounded(style.corner_radius.max(gpui::px(0.)))
+                        .overflow_hidden()
+                        .bg(style.background);
+                    let mut body_index = 0;
+                    for (row_index, row) in rows.iter().enumerate() {
+                        let mut row_view = div()
+                            .id(("table-row", row.node.0 as usize))
+                            .w_full()
+                            .flex()
+                            .items_stretch();
+                        if row.header {
+                            row_view = row_view.bg(style.header_background);
+                        } else {
+                            if body_index % 2 == 1 {
+                                row_view = row_view
+                                    .when_some(style.alternate_background, |row, color| {
+                                        row.bg(color)
+                                    });
+                            }
+                            body_index += 1;
+                        }
+                        if row_index + 1 < rows.len() {
+                            row_view = row_view.border_b_1().border_color(style.border_color);
+                        }
+                        for (index, (cell, column)) in row.cells.iter().zip(columns).enumerate() {
+                            let mut cell_view = div()
+                                .id(("table-cell", cell.node.0 as usize))
+                                .px(padding.width)
+                                .py(padding.height)
+                                .flex_shrink_0();
+                            cell_view = match column.width {
+                                crate::ColumnWidth::Fixed(width) => {
+                                    cell_view.w(width.max(padding.width * 2. + gpui::px(1.)))
+                                }
+                                crate::ColumnWidth::Flex(weight) => cell_view
+                                    .flex_basis(gpui::px(0.))
+                                    .flex_grow(weight)
+                                    .min_w(minimum),
+                            };
+                            if index + 1 < columns.len() {
+                                cell_view = cell_view.border_r_1().border_color(style.border_color);
+                            }
+                            row_view = row_view.child(
+                                cell_view
+                                    .child(self.fragment(cell).w_full().text_align(column.align)),
+                            );
+                        }
+                        table = table.child(row_view);
+                    }
+                    surface = surface.child(
+                        div()
+                            .id(("table-scroll", node.0 as usize))
+                            .w_full()
+                            .min_w_0()
+                            .overflow_x_scroll()
+                            .child(table),
+                    );
+                }
+            }
+        }
+        surface.into_any_element()
     }
 }
 

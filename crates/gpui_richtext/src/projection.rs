@@ -8,6 +8,7 @@ use std::{
     any::{Any, TypeId},
     collections::HashMap,
     ops::Range,
+    sync::Arc,
 };
 
 /// A text leaf. Its style inherits from ancestor contributions.
@@ -19,6 +20,12 @@ pub struct Paragraph;
 
 /// The semantic contribution of a registered payload type.
 pub enum Contribution {
+    Table(crate::Table),
+    TableRow {
+        header: bool,
+        style: InlineStyle,
+    },
+    TableCell(InlineStyle),
     Text(SharedString, HighlightStyle),
     Inline(HighlightStyle),
     StyledInline(InlineStyle),
@@ -130,6 +137,20 @@ impl Registry {
     /// Register standard nodes with application-supplied inline style presets.
     pub fn with_theme(theme: TextTheme) -> Self {
         let mut registry = Self::new();
+        registry.register::<crate::Table>(|table| Ok(Contribution::Table(table.clone())));
+        registry.register::<crate::TableRow>(move |row| {
+            Ok(Contribution::TableRow {
+                header: row.header,
+                style: if row.header {
+                    theme.table_header.clone()
+                } else {
+                    InlineStyle::default()
+                },
+            })
+        });
+        registry.register::<crate::TableCell>(move |_| {
+            Ok(Contribution::TableCell(theme.table_cell.clone()))
+        });
         registry.register::<Text>(|text| {
             Ok(Contribution::Text(
                 text.0.clone(),
@@ -205,12 +226,15 @@ impl Registry {
         for root in document.roots.iter() {
             self.append(document, *root, true, InlineStyle::default(), &mut output)?;
         }
-        Ok(Projection {
+        let mut projection = Projection {
             text: output.text.into(),
             spans: output.spans,
             links: output.links,
             blocks: output.blocks,
-        })
+            parts: Vec::new(),
+        };
+        projection.prepare_parts();
+        Ok(projection)
     }
 
     fn append(
@@ -222,14 +246,12 @@ impl Registry {
         output: &mut Compilation,
     ) -> Result<()> {
         let node = &document.nodes[&id];
-        let Some(resolve) = self.resolvers.get(&node.payload.as_ref().type_id()) else {
-            bail!("unregistered payload on node {id:?}");
-        };
-        let contribution = resolve(node.payload.as_ref())?;
+        let contribution = self.resolve_node(document, id)?;
         if root
             != matches!(
                 contribution,
                 Contribution::Paragraph(_)
+                    | Contribution::Table(_)
                     | Contribution::Heading { .. }
                     | Contribution::Quote(_)
                     | Contribution::ListItem { .. }
@@ -243,6 +265,12 @@ impl Registry {
             );
         }
         match contribution {
+            Contribution::Table(table) => {
+                self.append_table(document, id, table, inherited, output)?
+            }
+            Contribution::TableRow { .. } | Contribution::TableCell(_) => {
+                bail!("table row or cell {id:?} outside its table parent");
+            }
             Contribution::Text(value, style) => {
                 if !node.children.is_empty() {
                     bail!("text node {id:?} cannot have children");
@@ -368,6 +396,103 @@ impl Registry {
         }
         Ok(())
     }
+
+    fn resolve_node(&self, document: &Document, id: NodeId) -> Result<Contribution> {
+        let node = &document.nodes[&id];
+        let Some(resolve) = self.resolvers.get(&node.payload.as_ref().type_id()) else {
+            bail!("unregistered payload on node {id:?}");
+        };
+        resolve(node.payload.as_ref())
+    }
+
+    fn append_table(
+        &self,
+        document: &Document,
+        id: NodeId,
+        table: crate::Table,
+        inherited: InlineStyle,
+        output: &mut Compilation,
+    ) -> Result<()> {
+        let node = &document.nodes[&id];
+        let Some(first) = node.children.first() else {
+            bail!("table {id:?} requires a row");
+        };
+        let count = document.nodes[first].children.len();
+        if count == 0 {
+            bail!("table {id:?} requires a column");
+        }
+        let columns = if table.columns.is_empty() {
+            vec![crate::TableColumn::default(); count]
+        } else {
+            if table.columns.len() != count {
+                bail!("table {id:?} column count differs from its rows");
+            }
+            table.columns
+        };
+        for column in &columns {
+            let width = match column.width {
+                crate::ColumnWidth::Fixed(width) => f32::from(width),
+                crate::ColumnWidth::Flex(weight) => weight,
+            };
+            if !width.is_finite() || width <= 0. {
+                bail!("invalid column width in table {id:?}");
+            }
+        }
+        let start = output.start_block();
+        let mut rows = Vec::new();
+        for (row_index, row_id) in node.children.iter().copied().enumerate() {
+            let Contribution::TableRow { header, style } = self.resolve_node(document, row_id)?
+            else {
+                bail!("table {id:?} requires row children");
+            };
+            let row_node = &document.nodes[&row_id];
+            if row_node.children.len() != count {
+                bail!("inconsistent column count at row {row_id:?}");
+            }
+            if row_index > 0 {
+                output.text.push('\n');
+            }
+            let row_style = inherited.inherit(&style);
+            let mut cells = Vec::new();
+            for (column_index, cell_id) in row_node.children.iter().copied().enumerate() {
+                let Contribution::TableCell(style) = self.resolve_node(document, cell_id)? else {
+                    bail!("table row {row_id:?} requires cell children");
+                };
+                if column_index > 0 {
+                    output.text.push('\t');
+                }
+                let cell_start = output.text.len();
+                let style = row_style.inherit(&style);
+                let cell_node = &document.nodes[&cell_id];
+                for child in &cell_node.children {
+                    self.append(document, *child, false, style.clone(), output)?;
+                }
+                if cell_node.children.is_empty() {
+                    output.spans.push(TextSpan {
+                        node: cell_id,
+                        range: cell_start..cell_start,
+                        style: style.highlight,
+                        font_family: style.font_family,
+                    });
+                }
+                cells.push(crate::TableCellSpan {
+                    node: cell_id,
+                    range: cell_start..output.text.len(),
+                });
+            }
+            rows.push(crate::TableRowSpan {
+                node: row_id,
+                header,
+                cells,
+            });
+        }
+        output.blocks.push(BlockSpan {
+            node: id,
+            range: start..output.text.len(),
+            kind: BlockKind::Table(crate::TableBlock { columns, rows }),
+        });
+        Ok(())
+    }
 }
 
 /// A source node's UTF-8 byte range in projected text. List markers belong to
@@ -386,6 +511,28 @@ pub struct Projection {
     spans: Vec<TextSpan>,
     links: Vec<LinkSpan>,
     blocks: Vec<BlockSpan>,
+    pub(crate) parts: Vec<RenderPart>,
+}
+
+pub(crate) struct CellProjection {
+    pub node: NodeId,
+    pub offset: usize,
+    pub projection: Arc<Projection>,
+}
+
+pub(crate) struct RowProjection {
+    pub node: NodeId,
+    pub header: bool,
+    pub cells: Vec<CellProjection>,
+}
+
+pub(crate) enum RenderPart {
+    Text(CellProjection),
+    Table {
+        node: NodeId,
+        columns: Vec<crate::TableColumn>,
+        rows: Vec<RowProjection>,
+    },
 }
 
 /// A leaf block's range, excluding separators inserted between blocks.
@@ -398,6 +545,7 @@ pub struct BlockSpan {
 
 #[derive(Clone, Debug)]
 pub enum BlockKind {
+    Table(crate::TableBlock),
     Paragraph,
     Heading { level: HeadingLevel },
     Quote,
@@ -414,6 +562,120 @@ pub struct LinkSpan {
 }
 
 impl Projection {
+    fn slice(&self, range: Range<usize>) -> Arc<Self> {
+        let first_span = self
+            .spans
+            .partition_point(|span| span.range.end < range.start);
+        let first_link = self
+            .links
+            .partition_point(|link| link.range.end <= range.start);
+        let first_block = self
+            .blocks
+            .partition_point(|block| block.range.end < range.start);
+        let intersects = |candidate: &Range<usize>| {
+            candidate.start < range.end && candidate.end > range.start
+                || candidate.is_empty()
+                    && candidate.start >= range.start
+                    && candidate.start <= range.end
+        };
+        Arc::new(Self {
+            text: self.text[range.clone()].to_owned().into(),
+            spans: self.spans[first_span..]
+                .iter()
+                .take_while(|span| span.range.start <= range.end)
+                .filter(|span| intersects(&span.range))
+                .map(|span| {
+                    let mut span = span.clone();
+                    span.range = span.range.start.max(range.start) - range.start
+                        ..span.range.end.min(range.end) - range.start;
+                    span
+                })
+                .collect(),
+            links: self.links[first_link..]
+                .iter()
+                .take_while(|span| span.range.start < range.end)
+                .filter(|span| intersects(&span.range))
+                .map(|span| {
+                    let mut span = span.clone();
+                    span.range = span.range.start.max(range.start) - range.start
+                        ..span.range.end.min(range.end) - range.start;
+                    span
+                })
+                .collect(),
+            blocks: self.blocks[first_block..]
+                .iter()
+                .take_while(|block| block.range.start <= range.end)
+                .filter(|block| {
+                    !matches!(block.kind, BlockKind::Table(_))
+                        && block.range.start >= range.start
+                        && block.range.end <= range.end
+                })
+                .map(|block| {
+                    let mut block = block.clone();
+                    block.range = block.range.start - range.start..block.range.end - range.start;
+                    block
+                })
+                .collect(),
+            parts: Vec::new(),
+        })
+    }
+
+    fn prepare_parts(&mut self) {
+        if !self
+            .blocks
+            .iter()
+            .any(|block| matches!(block.kind, BlockKind::Table(_)))
+        {
+            return;
+        }
+        let mut parts = Vec::new();
+        let mut first = 0;
+        for (index, block) in self.blocks.iter().enumerate() {
+            let BlockKind::Table(table) = &block.kind else {
+                continue;
+            };
+            if first < index {
+                let start = &self.blocks[first];
+                parts.push(RenderPart::Text(CellProjection {
+                    node: start.node,
+                    offset: start.range.start,
+                    projection: self.slice(start.range.start..self.blocks[index - 1].range.end),
+                }));
+            }
+            parts.push(RenderPart::Table {
+                node: block.node,
+                columns: table.columns.clone(),
+                rows: table
+                    .rows
+                    .iter()
+                    .map(|row| RowProjection {
+                        node: row.node,
+                        header: row.header,
+                        cells: row
+                            .cells
+                            .iter()
+                            .map(|cell| CellProjection {
+                                node: cell.node,
+                                offset: cell.range.start,
+                                projection: self.slice(cell.range.clone()),
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            });
+            first = index + 1;
+        }
+        if first < self.blocks.len() {
+            let start = &self.blocks[first];
+            parts.push(RenderPart::Text(CellProjection {
+                node: start.node,
+                offset: start.range.start,
+                projection: self.slice(start.range.start..self.blocks.last().unwrap().range.end),
+            }));
+        }
+        self.parts = parts;
+    }
+
     pub fn text(&self) -> &SharedString {
         &self.text
     }

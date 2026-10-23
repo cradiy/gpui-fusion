@@ -3,8 +3,8 @@ use gpui::{
     App, Bounds, Context, Entity, FontWeight, Render, Subscription, Window, WindowBounds,
     WindowOptions, div, prelude::*, px, rgb, size,
 };
+use gpui_icons::IconAssets;
 use gpui_platform::application;
-use uic::assets::LucideAssets;
 use uic::components::calendar::{
     CalendarDatePicker, CalendarSelection, CalendarSelectionMode, CalendarState, CalendarView,
     DatePickerDayLabel,
@@ -184,7 +184,7 @@ fn date(day: u32) -> NaiveDate {
 
 fn main() {
     application()
-        .with_assets(LucideAssets::new())
+        .with_assets(IconAssets::new())
         .run(|cx: &mut App| {
             uic::init(cx);
             cx.open_window(

@@ -1,0 +1,23 @@
+[package]
+name = "gpui_icons"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["cradiy <cradiy.rs@gmail.com>"]
+
+[features]
+default = ["lucide-common"]
+lucide-core = []
+lucide-common = ["lucide-core"]
+lucide-media = []
+lucide-files = []
+lucide-editing = []
+lucide-development = []
+lucide-connectivity = []
+lucide-misc = []
+all = ["lucide-common", "lucide-media", "lucide-files", "lucide-editing", "lucide-development", "lucide-connectivity", "lucide-misc"]
+
+[dependencies]
+anyhow.workspace = true
+gpui.workspace = true
+gpui_icons_macros.workspace = true

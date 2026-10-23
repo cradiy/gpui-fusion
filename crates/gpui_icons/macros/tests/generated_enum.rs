@@ -1,4 +1,4 @@
-use uic_macros::file_enum;
+use gpui_icons_macros::file_enum;
 
 #[file_enum(path = "tests/assets", ext = "svg", rename_all = "PascalCase")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

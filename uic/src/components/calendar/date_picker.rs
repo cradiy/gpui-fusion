@@ -6,7 +6,7 @@ use gpui::{
     SharedString, StyleRefinement, Styled, Window, div, prelude::*, px, relative, rgb, svg,
 };
 
-use crate::assets::LucideIcons;
+use gpui_icons::GpuiIcons;
 
 use super::{
     CalendarLocale, CalendarSelection, CalendarSelectionMode, CalendarState, CalendarView,
@@ -236,7 +236,7 @@ impl RenderOnce for CalendarDatePicker {
         let appearance = self.appearance.clone();
         let navigation_id = self.id.clone();
         let navigation_button = move |id: &'static str,
-                                      icon: LucideIcons,
+                                      icon: GpuiIcons,
                                       label: gpui::SharedString,
                                       state: Entity<CalendarState>,
                                       delta: i8| {
@@ -316,7 +316,7 @@ impl RenderOnce for CalendarDatePicker {
                             .child(self.locale.month_names[month.month as usize - 1].clone())
                             .child(
                                 svg()
-                                    .path(LucideIcons::ChevronDown)
+                                    .path(GpuiIcons::LucideChevronDown)
                                     .size(px(13.))
                                     .text_color(self.appearance.muted_foreground),
                             ),
@@ -342,7 +342,7 @@ impl RenderOnce for CalendarDatePicker {
                             .child(month.year.to_string())
                             .child(
                                 svg()
-                                    .path(LucideIcons::ChevronDown)
+                                    .path(GpuiIcons::LucideChevronDown)
                                     .size(px(13.))
                                     .text_color(self.appearance.muted_foreground),
                             ),
@@ -371,7 +371,7 @@ impl RenderOnce for CalendarDatePicker {
                     .child(month.year.to_string())
                     .child(
                         svg()
-                            .path(LucideIcons::ChevronDown)
+                            .path(GpuiIcons::LucideChevronDown)
                             .size(px(13.))
                             .text_color(self.appearance.muted_foreground),
                     )
@@ -410,7 +410,7 @@ impl RenderOnce for CalendarDatePicker {
             })
             .child(
                 svg()
-                    .path(LucideIcons::X)
+                    .path(GpuiIcons::LucideX)
                     .size_4()
                     .text_color(self.appearance.muted_foreground),
             );
@@ -421,7 +421,7 @@ impl RenderOnce for CalendarDatePicker {
             .justify_end()
             .child(navigation_button(
                 "next",
-                LucideIcons::ChevronRight,
+                GpuiIcons::LucideChevronRight,
                 self.locale.labels.next.clone(),
                 next_state,
                 1,
@@ -436,7 +436,7 @@ impl RenderOnce for CalendarDatePicker {
             .items_center()
             .child(div().w(px(64.)).child(navigation_button(
                 "previous",
-                LucideIcons::ChevronLeft,
+                GpuiIcons::LucideChevronLeft,
                 self.locale.labels.previous.clone(),
                 previous_state,
                 -1,

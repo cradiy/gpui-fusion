@@ -37,7 +37,7 @@ First-party packages outside the Apache-2.0 scope are authored by
 `Copyright (c) 2026 cradiy` and a package-local `LICENSE` file.
 
 These include `gpui_3d`, `gpui_3d_effects`, `gpui_3d_gltf`, `gpui_android`,
-`gpui_automation`, `gpui_effects`, `gpui_inspector`, `gpui_io`, `gpui_media`,
+`gpui_automation`, `gpui_effects`, `gpui_icons`, `gpui-icons-macros`, `gpui_inspector`, `gpui_io`, `gpui_media`,
 `gpui_media_backend`, `gpui_media_core`, `gpui_notifications`, `gpui_render`, `gpui_richtext`,
 `gpui_wayland_source`, `uic`, `uic-macros`, and the standalone example packages
 outside the Apache-2.0 scope.
@@ -46,4 +46,4 @@ outside the Apache-2.0 scope.
 
 Third-party dependencies, bundled assets, and source copied from inherited
 packages retain their licenses and attribution. In particular,
-`uic/assets/icons/LICENSE` contains the Lucide ISC and Feather MIT notices.
+`crates/gpui_icons/assets/lucide/LICENSE` contains the Lucide ISC and Feather MIT notices.

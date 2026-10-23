@@ -941,6 +941,27 @@ mod tests {
     const LILEX_BOLD: &[u8] = include_bytes!("../../../assets/fonts/lilex/Lilex-Bold.ttf");
 
     #[test]
+    fn missing_family_preserves_bold_italic() {
+        let platform = Arc::new(CosmicTextSystem::new_without_system_fonts("Lilex"));
+        platform
+            .add_fonts(vec![
+                Cow::Borrowed(LILEX_REGULAR),
+                Cow::Borrowed(include_bytes!(
+                    "../../../assets/fonts/lilex/Lilex-BoldItalic.ttf"
+                )),
+            ])
+            .unwrap();
+        let system = gpui::TextSystem::new(platform.clone());
+        let requested = gpui::font("Unavailable Typeface").bold().italic();
+        let resolved = system.resolve_font(&requested);
+        let state = platform.0.read();
+        let loaded = state.loaded_font(resolved);
+        let face = state.font_system.db().face(loaded.font.id()).unwrap();
+        assert_eq!(face.style, cosmic_text::Style::Italic);
+        assert_eq!(loaded.weight, cosmic_text::Weight::BOLD);
+    }
+
+    #[test]
     fn bidi_cluster_metadata_survives_shaping() {
         let system = CosmicTextSystem::new_without_system_fonts("Lilex");
         system

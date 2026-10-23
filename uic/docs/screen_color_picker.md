@@ -45,7 +45,7 @@ ScreenColorPicker::new(&screen)
 ```
 
 The default is a compact icon-only button. Use `show_label(true)` to display
-text beside the icon. Register `uic::assets::LucideAssets` through
+text beside the icon. Register `gpui_icons::IconAssets` through
 `Application::with_assets`, or serve its paths from the application's asset
 source. `text_color` also colors the default icon explicitly; `icon_color`
 overrides only the icon color.

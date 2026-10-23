@@ -69,7 +69,12 @@ fn rows(layout: &TextLayout, align: TextAlign) -> Vec<Row> {
     let mut result = Vec::new();
     let mut line_start = 0;
     let mut y = bounds.top();
-    for line in &inner.lines {
+    for (line_index, line) in inner.lines.iter().enumerate() {
+        y += inner
+            .line_top_spacing
+            .get(line_index)
+            .copied()
+            .unwrap_or_default();
         for index in 0..=line.wrap_boundaries().len() {
             let range = line.row_range(index).unwrap();
             let extent = line.row_extent(index).unwrap();
@@ -505,6 +510,7 @@ mod tests {
             len: 7,
             lines: smallvec::smallvec![line],
             line_height: px(20.),
+            line_top_spacing: vec![px(0.)],
             wrap_width: None,
             size: Some(size(px(200.), px(20.))),
             bounds: Some(Bounds::new(
@@ -525,6 +531,65 @@ mod tests {
         let rows = rows(&layout, TextAlign::Right);
         assert_eq!(index_at(&rows, point(px(299.), px(55.))), 1);
         assert_eq!(character_at(&rows, point(px(285.), px(55.))), Some(3));
+    }
+
+    #[crate::test]
+    fn line_spacing_preserves_wrapped_selection_and_source_coordinates(cx: &mut TestAppContext) {
+        let (_, mut visual) = setup(cx, TextAlign::Left);
+        let source = "Title\nSeveral words wrap onto following rows.\nEnd";
+        for width in [180., 90.] {
+            let mut layouts = Vec::new();
+            for spacing in [Vec::new(), vec![(6, px(32.))]] {
+                let text = StyledText::new(source).with_line_top_spacing(spacing);
+                layouts.push(text.layout().clone());
+                visual.draw(
+                    point(px(0.), px(0.)),
+                    size(
+                        crate::AvailableSpace::Definite(px(width)),
+                        crate::AvailableSpace::MinContent,
+                    ),
+                    move |_, _| {
+                        div()
+                            .w(px(width))
+                            .text_size(px(16.))
+                            .line_height(px(24.))
+                            .whitespace_normal()
+                            .child(text)
+                    },
+                );
+            }
+            let original = rows(&layouts[0], TextAlign::Left);
+            let spaced = rows(&layouts[1], TextAlign::Left);
+            assert_eq!(original.len(), spaced.len());
+            for (before, after) in original.iter().zip(&spaced) {
+                assert_eq!(before.range, after.range);
+                let expected_gap = if after.line_start >= 6 {
+                    px(32.)
+                } else {
+                    px(0.)
+                };
+                assert_eq!(after.origin.y, before.origin.y + expected_gap);
+            }
+            let start = layouts[1].position_for_index(6).unwrap();
+            assert_eq!(
+                layouts[1].index_for_position(start + point(px(0.), px(1.))),
+                Ok(6)
+            );
+            assert_eq!(character_at(&spaced, start - point(px(0.), px(8.))), None);
+            let quads = selection_quads(
+                &layouts[1],
+                0..source.len(),
+                TextAlign::Left,
+                crate::black(),
+            );
+            assert!(
+                quads
+                    .iter()
+                    .all(|quad| quad.bounds.bottom() <= start.y - px(32.)
+                        || quad.bounds.top() >= start.y)
+            );
+            assert_eq!(layouts[1].text(), source);
+        }
     }
 
     fn setup(cx: &mut TestAppContext, align: TextAlign) -> (WindowHandle<Demo>, VisualTestContext) {

@@ -6,7 +6,7 @@ use gpui::{
     transparent_black,
 };
 
-use crate::assets::LucideIcons;
+use gpui_icons::GpuiIcons;
 
 use super::{CollapsibleAppearance, CollapsibleState};
 
@@ -128,9 +128,9 @@ impl RenderOnce for Collapsible {
             .unwrap_or_else(|| {
                 svg()
                     .path(if expanded {
-                        LucideIcons::ChevronDown
+                        GpuiIcons::LucideChevronDown
                     } else {
-                        LucideIcons::ChevronRight
+                        GpuiIcons::LucideChevronRight
                     })
                     .size_4()
                     .text_color(self.appearance.indicator)

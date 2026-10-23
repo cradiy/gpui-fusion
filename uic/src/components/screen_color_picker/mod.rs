@@ -101,9 +101,9 @@ impl RenderOnce for ScreenColorPicker {
                 .child(
                     svg()
                         .path(if busy {
-                            crate::assets::LucideIcons::LoaderCircle.path()
+                            gpui_icons::GpuiIcons::LucideLoaderCircle.path()
                         } else {
-                            crate::assets::LucideIcons::Pipette.path()
+                            gpui_icons::GpuiIcons::LucidePipette.path()
                         })
                         .size(px(18.))
                         .text_color(color),

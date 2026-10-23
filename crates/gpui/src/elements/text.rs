@@ -274,7 +274,7 @@ impl Element for &'static str {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut state = TextLayout::default();
-        let layout_id = state.layout(SharedString::from(*self), None, window, cx);
+        let layout_id = state.layout(SharedString::from(*self), None, Vec::new(), window, cx);
         (layout_id, state)
     }
 
@@ -348,7 +348,7 @@ impl Element for SharedString {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut state = TextLayout::default();
-        let layout_id = state.layout(self.clone(), None, window, cx);
+        let layout_id = state.layout(self.clone(), None, Vec::new(), window, cx);
         (layout_id, state)
     }
 
@@ -397,6 +397,7 @@ pub struct StyledText {
     delayed_highlights: Option<Vec<(Range<usize>, HighlightStyle)>>,
     delayed_font_family_overrides: Option<Vec<(Range<usize>, SharedString)>>,
     layout: TextLayout,
+    line_top_spacing: Vec<(usize, Pixels)>,
 }
 
 impl StyledText {
@@ -408,12 +409,22 @@ impl StyledText {
             delayed_highlights: None,
             delayed_font_family_overrides: None,
             layout: TextLayout::default(),
+            line_top_spacing: Vec::new(),
         }
     }
 
     /// Get the layout for this element. This can be used to map indices to pixels and vice versa.
     pub fn layout(&self) -> &TextLayout {
         &self.layout
+    }
+
+    /// Reserve vertical space before source lines without adding text. Offsets
+    /// must identify the start of a newline-delimited line. Invalid offsets are
+    /// ignored; negative spacing is clamped to zero. Wrapped continuations do
+    /// not repeat the spacing.
+    pub fn with_line_top_spacing(mut self, spacing: Vec<(usize, Pixels)>) -> Self {
+        self.line_top_spacing = spacing;
+        self
     }
 
     /// Set the styling attributes for the given text, as well as
@@ -574,7 +585,13 @@ impl Element for StyledText {
             Self::apply_font_family_overrides(runs, overrides);
         }
 
-        let layout_id = self.layout.layout(self.text.clone(), runs, window, cx);
+        let layout_id = self.layout.layout(
+            self.text.clone(),
+            runs,
+            std::mem::take(&mut self.line_top_spacing),
+            window,
+            cx,
+        );
         (layout_id, ())
     }
 
@@ -624,6 +641,7 @@ struct TextLayoutInner {
     wrap_width: Option<Pixels>,
     size: Option<Size<Pixels>>,
     bounds: Option<Bounds<Pixels>>,
+    line_top_spacing: Vec<Pixels>,
 }
 
 impl TextLayout {
@@ -631,6 +649,7 @@ impl TextLayout {
         &self,
         text: SharedString,
         runs: Option<Vec<TextRun>>,
+        line_top_spacing: Vec<(usize, Pixels)>,
         window: &mut Window,
         _: &mut App,
     ) -> LayoutId {
@@ -738,12 +757,27 @@ impl TextLayout {
                         wrap_width,
                         size: Some(Size::default()),
                         bounds: None,
+                        line_top_spacing: Vec::new(),
                     });
                     return Size::default();
                 };
 
                 let mut size: Size<Pixels> = Size::default();
+                let spacing: std::collections::HashMap<_, _> =
+                    line_top_spacing.iter().copied().collect();
+                let mut line_start = 0;
+                let mut resolved_spacing = Vec::new();
                 for line in &lines {
+                    let top = spacing
+                        .get(&line_start)
+                        .copied()
+                        .unwrap_or_default()
+                        .max(Pixels::ZERO);
+                    if !spacing.is_empty() {
+                        resolved_spacing.push(top);
+                    }
+                    size.height += top;
+                    line_start += line.len() + 1;
                     let line_size = line.size(line_height);
                     size.height += line_size.height;
                     size.width = size.width.max(line_size.width).ceil();
@@ -757,6 +791,7 @@ impl TextLayout {
                     wrap_width,
                     size: Some(size),
                     bounds: None,
+                    line_top_spacing: resolved_spacing,
                 });
 
                 size
@@ -802,7 +837,12 @@ impl TextLayout {
         let line_height = element_state.line_height;
         let mut line_origin = bounds.origin;
         let text_style = window.text_style();
-        for line in &element_state.lines {
+        for (index, line) in element_state.lines.iter().enumerate() {
+            line_origin.y += element_state
+                .line_top_spacing
+                .get(index)
+                .copied()
+                .unwrap_or_default();
             line.paint_background(
                 line_origin,
                 line_height,
@@ -830,7 +870,12 @@ impl TextLayout {
                 window.paint_quad(quad);
             }
             let mut line_origin = bounds.origin;
-            for line in &element_state.lines {
+            for (index, line) in element_state.lines.iter().enumerate() {
+                line_origin.y += element_state
+                    .line_top_spacing
+                    .get(index)
+                    .copied()
+                    .unwrap_or_default();
                 line.paint(
                     line_origin,
                     line_height,
@@ -862,7 +907,15 @@ impl TextLayout {
         let line_height = element_state.line_height;
         let mut line_origin = bounds.origin;
         let mut line_start_ix = 0;
-        for line in &element_state.lines {
+        for (index, line) in element_state.lines.iter().enumerate() {
+            line_origin.y += element_state
+                .line_top_spacing
+                .get(index)
+                .copied()
+                .unwrap_or_default();
+            if position.y < line_origin.y {
+                return Err(line_start_ix);
+            }
             let line_bottom = line_origin.y + line.size(line_height).height;
             if position.y > line_bottom {
                 line_origin.y = line_bottom;
@@ -893,7 +946,12 @@ impl TextLayout {
         let mut line_origin = bounds.origin;
         let mut line_start_ix = 0;
 
-        for line in &element_state.lines {
+        for (line_index, line) in element_state.lines.iter().enumerate() {
+            line_origin.y += element_state
+                .line_top_spacing
+                .get(line_index)
+                .copied()
+                .unwrap_or_default();
             let line_end_ix = line_start_ix + line.len();
             if index < line_start_ix {
                 break;

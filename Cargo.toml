@@ -10,6 +10,8 @@ members = [
   "crates/gpui_automation",
   "crates/gpui_inspector",
   "crates/gpui_io",
+  "crates/gpui_icons",
+  "crates/gpui_icons/macros",
   "crates/gpui_notifications",
   "crates/gpui_notifications/examples/notifications",
   "crates/gpui_media",
@@ -59,6 +61,8 @@ gpui = { path = "crates/gpui", default-features = false }
 gpui_android = { path = "crates/gpui_android" }
 gpui_inspector = { path = "crates/gpui_inspector" }
 gpui_io = { path = "crates/gpui_io" }
+gpui_icons = { path = "crates/gpui_icons", default-features = false }
+gpui_icons_macros = { package = "gpui-icons-macros", path = "crates/gpui_icons/macros" }
 gpui_notifications = { path = "crates/gpui_notifications" }
 gpui_automation = { path = "crates/gpui_automation" }
 gpui_media = { path = "crates/gpui_media" }

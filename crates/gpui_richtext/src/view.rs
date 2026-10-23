@@ -51,6 +51,7 @@ pub struct RichText {
     code_block_labels: Option<CodeBlockLabels>,
     quote_border_color: Hsla,
     task_marker_style: crate::TaskMarkerStyle,
+    block_spacing: gpui::Pixels,
 }
 
 impl RichText {
@@ -68,6 +69,7 @@ impl RichText {
             code_block_labels: None,
             quote_border_color: gpui::rgba(0x64748b66).into(),
             task_marker_style: crate::TaskMarkerStyle::default(),
+            block_spacing: gpui::px(10.),
         }
     }
 
@@ -93,6 +95,14 @@ impl RichText {
 
     pub fn task_marker_style(mut self, style: crate::TaskMarkerStyle) -> Self {
         self.task_marker_style = style;
+        self
+    }
+
+    /// Height of automatically inserted blank separators between blocks.
+    pub fn block_spacing(mut self, spacing: gpui::Pixels) -> Self {
+        if f32::from(spacing).is_finite() {
+            self.block_spacing = spacing.max(gpui::px(1.));
+        }
         self
     }
 
@@ -137,28 +147,80 @@ impl Styled for RichText {
 }
 
 impl RenderOnce for RichText {
-    fn render(self, _: &mut gpui::Window, _: &mut gpui::App) -> impl IntoElement {
+    fn render(self, window: &mut gpui::Window, _: &mut gpui::App) -> impl IntoElement {
         let mut surface = div().whitespace_normal();
         surface.style().refine(&self.style);
         let header_height = gpui::px(36.);
         let header_spacing = header_height + gpui::px(8.);
         let quote_color = self.quote_border_color;
         let task_style = self.task_marker_style;
-        let tasks: Vec<_> = self
+        let padding = self.code_block_style.padding.max(gpui::px(0.));
+        let mut marker_text_style = window.text_style();
+        marker_text_style.refine(&self.style.text);
+        let mut list_indent = gpui::px(24.);
+        let bullet_inset = gpui::px(16.);
+        let mut bullet_indent = bullet_inset + gpui::px(8.);
+        let markers: Vec<_> = self
             .projection
             .blocks()
             .iter()
             .filter_map(|block| {
-                if let BlockKind::ListItem {
-                    marker: crate::ListMarker::Task { checked },
-                } = block.kind
-                {
-                    Some((block.range.start, checked))
+                if let BlockKind::ListItem { marker } = block.kind {
+                    let mut marker_style = marker_text_style.clone();
+                    if let Some(span) = self
+                        .projection
+                        .spans()
+                        .iter()
+                        .find(|span| span.node == block.node)
+                    {
+                        marker_style = marker_style.highlight(span.style);
+                        if let Some(family) = &span.font_family {
+                            marker_style.font_family = family.clone();
+                        }
+                    }
+                    let label: gpui::SharedString = marker.text().trim_end().to_owned().into();
+                    let shaped = window.text_system().shape_line(
+                        label.clone(),
+                        marker_style.font_size.to_pixels(window.rem_size()),
+                        &[marker_style.to_run(label.len())],
+                        None,
+                    );
+                    if matches!(marker, crate::ListMarker::Bullet) {
+                        bullet_indent =
+                            bullet_indent.max(bullet_inset + shaped.width() + gpui::px(8.));
+                    } else if !matches!(marker, crate::ListMarker::Task { .. }) {
+                        list_indent = list_indent.max(shaped.width() + gpui::px(8.));
+                    }
+                    Some((block.range.start, marker, shaped))
                 } else {
                     None
                 }
             })
             .collect();
+        let mut indents = Vec::new();
+        for block in self.projection.blocks() {
+            let (prefix_len, width) = match block.kind {
+                BlockKind::ListItem {
+                    marker: crate::ListMarker::Bullet,
+                } => (crate::ListMarker::Bullet.text().len(), bullet_indent),
+                BlockKind::ListItem { marker } => (marker.text().len(), list_indent),
+                BlockKind::Quote => (0, gpui::px(16.)),
+                BlockKind::Code { .. } => (0, padding),
+                _ => continue,
+            };
+            indents.push(gpui::TextLineIndent {
+                line_start: block.range.start,
+                prefix_len,
+                width,
+            });
+            for (offset, _) in self.projection.text()[block.range.clone()].match_indices('\n') {
+                indents.push(gpui::TextLineIndent {
+                    line_start: block.range.start + offset + 1,
+                    prefix_len: 0,
+                    width,
+                });
+            }
+        }
         let quote_ranges: Vec<_> = self
             .projection
             .blocks()
@@ -173,12 +235,27 @@ impl RenderOnce for RichText {
             .filter(|block| matches!(block.kind, BlockKind::Code { .. }))
             .map(|block| block.range.clone())
             .collect();
-        let styled_text = self.projection.styled_text().with_line_top_spacing(
-            code_ranges
-                .iter()
-                .map(|range| (range.start, header_spacing))
-                .collect(),
-        );
+        let styled_text = self
+            .projection
+            .styled_text()
+            .with_empty_line_heights(
+                self.projection
+                    .blocks()
+                    .windows(2)
+                    .filter_map(|blocks| {
+                        let gap = blocks[0].range.end..blocks[1].range.start;
+                        (self.projection.text()[gap.clone()] == *"\n\n")
+                            .then_some((gap.start + 1, self.block_spacing))
+                    })
+                    .collect(),
+            )
+            .with_line_indents(indents)
+            .with_line_top_spacing(
+                code_ranges
+                    .iter()
+                    .map(|range| (range.start, header_spacing))
+                    .collect(),
+            );
         let layout = styled_text.layout().clone();
         let header_layout = layout.clone();
         let header_projection = self.projection.clone();
@@ -211,22 +288,16 @@ impl RenderOnce for RichText {
                 move |index, window, cx| listener(&projection.links()[index], window, cx),
             );
         }
-        if code_ranges.is_empty() && quote_ranges.is_empty() && tasks.is_empty() {
+        if code_ranges.is_empty() && quote_ranges.is_empty() && markers.is_empty() {
             return surface.child(text);
         }
         let style = self.code_block_style;
         let labels = self.code_block_labels;
         let task_layout = layout.clone();
-        let padding = if quote_ranges.is_empty() {
-            style.padding.max(gpui::px(0.))
-        } else {
-            style.padding.max(gpui::px(12.))
-        };
         surface.child(
             div()
                 .id(id)
                 .relative()
-                .px(padding)
                 .py(padding)
                 .child(
                     gpui::canvas(
@@ -271,7 +342,7 @@ impl RenderOnce for RichText {
                                 };
                                 window.paint_quad(gpui::fill(
                                     gpui::Bounds::new(
-                                        gpui::point(bounds.left() + gpui::px(2.), start.y),
+                                        gpui::point(bounds.left(), start.y),
                                         gpui::size(
                                             gpui::px(3.),
                                             end.y - start.y + layout.line_height(),
@@ -291,14 +362,31 @@ impl RenderOnce for RichText {
                 .child(
                     gpui::canvas(
                         |_, _, _| (),
-                        move |_, _, window, _| {
+                        move |_, _, window, cx| {
                             let side = gpui::px(16.).min(task_layout.line_height());
-                            for (offset, checked) in tasks {
+                            for (offset, marker, shaped) in markers {
                                 let Some(start) = task_layout.position_for_index(offset) else {
                                     continue;
                                 };
+                                let crate::ListMarker::Task { checked } = marker else {
+                                    let marker_x = if matches!(marker, crate::ListMarker::Bullet) {
+                                        start.x - bullet_indent + bullet_inset
+                                    } else {
+                                        start.x - list_indent
+                                    };
+                                    let origin = gpui::point(marker_x, start.y);
+                                    let _ = shaped.paint(
+                                        origin,
+                                        task_layout.line_height(),
+                                        gpui::TextAlign::Left,
+                                        None,
+                                        window,
+                                        cx,
+                                    );
+                                    continue;
+                                };
                                 let origin = gpui::point(
-                                    start.x,
+                                    start.x - list_indent,
                                     start.y + (task_layout.line_height() - side) / 2.,
                                 );
                                 let border = if checked {

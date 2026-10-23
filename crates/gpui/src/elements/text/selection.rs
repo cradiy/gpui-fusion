@@ -70,6 +70,13 @@ fn rows(layout: &TextLayout, align: TextAlign) -> Vec<Row> {
     let mut line_start = 0;
     let mut y = bounds.top();
     for (line_index, line) in inner.lines.iter().enumerate() {
+        let line_height = inner.height_for_line(line_index);
+        let indent = inner
+            .line_indents
+            .get(line_index)
+            .copied()
+            .unwrap_or_default();
+        let available_width = (bounds.size.width - indent).max(px(0.));
         y += inner
             .line_top_spacing
             .get(line_index)
@@ -83,21 +90,21 @@ fn rows(layout: &TextLayout, align: TextAlign) -> Vec<Row> {
             let width = extent.end - base_x;
             let offset = match align {
                 TextAlign::Left => px(0.),
-                TextAlign::Center => (bounds.size.width - width) / 2.,
-                TextAlign::Right => bounds.size.width - width,
+                TextAlign::Center => (available_width - width) / 2.,
+                TextAlign::Right => available_width - width,
             };
             result.push(Row {
                 range: line_start + range.start..line_start + range.end,
                 line_start,
                 layout: unwrapped.clone(),
-                origin: point(bounds.left() + offset, y),
+                origin: point(bounds.left() + indent + offset, y),
                 base_x,
                 width,
-                height: inner.line_height,
+                height: line_height,
                 newline: index == line.wrap_boundaries().len()
                     && line_start + line.len() < inner.len,
             });
-            y += inner.line_height;
+            y += line_height;
         }
         line_start += line.len() + 1;
     }
@@ -511,6 +518,8 @@ mod tests {
             lines: smallvec::smallvec![line],
             line_height: px(20.),
             line_top_spacing: vec![px(0.)],
+            line_indents: Vec::new(),
+            line_heights: Vec::new(),
             wrap_width: None,
             size: Some(size(px(200.), px(20.))),
             bounds: Some(Bounds::new(
@@ -590,6 +599,122 @@ mod tests {
             );
             assert_eq!(layouts[1].text(), source);
         }
+    }
+
+    #[crate::test]
+    fn indented_prefixes_share_wrapping_hit_testing_and_selection_geometry(
+        cx: &mut TestAppContext,
+    ) {
+        let (_, mut visual) = setup(cx, TextAlign::Left);
+        for width in [150., 72.] {
+            let mut reference_rows = None;
+            for prefix in ["[ ] ", "[x] ", "87. ", "509. "] {
+                let source = format!("{prefix}A boat returns before sunset.");
+                let len = source.len();
+                let text = StyledText::new(source.clone()).with_line_indents(vec![
+                    crate::TextLineIndent {
+                        line_start: 0,
+                        prefix_len: prefix.len(),
+                        width: px(32.),
+                    },
+                ]);
+                let layout = text.layout().clone();
+                visual.draw(
+                    point(px(0.), px(0.)),
+                    size(
+                        crate::AvailableSpace::Definite(px(width)),
+                        crate::AvailableSpace::MinContent,
+                    ),
+                    move |_, _| {
+                        div()
+                            .w(px(width))
+                            .text_size(px(16.))
+                            .line_height(px(24.))
+                            .whitespace_normal()
+                            .child(text)
+                    },
+                );
+                let shaped_rows = rows(&layout, TextAlign::Left);
+                assert!(shaped_rows.len() > 1);
+                let content_rows: Vec<_> = shaped_rows
+                    .iter()
+                    .map(|row| {
+                        assert_eq!(row.origin.x, px(32.));
+                        (
+                            row.range.start.saturating_sub(prefix.len()),
+                            row.range.end - prefix.len(),
+                        )
+                    })
+                    .collect();
+                if let Some(reference) = &reference_rows {
+                    assert_eq!(&content_rows, reference);
+                } else {
+                    reference_rows = Some(content_rows);
+                }
+                for row in &shaped_rows {
+                    let index = row.range.start.max(prefix.len());
+                    let position = layout.position_for_index(index).unwrap();
+                    assert_eq!(
+                        position.x,
+                        px(32.),
+                        "prefix={prefix:?} row={:?} position={position:?}",
+                        row.range
+                    );
+                    assert_eq!(
+                        character_at(&shaped_rows, position + point(px(0.5), px(1.))),
+                        Some(index)
+                    );
+                }
+                assert!(
+                    selection_quads(&layout, 0..len, TextAlign::Left, crate::black())
+                        .iter()
+                        .all(|quad| quad.bounds.left() >= px(32.))
+                );
+                assert_eq!(layout.text(), source);
+            }
+        }
+    }
+
+    #[crate::test]
+    fn compact_empty_lines_keep_source_and_following_hit_geometry(cx: &mut TestAppContext) {
+        let (_, mut visual) = setup(cx, TextAlign::Left);
+        let source = "Lime\n\nIris";
+        let text = StyledText::new(source).with_empty_line_heights(vec![(5, px(8.)), (6, px(2.))]);
+        let layout = text.layout().clone();
+        visual.draw(
+            point(px(0.), px(0.)),
+            size(
+                crate::AvailableSpace::Definite(px(180.)),
+                crate::AvailableSpace::MinContent,
+            ),
+            move |_, _| {
+                div()
+                    .w(px(180.))
+                    .text_size(px(16.))
+                    .line_height(px(24.))
+                    .child(text)
+            },
+        );
+        let shaped_rows = rows(&layout, TextAlign::Left);
+        assert_eq!(
+            shaped_rows.iter().map(|row| row.height).collect::<Vec<_>>(),
+            vec![px(24.), px(8.), px(24.)]
+        );
+        let start = layout.position_for_index(6).unwrap();
+        assert_eq!(start.y, px(32.));
+        assert_eq!(
+            character_at(&shaped_rows, start + point(px(1.), px(1.))),
+            Some(6)
+        );
+        assert_eq!(
+            layout.index_for_position(start + point(px(1.), px(1.))),
+            Ok(6)
+        );
+        let quads = selection_quads(&layout, 6..source.len(), TextAlign::Left, crate::black());
+        assert_eq!(quads.len(), 1);
+        assert_eq!(quads[0].bounds.top(), start.y);
+        assert_eq!(quads[0].bounds.size.height, px(24.));
+        assert_eq!(layout.text(), source);
     }
 
     fn setup(cx: &mut TestAppContext, align: TextAlign) -> (WindowHandle<Demo>, VisualTestContext) {

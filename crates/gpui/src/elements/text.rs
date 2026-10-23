@@ -274,7 +274,13 @@ impl Element for &'static str {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut state = TextLayout::default();
-        let layout_id = state.layout(SharedString::from(*self), None, Vec::new(), window, cx);
+        let layout_id = state.layout(
+            SharedString::from(*self),
+            None,
+            TextLayoutOptions::default(),
+            window,
+            cx,
+        );
         (layout_id, state)
     }
 
@@ -348,7 +354,7 @@ impl Element for SharedString {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut state = TextLayout::default();
-        let layout_id = state.layout(self.clone(), None, Vec::new(), window, cx);
+        let layout_id = state.layout(self.clone(), None, TextLayoutOptions::default(), window, cx);
         (layout_id, state)
     }
 
@@ -398,6 +404,20 @@ pub struct StyledText {
     delayed_font_family_overrides: Option<Vec<(Range<usize>, SharedString)>>,
     layout: TextLayout,
     line_top_spacing: Vec<(usize, Pixels)>,
+    line_indents: Vec<TextLineIndent>,
+    empty_line_heights: Vec<(usize, Pixels)>,
+}
+
+/// A source-line gutter shared by its first and wrapped continuation rows.
+#[derive(Clone, Copy, Debug)]
+pub struct TextLineIndent {
+    /// UTF-8 byte offset of the source line's first character.
+    pub line_start: usize,
+    /// Prefix bytes retained for copying but collapsed during layout. Callers
+    /// must hide their glyphs and draw any marker separately.
+    pub prefix_len: usize,
+    /// Left inset reserved for every visual row of this source line.
+    pub width: Pixels,
 }
 
 impl StyledText {
@@ -410,6 +430,8 @@ impl StyledText {
             delayed_font_family_overrides: None,
             layout: TextLayout::default(),
             line_top_spacing: Vec::new(),
+            line_indents: Vec::new(),
+            empty_line_heights: Vec::new(),
         }
     }
 
@@ -424,6 +446,20 @@ impl StyledText {
     /// not repeat the spacing.
     pub fn with_line_top_spacing(mut self, spacing: Vec<(usize, Pixels)>) -> Self {
         self.line_top_spacing = spacing;
+        self
+    }
+
+    /// Indent specified newline-delimited source lines, including soft wraps.
+    /// Invalid line offsets, prefix boundaries, and widths are ignored.
+    pub fn with_line_indents(mut self, indents: Vec<TextLineIndent>) -> Self {
+        self.line_indents = indents;
+        self
+    }
+
+    /// Override the height of selected empty source lines by UTF-8 start offset.
+    /// Nonempty lines and nonpositive or nonfinite heights are ignored.
+    pub fn with_empty_line_heights(mut self, heights: Vec<(usize, Pixels)>) -> Self {
+        self.empty_line_heights = heights;
         self
     }
 
@@ -588,7 +624,11 @@ impl Element for StyledText {
         let layout_id = self.layout.layout(
             self.text.clone(),
             runs,
-            std::mem::take(&mut self.line_top_spacing),
+            TextLayoutOptions {
+                line_top_spacing: std::mem::take(&mut self.line_top_spacing),
+                line_indents: std::mem::take(&mut self.line_indents),
+                empty_line_heights: std::mem::take(&mut self.empty_line_heights),
+            },
             window,
             cx,
         );
@@ -642,6 +682,24 @@ struct TextLayoutInner {
     size: Option<Size<Pixels>>,
     bounds: Option<Bounds<Pixels>>,
     line_top_spacing: Vec<Pixels>,
+    line_indents: Vec<Pixels>,
+    line_heights: Vec<Pixels>,
+}
+
+#[derive(Default)]
+struct TextLayoutOptions {
+    line_top_spacing: Vec<(usize, Pixels)>,
+    line_indents: Vec<TextLineIndent>,
+    empty_line_heights: Vec<(usize, Pixels)>,
+}
+
+impl TextLayoutInner {
+    fn height_for_line(&self, index: usize) -> Pixels {
+        self.line_heights
+            .get(index)
+            .copied()
+            .unwrap_or(self.line_height)
+    }
 }
 
 impl TextLayout {
@@ -649,10 +707,15 @@ impl TextLayout {
         &self,
         text: SharedString,
         runs: Option<Vec<TextRun>>,
-        line_top_spacing: Vec<(usize, Pixels)>,
+        options: TextLayoutOptions,
         window: &mut Window,
         _: &mut App,
     ) -> LayoutId {
+        let TextLayoutOptions {
+            line_top_spacing,
+            line_indents,
+            empty_line_heights,
+        } = options;
         let text_style = window.text_style();
         let font_size = text_style.font_size.to_pixels(window.rem_size());
         let line_height = window.pixel_snap(
@@ -738,7 +801,7 @@ impl TextLayout {
                 };
                 let len = text.len();
 
-                let Some(lines) = window
+                let Some(mut lines) = window
                     .text_system()
                     .shape_text(
                         text.clone(),
@@ -758,6 +821,8 @@ impl TextLayout {
                         size: Some(Size::default()),
                         bounds: None,
                         line_top_spacing: Vec::new(),
+                        line_indents: Vec::new(),
+                        line_heights: Vec::new(),
                     });
                     return Size::default();
                 };
@@ -767,7 +832,39 @@ impl TextLayout {
                     line_top_spacing.iter().copied().collect();
                 let mut line_start = 0;
                 let mut resolved_spacing = Vec::new();
-                for line in &lines {
+                let indents: std::collections::HashMap<_, _> = line_indents
+                    .iter()
+                    .map(|indent| (indent.line_start, indent))
+                    .collect();
+                let mut resolved_indents = Vec::new();
+                let heights: std::collections::HashMap<_, _> =
+                    empty_line_heights.iter().copied().collect();
+                let mut resolved_heights = Vec::new();
+                let mut remaining_wraps = text_style.line_clamp.map(|max| max.saturating_sub(1));
+                for line in &mut lines {
+                    let indent = indents.get(&line_start).filter(|indent| {
+                        indent.width >= Pixels::ZERO
+                            && f32::from(indent.width).is_finite()
+                            && line.text.is_char_boundary(indent.prefix_len)
+                            && !line.runs().iter().flat_map(|run| &run.glyphs).any(|glyph| {
+                                glyph.index < indent.prefix_len
+                                    && glyph.cluster_end > indent.prefix_len
+                            })
+                    });
+                    let inset = indent.map_or(Pixels::ZERO, |indent| indent.width);
+                    if let Some(indent) = indent {
+                        *line = std::mem::take(line).with_collapsed_prefix(
+                            indent.prefix_len,
+                            inset,
+                            remaining_wraps,
+                        );
+                    }
+                    if let Some(remaining) = &mut remaining_wraps {
+                        *remaining = remaining.saturating_sub(line.wrap_boundaries.len());
+                    }
+                    if !indents.is_empty() {
+                        resolved_indents.push(inset);
+                    }
                     let top = spacing
                         .get(&line_start)
                         .copied()
@@ -777,10 +874,22 @@ impl TextLayout {
                         resolved_spacing.push(top);
                     }
                     size.height += top;
+                    let row_height = heights
+                        .get(&line_start)
+                        .copied()
+                        .filter(|height| {
+                            line.len() == 0
+                                && *height > Pixels::ZERO
+                                && f32::from(*height).is_finite()
+                        })
+                        .unwrap_or(line_height);
+                    if !heights.is_empty() {
+                        resolved_heights.push(row_height);
+                    }
                     line_start += line.len() + 1;
-                    let line_size = line.size(line_height);
+                    let line_size = line.size(row_height);
                     size.height += line_size.height;
-                    size.width = size.width.max(line_size.width).ceil();
+                    size.width = size.width.max(line_size.width + inset).ceil();
                 }
 
                 element_state.0.borrow_mut().replace(TextLayoutInner {
@@ -792,6 +901,8 @@ impl TextLayout {
                     size: Some(size),
                     bounds: None,
                     line_top_spacing: resolved_spacing,
+                    line_indents: resolved_indents,
+                    line_heights: resolved_heights,
                 });
 
                 size
@@ -834,10 +945,19 @@ impl TextLayout {
             .with_context(|| format!("prepaint has not been performed on {text}"))
             .unwrap();
 
-        let line_height = element_state.line_height;
         let mut line_origin = bounds.origin;
         let text_style = window.text_style();
         for (index, line) in element_state.lines.iter().enumerate() {
+            let line_height = element_state.height_for_line(index);
+            let indent = element_state
+                .line_indents
+                .get(index)
+                .copied()
+                .unwrap_or_default();
+            line_origin.x = bounds.left() + indent;
+            let mut line_bounds = bounds;
+            line_bounds.origin.x += indent;
+            line_bounds.size.width = (line_bounds.size.width - indent).max(Pixels::ZERO);
             line_origin.y += element_state
                 .line_top_spacing
                 .get(index)
@@ -847,7 +967,7 @@ impl TextLayout {
                 line_origin,
                 line_height,
                 text_style.text_align,
-                Some(bounds),
+                Some(line_bounds),
                 window,
                 cx,
             )
@@ -857,7 +977,7 @@ impl TextLayout {
                     line_origin,
                     line_height,
                     text_style.text_align,
-                    Some(bounds),
+                    Some(line_bounds),
                     window,
                     cx,
                 )
@@ -871,6 +991,16 @@ impl TextLayout {
             }
             let mut line_origin = bounds.origin;
             for (index, line) in element_state.lines.iter().enumerate() {
+                let line_height = element_state.height_for_line(index);
+                let indent = element_state
+                    .line_indents
+                    .get(index)
+                    .copied()
+                    .unwrap_or_default();
+                line_origin.x = bounds.left() + indent;
+                let mut line_bounds = bounds;
+                line_bounds.origin.x += indent;
+                line_bounds.size.width = (line_bounds.size.width - indent).max(Pixels::ZERO);
                 line_origin.y += element_state
                     .line_top_spacing
                     .get(index)
@@ -880,7 +1010,7 @@ impl TextLayout {
                     line_origin,
                     line_height,
                     text_style.text_align,
-                    Some(bounds),
+                    Some(line_bounds),
                     window,
                     cx,
                 )
@@ -904,10 +1034,16 @@ impl TextLayout {
             return Err(0);
         }
 
-        let line_height = element_state.line_height;
         let mut line_origin = bounds.origin;
         let mut line_start_ix = 0;
         for (index, line) in element_state.lines.iter().enumerate() {
+            let line_height = element_state.height_for_line(index);
+            line_origin.x = bounds.left()
+                + element_state
+                    .line_indents
+                    .get(index)
+                    .copied()
+                    .unwrap_or_default();
             line_origin.y += element_state
                 .line_top_spacing
                 .get(index)
@@ -941,12 +1077,18 @@ impl TextLayout {
         let bounds = element_state
             .bounds
             .expect("prepaint has not been performed");
-        let line_height = element_state.line_height;
 
         let mut line_origin = bounds.origin;
         let mut line_start_ix = 0;
 
         for (line_index, line) in element_state.lines.iter().enumerate() {
+            let line_height = element_state.height_for_line(line_index);
+            line_origin.x = bounds.left()
+                + element_state
+                    .line_indents
+                    .get(line_index)
+                    .copied()
+                    .unwrap_or_default();
             line_origin.y += element_state
                 .line_top_spacing
                 .get(line_index)

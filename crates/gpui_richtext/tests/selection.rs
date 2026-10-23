@@ -222,7 +222,7 @@ fn code_headers_copy_individual_blocks_and_do_not_enter_document_selection(
     visual.update(|window, cx| {
         window.draw(cx).clear();
     });
-    visual.simulate_click(point(px(200.), px(156.)), Default::default());
+    visual.simulate_click(point(px(214.), px(142.)), Default::default());
     assert_eq!(
         visual
             .update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))

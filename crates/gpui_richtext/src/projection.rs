@@ -447,17 +447,11 @@ impl Projection {
     }
 
     pub(crate) fn styled_text(&self) -> StyledText {
-        let task_nodes: std::collections::HashSet<_> = self
+        let marker_nodes: std::collections::HashSet<_> = self
             .blocks
             .iter()
             .filter_map(|block| {
-                matches!(
-                    block.kind,
-                    BlockKind::ListItem {
-                        marker: ListMarker::Task { .. }
-                    }
-                )
-                .then_some(block.node)
+                matches!(block.kind, BlockKind::ListItem { .. }).then_some(block.node)
             })
             .collect();
         StyledText::new(self.text.clone())
@@ -466,7 +460,7 @@ impl Projection {
                     .iter()
                     .filter(|span| !span.range.is_empty())
                     .map(|span| {
-                        let style = if task_nodes.contains(&span.node) {
+                        let style = if marker_nodes.contains(&span.node) {
                             HighlightStyle {
                                 fade_out: Some(1.),
                                 ..Default::default()

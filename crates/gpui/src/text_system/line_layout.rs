@@ -360,6 +360,16 @@ pub struct WrapBoundary {
 
 impl WrappedLineLayout {
     pub(super) fn with_tab_stops(&self, text: &str, stop: Pixels) -> Self {
+        self.with_adjusted_spacing(text, Some(stop), 0, self.wrap_width)
+    }
+
+    pub(super) fn with_adjusted_spacing(
+        &self,
+        text: &str,
+        tab_stop: Option<Pixels>,
+        prefix_len: usize,
+        wrap_width: Option<Pixels>,
+    ) -> Self {
         let source = &self.unwrapped_layout;
         let breaks = LineBreaks::new(text);
         let glyphs: Vec<_> = source
@@ -387,7 +397,9 @@ impl WrappedLineLayout {
         let count = clusters.len() - 1;
         let width_at = |ix: usize, x: Pixels| {
             let glyph = glyphs[clusters[ix]].1;
-            if text.as_bytes()[glyph.index] == b'\t' {
+            if glyph.index < prefix_len {
+                px(0.)
+            } else if let Some(stop) = tab_stop.filter(|_| text.as_bytes()[glyph.index] == b'\t') {
                 stop * ((x / stop).floor() + 1.) - x
             } else {
                 let next_x = glyphs
@@ -407,12 +419,16 @@ impl WrappedLineLayout {
                 } else {
                     glyph.index
                 };
-                if ix > row_start && breaks.can_wrap(logical) {
+                if ix > row_start
+                    && (prefix_len == 0 || logical > prefix_len)
+                    && breaks.can_wrap(logical)
+                {
                     candidate = Some(ix);
                 }
                 let next_x = x + width_at(ix, x);
-                if self.wrap_width.is_some_and(|width| next_x > width)
+                if wrap_width.is_some_and(|width| next_x > width)
                     && ix > row_start
+                    && (prefix_len == 0 || logical > prefix_len)
                     && breaks.is_grapheme_boundary(logical)
                 {
                     row_end = candidate.unwrap_or(ix);
@@ -429,9 +445,13 @@ impl WrappedLineLayout {
                     glyphs[clusters[ix]..clusters[ix + 1]].iter().enumerate()
                 {
                     let glyph = &mut runs[boundary.run_ix].glyphs[boundary.glyph_ix];
-                    glyph.position.x = origin + x + original.position.x - first.position.x;
-                    if is_tab {
+                    glyph.position.x = origin + x + (original.position.x - first.position.x);
+                    if is_tab || first.index < prefix_len {
                         glyph.advance = if offset == 0 { width } else { px(0.) };
+                    } else if prefix_len > 0 && glyph.advance > px(0.) {
+                        glyph.advance = glyph
+                            .advance
+                            .min((origin + x + width - glyph.position.x).max(px(0.)));
                     }
                 }
                 x += width;
@@ -452,7 +472,7 @@ impl WrappedLineLayout {
                 len: source.len,
             }),
             wrap_boundaries: boundaries,
-            wrap_width: self.wrap_width,
+            wrap_width,
         }
     }
 

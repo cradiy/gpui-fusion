@@ -369,6 +369,27 @@ pub struct WrappedLine {
 }
 
 impl WrappedLine {
+    pub(crate) fn with_collapsed_prefix(
+        mut self,
+        prefix_len: usize,
+        indent: Pixels,
+        max_wraps: Option<usize>,
+    ) -> Self {
+        let mut layout = self.layout.with_adjusted_spacing(
+            &self.text,
+            None,
+            prefix_len,
+            self.layout
+                .wrap_width
+                .map(|width| (width - indent).max(px(1.))),
+        );
+        if let Some(max) = max_wraps {
+            layout.wrap_boundaries.truncate(max);
+        }
+        self.layout = Arc::new(layout);
+        self
+    }
+
     /// Places tabs at multiples of `stop` pixels from the left edge of each visual row.
     /// Recomputes wrapping and caret geometry without changing text or byte offsets.
     /// Nonpositive or nonfinite stops leave the layout unchanged.

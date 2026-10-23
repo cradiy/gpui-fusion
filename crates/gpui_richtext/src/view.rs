@@ -158,7 +158,7 @@ impl Styled for RichText {
 impl RenderOnce for RichText {
     fn render(self, window: &mut gpui::Window, _: &mut gpui::App) -> impl IntoElement {
         if !self.projection.parts.is_empty() {
-            return self.render_parts();
+            return self.render_parts(window);
         }
         let mut surface = div().whitespace_normal();
         surface.style().refine(&self.style);
@@ -602,7 +602,10 @@ impl RichText {
         child
     }
 
-    fn render_parts(&self) -> gpui::AnyElement {
+    fn render_parts(&self, window: &gpui::Window) -> gpui::AnyElement {
+        let mut text_style = window.text_style();
+        text_style.refine(&self.style.text);
+        let line_height = text_style.line_height_in_pixels(window.rem_size());
         let mut surface = div()
             .id(self.id.clone())
             .flex()
@@ -669,15 +672,22 @@ impl RichText {
                             }
                             body_index += 1;
                         }
-                        if row_index + 1 < rows.len() {
+                        if style.row_borders && row_index + 1 < rows.len() {
                             row_view = row_view.border_b_1().border_color(style.border_color);
                         }
                         for (index, (cell, column)) in row.cells.iter().zip(columns).enumerate() {
                             let mut cell_view = div()
                                 .id(("table-cell", cell.node.0 as usize))
+                                .flex()
+                                .flex_col()
                                 .px(padding.width)
                                 .py(padding.height)
                                 .flex_shrink_0();
+                            cell_view = match column.vertical_align {
+                                crate::CellVerticalAlign::Top => cell_view.justify_start(),
+                                crate::CellVerticalAlign::Center => cell_view.justify_center(),
+                                crate::CellVerticalAlign::Bottom => cell_view.justify_end(),
+                            };
                             cell_view = match column.width {
                                 crate::ColumnWidth::Fixed(width) => {
                                     cell_view.w(width.max(padding.width * 2. + gpui::px(1.)))
@@ -687,12 +697,16 @@ impl RichText {
                                     .flex_grow(weight)
                                     .min_w(minimum),
                             };
-                            if index + 1 < columns.len() {
+                            if style.column_borders && index + 1 < columns.len() {
                                 cell_view = cell_view.border_r_1().border_color(style.border_color);
                             }
                             row_view = row_view.child(
-                                cell_view
-                                    .child(self.fragment(cell).w_full().text_align(column.align)),
+                                cell_view.child(
+                                    self.fragment(cell)
+                                        .w_full()
+                                        .min_h(line_height)
+                                        .text_align(column.align),
+                                ),
                             );
                         }
                         table = table.child(row_view);

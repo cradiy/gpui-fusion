@@ -8,11 +8,21 @@ pub enum ColumnWidth {
     Flex(f32),
 }
 
+/// Vertical placement of content within a table row.
+#[derive(Clone, Copy, Debug, Default)]
+pub enum CellVerticalAlign {
+    #[default]
+    Top,
+    Center,
+    Bottom,
+}
+
 /// Column sizing and horizontal text alignment.
 #[derive(Clone, Copy, Debug)]
 pub struct TableColumn {
     pub width: ColumnWidth,
     pub align: TextAlign,
+    pub vertical_align: CellVerticalAlign,
 }
 
 impl Default for TableColumn {
@@ -20,6 +30,7 @@ impl Default for TableColumn {
         Self {
             width: ColumnWidth::Flex(1.),
             align: TextAlign::Left,
+            vertical_align: CellVerticalAlign::Top,
         }
     }
 }
@@ -39,6 +50,11 @@ impl TableColumn {
     }
     pub fn align(mut self, align: TextAlign) -> Self {
         self.align = align;
+        self
+    }
+
+    pub fn vertical_align(mut self, align: CellVerticalAlign) -> Self {
+        self.vertical_align = align;
         self
     }
 }
@@ -97,6 +113,8 @@ pub struct TableStyle {
     pub header_background: gpui::Hsla,
     pub alternate_background: Option<gpui::Hsla>,
     pub border_color: gpui::Hsla,
+    pub row_borders: bool,
+    pub column_borders: bool,
     pub cell_padding: gpui::Size<Pixels>,
     pub min_column_width: Pixels,
     pub corner_radius: Pixels,
@@ -109,6 +127,8 @@ impl Default for TableStyle {
             header_background: gpui::rgb(0xf1f5f9).into(),
             alternate_background: Some(gpui::rgb(0xf8fafc).into()),
             border_color: gpui::rgb(0xe2e8f0).into(),
+            row_borders: true,
+            column_borders: true,
             cell_padding: gpui::size(gpui::px(12.), gpui::px(8.)),
             min_column_width: gpui::px(128.),
             corner_radius: gpui::px(8.),

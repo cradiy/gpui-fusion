@@ -36,7 +36,9 @@ fn document() -> Arc<Projection> {
             heading(HeadingLevel::H1).child(text("Observation journal")),
             node(Table::new().columns([
                 TableColumn::flex(1.),
-                TableColumn::fixed(px(110.)).align(gpui::TextAlign::Right),
+                TableColumn::fixed(px(110.))
+                    .align(gpui::TextAlign::Right)
+                    .vertical_align(gpui_richtext::CellVerticalAlign::Center),
                 TableColumn::flex(2.),
             ]))
                 .child(table_header()

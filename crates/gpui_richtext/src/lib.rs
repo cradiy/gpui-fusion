@@ -25,7 +25,7 @@ pub use styles::{
     Underline,
 };
 pub use table::{
-    ColumnWidth, Table, TableBlock, TableCell, TableCellSpan, TableColumn, TableRow, TableRowSpan,
-    TableStyle,
+    CellVerticalAlign, ColumnWidth, Table, TableBlock, TableCell, TableCellSpan, TableColumn,
+    TableRow, TableRowSpan, TableStyle,
 };
 pub use view::RichText;

@@ -106,10 +106,14 @@ impl Render for TablePage {
 fn cells_select_independently_and_keep_row_height_and_link_offsets_after_resize(
     cx: &mut TestAppContext,
 ) {
-    let document = Document::from_roots([node(Table::new().columns([
-        TableColumn::fixed(px(100.)),
-        TableColumn::flex(1.).align(TextAlign::Right),
-    ]))
+    let document = Document::from_roots([node(
+        Table::new().columns([
+            TableColumn::fixed(px(100.)),
+            TableColumn::flex(1.)
+                .align(TextAlign::Right)
+                .vertical_align(gpui_richtext::CellVerticalAlign::Bottom),
+        ]),
+    )
     .child(
         table_header()
             .child(table_cell().child(text("Key")))
@@ -142,7 +146,7 @@ fn cells_select_independently_and_keep_row_height_and_link_offsets_after_resize(
         });
         for (position, expected) in [
             (point(px(20.), px(60.)), "a\nb\nc"),
-            (point(px(width - 30.), px(60.)), "écho"),
+            (point(px(width - 30.), px(108.)), "écho"),
             (point(px(20.), px(150.)), "omega"),
         ] {
             visual.simulate_click(position, Default::default());
@@ -168,7 +172,7 @@ fn cells_select_independently_and_keep_row_height_and_link_offsets_after_resize(
     visual.update(|window, cx| {
         window.draw(cx).clear();
     });
-    visual.simulate_click(point(px(150.), px(60.)), Default::default());
+    visual.simulate_click(point(px(150.), px(108.)), Default::default());
     visual.simulate_keystrokes(&gpui::platform_shortcut("ctrl-a"));
     visual.simulate_keystrokes(&gpui::platform_shortcut("ctrl-c"));
     assert_eq!(

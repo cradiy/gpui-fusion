@@ -42,6 +42,21 @@ pub fn text(value: impl Into<SharedString>) -> NodeTree {
 pub fn paragraph() -> NodeTree {
     node(Paragraph)
 }
+pub fn heading(level: crate::HeadingLevel) -> NodeTree {
+    node(crate::Heading(level))
+}
+pub fn quote() -> NodeTree {
+    node(crate::Quote)
+}
+pub fn bullet_item() -> NodeTree {
+    node(crate::ListItem(crate::ListMarker::Bullet))
+}
+pub fn numbered_item(number: u32) -> NodeTree {
+    node(crate::ListItem(crate::ListMarker::Number(number)))
+}
+pub fn task_item(checked: bool) -> NodeTree {
+    node(crate::ListItem(crate::ListMarker::Task { checked }))
+}
 pub fn group() -> NodeTree {
     node(Group)
 }

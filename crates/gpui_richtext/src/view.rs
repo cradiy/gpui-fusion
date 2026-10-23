@@ -1,4 +1,4 @@
-use crate::{BlockKind, CodeBlockStyle, LinkSpan, Projection};
+use crate::{BlockKind, CodeBlockLabels, CodeBlockStyle, LinkSpan, Projection};
 use gpui::prelude::*;
 use gpui::{
     AnimationExt, ElementId, Hsla, InteractiveText, IntoElement, Refineable, RenderOnce,
@@ -48,6 +48,9 @@ pub struct RichText {
     link_tooltips: bool,
     link_tooltip: Option<LinkTooltipBuilder>,
     code_block_style: CodeBlockStyle,
+    code_block_labels: Option<CodeBlockLabels>,
+    quote_border_color: Hsla,
+    task_marker_style: crate::TaskMarkerStyle,
 }
 
 impl RichText {
@@ -62,6 +65,9 @@ impl RichText {
             link_tooltips: true,
             link_tooltip: None,
             code_block_style: CodeBlockStyle::default(),
+            code_block_labels: None,
+            quote_border_color: gpui::rgba(0x64748b66).into(),
+            task_marker_style: crate::TaskMarkerStyle::default(),
         }
     }
 
@@ -77,6 +83,22 @@ impl RichText {
 
     pub fn code_block_style(mut self, style: CodeBlockStyle) -> Self {
         self.code_block_style = style;
+        self
+    }
+
+    pub fn quote_border_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.quote_border_color = color.into();
+        self
+    }
+
+    pub fn task_marker_style(mut self, style: crate::TaskMarkerStyle) -> Self {
+        self.task_marker_style = style;
+        self
+    }
+
+    /// Supply localized tooltips and the copy button's accessible action name.
+    pub fn code_block_labels(mut self, labels: CodeBlockLabels) -> Self {
+        self.code_block_labels = Some(labels);
         self
     }
 
@@ -118,7 +140,32 @@ impl RenderOnce for RichText {
     fn render(self, _: &mut gpui::Window, _: &mut gpui::App) -> impl IntoElement {
         let mut surface = div().whitespace_normal();
         surface.style().refine(&self.style);
-        let header_height = gpui::px(32.);
+        let header_height = gpui::px(36.);
+        let header_spacing = header_height + gpui::px(8.);
+        let quote_color = self.quote_border_color;
+        let task_style = self.task_marker_style;
+        let tasks: Vec<_> = self
+            .projection
+            .blocks()
+            .iter()
+            .filter_map(|block| {
+                if let BlockKind::ListItem {
+                    marker: crate::ListMarker::Task { checked },
+                } = block.kind
+                {
+                    Some((block.range.start, checked))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let quote_ranges: Vec<_> = self
+            .projection
+            .blocks()
+            .iter()
+            .filter(|block| matches!(block.kind, BlockKind::Quote))
+            .map(|block| block.range.clone())
+            .collect();
         let code_ranges: Vec<_> = self
             .projection
             .blocks()
@@ -129,7 +176,7 @@ impl RenderOnce for RichText {
         let styled_text = self.projection.styled_text().with_line_top_spacing(
             code_ranges
                 .iter()
-                .map(|range| (range.start, header_height))
+                .map(|range| (range.start, header_spacing))
                 .collect(),
         );
         let layout = styled_text.layout().clone();
@@ -164,11 +211,17 @@ impl RenderOnce for RichText {
                 move |index, window, cx| listener(&projection.links()[index], window, cx),
             );
         }
-        if code_ranges.is_empty() {
+        if code_ranges.is_empty() && quote_ranges.is_empty() && tasks.is_empty() {
             return surface.child(text);
         }
         let style = self.code_block_style;
-        let padding = style.padding.max(gpui::px(0.));
+        let labels = self.code_block_labels;
+        let task_layout = layout.clone();
+        let padding = if quote_ranges.is_empty() {
+            style.padding.max(gpui::px(0.))
+        } else {
+            style.padding.max(gpui::px(12.))
+        };
         surface.child(
             div()
                 .id(id)
@@ -190,13 +243,13 @@ impl RenderOnce for RichText {
                                 let block_bounds = gpui::Bounds::new(
                                     gpui::point(
                                         bounds.left(),
-                                        start.y - vertical_padding - header_height,
+                                        start.y - vertical_padding - header_spacing,
                                     ),
                                     gpui::size(
                                         bounds.size.width,
                                         end.y - start.y
                                             + layout.line_height()
-                                            + header_height
+                                            + header_spacing
                                             + vertical_padding * 2.,
                                     ),
                                 );
@@ -209,6 +262,24 @@ impl RenderOnce for RichText {
                                     gpui::BorderStyle::default(),
                                 ));
                             }
+                            for range in quote_ranges {
+                                let Some(start) = layout.position_for_index(range.start) else {
+                                    continue;
+                                };
+                                let Some(end) = layout.position_for_index(range.end) else {
+                                    continue;
+                                };
+                                window.paint_quad(gpui::fill(
+                                    gpui::Bounds::new(
+                                        gpui::point(bounds.left() + gpui::px(2.), start.y),
+                                        gpui::size(
+                                            gpui::px(3.),
+                                            end.y - start.y + layout.line_height(),
+                                        ),
+                                    ),
+                                    quote_color,
+                                ));
+                            }
                         },
                     )
                     .absolute()
@@ -217,6 +288,54 @@ impl RenderOnce for RichText {
                     .size_full(),
                 )
                 .child(text)
+                .child(
+                    gpui::canvas(
+                        |_, _, _| (),
+                        move |_, _, window, _| {
+                            let side = gpui::px(16.).min(task_layout.line_height());
+                            for (offset, checked) in tasks {
+                                let Some(start) = task_layout.position_for_index(offset) else {
+                                    continue;
+                                };
+                                let origin = gpui::point(
+                                    start.x,
+                                    start.y + (task_layout.line_height() - side) / 2.,
+                                );
+                                let border = if checked {
+                                    task_style.checked_background
+                                } else {
+                                    task_style.border
+                                };
+                                let background = if checked {
+                                    task_style.checked_background
+                                } else {
+                                    gpui::transparent_black()
+                                };
+                                window.paint_quad(gpui::quad(
+                                    gpui::Bounds::new(origin, gpui::size(side, side)),
+                                    gpui::px(4.),
+                                    background,
+                                    gpui::px(1.),
+                                    border,
+                                    gpui::BorderStyle::default(),
+                                ));
+                                if checked {
+                                    let mut path = gpui::PathBuilder::stroke(gpui::px(1.7));
+                                    path.move_to(origin + gpui::point(side * 0.24, side * 0.5));
+                                    path.line_to(origin + gpui::point(side * 0.43, side * 0.69));
+                                    path.line_to(origin + gpui::point(side * 0.77, side * 0.32));
+                                    if let Ok(path) = path.build() {
+                                        window.paint_path(path, task_style.check);
+                                    }
+                                }
+                            }
+                        },
+                    )
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full(),
+                )
                 .child(
                     gpui::canvas(
                         move |bounds, window, cx| {
@@ -242,7 +361,7 @@ impl RenderOnce for RichText {
                                 let icon = if copied {
                                     gpui::svg()
                                         .path(gpui_icons::GpuiIcons::LucideCheck)
-                                        .text_color(gpui::rgb(0x22a06b))
+                                        .text_color(style.copy_success_color)
                                         .size(gpui::px(16.))
                                         .with_animation(
                                             ("copy-success", generation),
@@ -263,7 +382,7 @@ impl RenderOnce for RichText {
                                 } else {
                                     gpui::svg()
                                         .path(gpui_icons::GpuiIcons::LucideCopy)
-                                        .text_color(gpui::rgb(0x64748b))
+                                        .text_color(style.header_color)
                                         .size(gpui::px(16.))
                                         .into_any_element()
                                 };
@@ -274,11 +393,18 @@ impl RenderOnce for RichText {
                                     .justify_between()
                                     .h(header_height)
                                     .px(padding)
+                                    .gap_2()
+                                    .border_b_1()
+                                    .border_color(style.border_color)
+                                    .text_color(style.header_color)
                                     .text_size(gpui::px(12.))
                                     .line_height(gpui::px(20.))
                                     .child(
                                         div()
+                                            .min_w_0()
                                             .overflow_hidden()
+                                            .whitespace_nowrap()
+                                            .font_weight(gpui::FontWeight::MEDIUM)
                                             .child(language.clone().unwrap_or_default()),
                                     )
                                     .child(
@@ -289,13 +415,23 @@ impl RenderOnce for RichText {
                                             .flex()
                                             .items_center()
                                             .justify_center()
-                                            .rounded_sm()
+                                            .rounded_md()
                                             .cursor_pointer()
-                                            .aria_label("Copy code")
-                                            .tooltip(|_, cx| {
-                                                cx.new(|_| LinkTooltip("Copy code".into())).into()
+                                            .when_some(labels.clone(), |button, labels| {
+                                                button.aria_label(labels.copy.clone()).tooltip(
+                                                    move |_, cx| {
+                                                        let label = if copied {
+                                                            labels.copied.clone()
+                                                        } else {
+                                                            labels.copy.clone()
+                                                        };
+                                                        cx.new(|_| LinkTooltip(label)).into()
+                                                    },
+                                                )
                                             })
-                                            .hover(|style| style.bg(gpui::rgba(0x64748b25)))
+                                            .hover(move |button| {
+                                                button.bg(style.button_hover_background)
+                                            })
                                             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
                                                 cx.stop_propagation()
                                             })
@@ -318,7 +454,7 @@ impl RenderOnce for RichText {
                                     cx,
                                 );
                                 header.prepaint_at(
-                                    gpui::point(bounds.left(), start.y - header_height),
+                                    gpui::point(bounds.left(), start.y - header_spacing),
                                     window,
                                     cx,
                                 );

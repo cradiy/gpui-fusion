@@ -1,6 +1,6 @@
 use crate::{
-    Code, CodeBlock, Document, Emphasis, Group, HardBreak, InlineStyle, Link, Mark, NodeId,
-    Strikethrough, Strong, TextTheme, Underline,
+    Code, CodeBlock, Document, Emphasis, Group, HardBreak, Heading, HeadingLevel, InlineStyle,
+    Link, ListItem, ListMarker, Mark, NodeId, Quote, Strikethrough, Strong, TextTheme, Underline,
 };
 use anyhow::{Result, bail};
 use gpui::{HighlightStyle, SharedString, StyledText};
@@ -23,6 +23,15 @@ pub enum Contribution {
     Inline(HighlightStyle),
     StyledInline(InlineStyle),
     Paragraph(HighlightStyle),
+    Heading {
+        level: HeadingLevel,
+        style: InlineStyle,
+    },
+    Quote(InlineStyle),
+    ListItem {
+        marker: ListMarker,
+        style: InlineStyle,
+    },
     Blocks(InlineStyle),
     CodeBlock {
         block: CodeBlock,
@@ -129,6 +138,19 @@ impl Registry {
         });
         registry.register::<Span>(|span| Ok(Contribution::Inline(span.0)));
         registry.register::<Paragraph>(|_| Ok(Contribution::Paragraph(HighlightStyle::default())));
+        registry.register::<Heading>(move |heading| {
+            Ok(Contribution::Heading {
+                level: heading.0,
+                style: theme.headings[heading.0.index()].clone(),
+            })
+        });
+        registry.register::<Quote>(move |_| Ok(Contribution::Quote(theme.quote.clone())));
+        registry.register::<ListItem>(move |item| {
+            Ok(Contribution::ListItem {
+                marker: item.0,
+                style: theme.list_item.clone(),
+            })
+        });
         registry.register::<Group>(|_| Ok(Contribution::Blocks(InlineStyle::default())));
         registry.register::<Link>(move |link| {
             Ok(Contribution::Link {
@@ -176,7 +198,7 @@ impl Registry {
 
     /// Flatten paragraphs into one shaping and selection stream.
     ///
-    /// Paragraphs are separated by two newlines, including empty paragraphs.
+    /// Blocks are separated by two newlines; consecutive list items use one.
     /// Styling boundaries do not add text or interrupt shaping explicitly.
     pub fn compile(&self, document: &Document) -> Result<Projection> {
         let mut output = Compilation::default();
@@ -208,6 +230,9 @@ impl Registry {
             != matches!(
                 contribution,
                 Contribution::Paragraph(_)
+                    | Contribution::Heading { .. }
+                    | Contribution::Quote(_)
+                    | Contribution::ListItem { .. }
                     | Contribution::Blocks(_)
                     | Contribution::CodeBlock { .. }
             )
@@ -231,16 +256,49 @@ impl Registry {
                     font_family: inherited.font_family,
                 });
             }
-            Contribution::Paragraph(style) => {
-                let start = output.start_block();
-                let style = inherited.inherit(&style.into());
+            block @ (Contribution::Paragraph(_)
+            | Contribution::Heading { .. }
+            | Contribution::Quote(_)
+            | Contribution::ListItem { .. }) => {
+                let (kind, style, prefix) = match block {
+                    Contribution::Paragraph(style) => (BlockKind::Paragraph, style.into(), None),
+                    Contribution::Heading { level, style } => {
+                        (BlockKind::Heading { level }, style, None)
+                    }
+                    Contribution::Quote(style) => (BlockKind::Quote, style, None),
+                    Contribution::ListItem { marker, style } => {
+                        (BlockKind::ListItem { marker }, style, Some(marker.text()))
+                    }
+                    _ => unreachable!(),
+                };
+                let start = if matches!(kind, BlockKind::ListItem { .. })
+                    && output
+                        .blocks
+                        .last()
+                        .is_some_and(|block| matches!(block.kind, BlockKind::ListItem { .. }))
+                {
+                    output.text.push('\n');
+                    output.text.len()
+                } else {
+                    output.start_block()
+                };
+                let style = inherited.inherit(&style);
+                if let Some(prefix) = prefix {
+                    output.text.push_str(&prefix);
+                    output.spans.push(TextSpan {
+                        node: id,
+                        range: start..output.text.len(),
+                        style: style.highlight,
+                        font_family: style.font_family.clone(),
+                    });
+                }
                 for child in &node.children {
                     self.append(document, *child, false, style.clone(), output)?;
                 }
                 output.blocks.push(BlockSpan {
                     node: id,
                     range: start..output.text.len(),
-                    kind: BlockKind::Paragraph,
+                    kind,
                 });
             }
             Contribution::CodeBlock { block, style } => {
@@ -312,7 +370,8 @@ impl Registry {
     }
 }
 
-/// A leaf's UTF-8 byte range in the projected text. Separators have no leaf ID.
+/// A source node's UTF-8 byte range in projected text. List markers belong to
+/// their item node; inter-block separators have no source ID.
 #[derive(Clone, Debug)]
 pub struct TextSpan {
     pub node: NodeId,
@@ -340,6 +399,9 @@ pub struct BlockSpan {
 #[derive(Clone, Debug)]
 pub enum BlockKind {
     Paragraph,
+    Heading { level: HeadingLevel },
+    Quote,
+    ListItem { marker: ListMarker },
     Code { language: Option<SharedString> },
 }
 
@@ -365,7 +427,7 @@ impl Projection {
         &self.blocks
     }
 
-    /// Map a leaf-relative UTF-8 position to the shared selection stream.
+    /// Map a source-relative UTF-8 position to the shared selection stream.
     /// This checks scalar boundaries; user selection additionally uses GPUI's
     /// grapheme and shaping-cluster handling across the complete stream.
     pub fn offset(&self, node: NodeId, byte_offset: usize) -> Option<usize> {
@@ -385,12 +447,35 @@ impl Projection {
     }
 
     pub(crate) fn styled_text(&self) -> StyledText {
+        let task_nodes: std::collections::HashSet<_> = self
+            .blocks
+            .iter()
+            .filter_map(|block| {
+                matches!(
+                    block.kind,
+                    BlockKind::ListItem {
+                        marker: ListMarker::Task { .. }
+                    }
+                )
+                .then_some(block.node)
+            })
+            .collect();
         StyledText::new(self.text.clone())
             .with_highlights(
                 self.spans
                     .iter()
                     .filter(|span| !span.range.is_empty())
-                    .map(|span| (span.range.clone(), span.style)),
+                    .map(|span| {
+                        let style = if task_nodes.contains(&span.node) {
+                            HighlightStyle {
+                                fade_out: Some(1.),
+                                ..Default::default()
+                            }
+                        } else {
+                            span.style
+                        };
+                        (span.range.clone(), style)
+                    }),
             )
             .with_font_family_overrides(self.spans.iter().filter_map(|span| {
                 if span.range.is_empty() {

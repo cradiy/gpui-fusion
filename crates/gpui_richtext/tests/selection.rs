@@ -9,6 +9,49 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 struct Page(Arc<Projection>, Rc<RefCell<Vec<String>>>);
 
+#[gpui::test]
+fn structured_blocks_keep_markers_and_unicode_selection_after_reflow(cx: &mut TestAppContext) {
+    use gpui_richtext::{HeadingLevel, compose::*};
+    let document = Document::from_roots([
+        heading(HeadingLevel::H2).child(text("Route overview")),
+        quote().child(text("北岸")),
+        bullet_item().child(link_with_text("port:beta", "Dock β")),
+        numbered_item(4).child(text("Inspect ropes")),
+        task_item(true).child(text("Confirm departure")),
+    ])
+    .unwrap();
+    let projection = Arc::new(Registry::with_standard_nodes().compile(&document).unwrap());
+    let expected = "Route overview\n\n北岸\n\n• Dock β\n4. Inspect ropes\n[x] Confirm departure";
+    assert_eq!(projection.text().as_ref(), expected);
+    let link = &projection.links()[0];
+    assert_eq!(&projection.text()[link.range.clone()], "Dock β");
+    assert_eq!(
+        projection.offset(link.node, "Dock ".len()),
+        Some(link.range.start + "Dock ".len())
+    );
+    assert_eq!(projection.offset(link.node, "Dock ".len() + 1), None);
+    let window = cx.open_window(size(px(400.), px(600.)), move |_, _| {
+        Page(projection, Rc::default())
+    });
+    let mut visual = VisualTestContext::from_window(window.into(), cx);
+    visual.update(|window, cx| {
+        window.draw(cx).clear();
+    });
+    visual.simulate_click(point(px(20.), px(20.)), Default::default());
+    visual.simulate_keystrokes(&gpui::platform_shortcut("ctrl-a"));
+    visual.simulate_resize(size(px(120.), px(600.)));
+    visual.update(|window, cx| {
+        window.draw(cx).clear();
+    });
+    visual.simulate_keystrokes(&gpui::platform_shortcut("ctrl-c"));
+    assert_eq!(
+        visual
+            .update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))
+            .as_deref(),
+        Some(expected)
+    );
+}
+
 impl Render for Page {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let activations = self.1.clone();

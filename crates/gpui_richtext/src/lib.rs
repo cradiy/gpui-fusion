@@ -3,6 +3,7 @@
 //! This experimental API currently supports uniform-size text flow. It does not
 //! yet provide embedded objects, independent block layout, or virtualization.
 
+mod blocks;
 mod code_block;
 pub mod compose;
 mod document;
@@ -10,7 +11,8 @@ mod projection;
 mod styles;
 mod view;
 
-pub use code_block::{CodeBlock, CodeBlockStyle};
+pub use blocks::{Heading, HeadingLevel, ListItem, ListMarker, Quote, TaskMarkerStyle};
+pub use code_block::{CodeBlock, CodeBlockLabels, CodeBlockStyle};
 pub use compose::NodeTree;
 pub use document::{Document, Node, NodeId};
 pub use projection::{

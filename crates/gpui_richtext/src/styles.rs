@@ -71,6 +71,9 @@ impl Link {
 /// recompiling with a different theme does not mutate existing projections.
 #[derive(Clone, Debug)]
 pub struct TextTheme {
+    pub headings: [InlineStyle; 6],
+    pub quote: InlineStyle,
+    pub list_item: InlineStyle,
     pub strong: InlineStyle,
     pub emphasis: InlineStyle,
     pub underline: InlineStyle,
@@ -84,6 +87,16 @@ pub struct TextTheme {
 impl Default for TextTheme {
     fn default() -> Self {
         Self {
+            headings: std::array::from_fn(|index| {
+                HighlightStyle::from(if index < 2 {
+                    FontWeight::BOLD
+                } else {
+                    FontWeight::SEMIBOLD
+                })
+                .into()
+            }),
+            quote: HighlightStyle::from(FontStyle::Italic).into(),
+            list_item: InlineStyle::default(),
             strong: HighlightStyle::from(FontWeight::BOLD).into(),
             emphasis: HighlightStyle::from(FontStyle::Italic).into(),
             underline: HighlightStyle {

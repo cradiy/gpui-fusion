@@ -1,11 +1,21 @@
 use gpui::{HighlightStyle, SharedString};
 use std::ops::Range;
 
+/// Application-localized copy action and success labels.
+#[derive(Clone)]
+pub struct CodeBlockLabels {
+    pub copy: SharedString,
+    pub copied: SharedString,
+}
+
 /// Surface styling for code blocks, independent of syntax highlighting.
 #[derive(Clone)]
 pub struct CodeBlockStyle {
     pub background: gpui::Hsla,
     pub border_color: gpui::Hsla,
+    pub header_color: gpui::Hsla,
+    pub button_hover_background: gpui::Hsla,
+    pub copy_success_color: gpui::Hsla,
     pub corner_radius: gpui::Pixels,
     pub padding: gpui::Pixels,
 }
@@ -15,6 +25,9 @@ impl Default for CodeBlockStyle {
         Self {
             background: gpui::rgba(0x64748b18).into(),
             border_color: gpui::rgba(0x64748b30).into(),
+            header_color: gpui::rgb(0x64748b).into(),
+            button_hover_background: gpui::rgba(0x64748b18).into(),
+            copy_success_color: gpui::rgb(0x22a06b).into(),
             corner_radius: gpui::px(8.),
             padding: gpui::px(12.),
         }

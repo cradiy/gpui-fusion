@@ -12,14 +12,15 @@ GPUI and does not require UIC or a document format parser.
 - A `Styled` view with selectable text using GPUI's read-only selection bridge.
 
 Create `Node` values with document-local `NodeId`s, then validate them with
-`Document::new`. Root nodes must resolve to paragraphs, code blocks, or block groups. Register payload types
+`Document::new`. Root nodes must resolve to text blocks, code blocks, or block groups. Register payload types
 in `Registry`, compile the document, and share the resulting `Arc<Projection>`
 with `RichText::new`. Keep the element ID stable between renders. Compilation
 belongs outside the render loop unless the content or registry changes.
 
 `Registry::with_standard_nodes` registers `Paragraph`, `Span`, `Text`,
 `InlineStyle`, `Strong`, `Emphasis`, `Underline`, `Strikethrough`, `Mark`, `Code`,
-`HardBreak`, `Group`, `Link`, and `CodeBlock`. Style nodes are inline containers; `HardBreak` is a leaf that
+`HardBreak`, `Group`, `Link`, `CodeBlock`, `Heading`, `Quote`, and `ListItem`.
+Style nodes are inline containers; `HardBreak` is a leaf that
 contributes one newline inside a paragraph.
 `register::<T>` adds or replaces a type's resolver. A resolver returns a
 `Contribution` and can fail. Unknown types and invalid child roles fail compilation;
@@ -55,7 +56,37 @@ return `Contribution::StyledInline` to supply this typography contract.
 Ancestor highlights are combined using GPUI's `HighlightStyle::highlight`:
 descendant weight and style override inherited values, while colors use its
 compositing semantics. The view supplies the base font, size, color, and line
-height. Paragraphs are separated by two newlines in both display and copying.
+height. Blocks are separated by two newlines in both display and copying, except
+consecutive list items, which use one newline.
+
+## Headings, quotations, and lists
+
+`heading(HeadingLevel)` contains inline children and preserves levels H1 through
+H6 in `BlockKind::Heading`. `TextTheme::headings` supplies six independent style
+presets, indexed from H1. Headings share the flow's font size and line height;
+their default emphasis uses bold or semibold weight.
+
+`quote()` contains inline children and uses `TextTheme::quote`. The view draws a
+left border across all wrapped lines; `RichText::quote_border_color` sets its
+color. The border is decorative and is excluded from copying. Use a `group()`
+to compose multiple quoted paragraphs.
+
+`bullet_item()`, `numbered_item(number)`, and `task_item(checked)` create list
+paragraphs using `TextTheme::list_item`. Task items are read-only. Numbering is
+explicit, so the document producer controls continuation and restart. Each item
+accepts inline children, including links and styles. Markers are part of the
+projected text and participate in selection and copying. Their source span
+belongs to the list-item node; child source offsets remain relative to each
+child's own text. `BlockKind::ListItem` preserves marker metadata.
+
+Task items draw rounded checkboxes independently of font glyphs. Configure their
+border, checked background, and check colors with `RichText::task_marker_style`.
+Selection and copying use `[ ]` and `[x]` text markers; these source markers are
+hidden beneath the drawn checkbox in the rendered view.
+
+These blocks cannot contain other blocks or appear inside inline content.
+List wrapping uses the shared text gutter; hanging indents and nested list
+layout are not implemented.
 
 The view shares GPUI's desktop selection and Android native selection integration.
 Changing projected text clears the selection; style-only changes preserve it.
@@ -64,7 +95,7 @@ anchors across document updates. Browser-native DOM selection is not provided.
 
 ## Groups and links
 
-`Group` contains paragraphs, code blocks, or nested groups. It adds no text or spacing of its
+`Group` contains text blocks, code blocks, or nested groups. It adds no text or spacing of its
 own; empty groups are omitted from text flow, while explicit empty paragraphs
 retain their paragraph separators. Custom resolvers can return
 `Contribution::Blocks(InlineStyle)` to apply inherited typography to a block group.
@@ -98,8 +129,8 @@ Spaces, tabs, blank lines, and trailing newlines remain in the projected and
 copied text. Blocks are separated by two additional newlines, like paragraphs.
 Code blocks cannot have children or occur inside a paragraph or link.
 
-`.language(name)` records metadata; it does not load a parser or add a visible
-language label. `.highlights(...)` accepts application-provided syntax highlights
+`.language(name)` supplies the header label without loading a parser.
+`.highlights(...)` accepts application-provided syntax highlights
 as sorted, non-overlapping UTF-8 ranges. Compilation rejects out-of-bounds,
 overlapping, reversed, and non-character-boundary ranges. Unhighlighted ranges
 inherit `TextTheme::code_block`; highlighted ranges refine that style. Configure
@@ -112,17 +143,25 @@ through syntax highlight boundaries without altering source offsets.
 
 Code blocks have a full-width rounded surface with a subtle neutral background
 and border. `RichText::code_block_style(CodeBlockStyle)` controls the background,
-border color, corner radius, and padding. Documents containing code blocks reserve
+border color, corner radius, and padding. `header_color` colors the language label
+and copy SVG; `button_hover_background` and `copy_success_color` style the button
+states. Documents containing code blocks reserve
 a shared text gutter; vertical surface padding is capped at a quarter line height
 to keep neighboring blocks separate. Surface geometry follows the wrapped text
 layout, including empty and trailing lines, without inserting padding characters.
 
 Code blocks currently share the document's font size, line height, and wrapping.
-Each code block has a header displaying its optional language and a copy icon
-with a "Copy code" tooltip. Register `gpui_icons::IconAssets` with the application
+Each code block has a header displaying its optional language and a copy icon.
+Supply `RichText::code_block_labels(CodeBlockLabels)` from the application's
+localization layer. `copy` supplies the action tooltip and accessible name;
+`copied` supplies the success tooltip. Without labels, these text attributes
+are omitted; the component does not select a language or supply fallback text.
+Register `gpui_icons::IconAssets` with the application
 or delegate icon paths to it from the application's asset source.
 Copy writes only that block's original source, including whitespace, to the system
 clipboard. Headers are excluded from text selection and document offsets.
+After copying, a success check animates for two seconds before the copy icon
+returns. Copying again restarts that interval.
 They have no independent horizontal scrollbar or line numbers.
 Syntax background highlights cover text runs in addition to the block surface.
 

@@ -3,10 +3,10 @@ use gpui::{
     rgb,
 };
 use gpui_richtext::{
-    CodeBlock, Contribution, Document, LinkSpan, Projection, Registry, RichText,
+    CodeBlock, Contribution, Document, HeadingLevel, LinkSpan, Projection, Registry, RichText,
     compose::{
-        code, emphasis, group, hard_break, link, mark, node, paragraph, strikethrough, strong,
-        text, underline,
+        bullet_item, code, emphasis, group, hard_break, heading, link, mark, node, numbered_item,
+        paragraph, quote, strikethrough, strong, task_item, text, underline,
     },
 };
 use std::sync::Arc;
@@ -31,6 +31,17 @@ fn document() -> Arc<Projection> {
     });
     let document =
         Document::from_roots([
+            heading(HeadingLevel::H1).child(text("Observation journal")),
+            quote().child(text("A useful observation records uncertainty as carefully as the result.")),
+            heading(HeadingLevel::H3).child(text("Before the session")),
+            bullet_item().child(text("Check the weather forecast.")),
+            bullet_item().child(text("Allow the optics to reach ambient temperature.")),
+            heading(HeadingLevel::H3).child(text("Capture sequence")),
+            numbered_item(1).child(text("Align the mount.")),
+            numbered_item(2).child(text("Record a reference frame.")),
+            heading(HeadingLevel::H3).child(text("Equipment checklist")),
+            task_item(true).child(text("Battery charged")),
+            task_item(false).child(text("Storage verified")),
             node(CodeBlock::new("const EXPOSURE: f32 = 0.8;\n\nfn calibrate(value: f32) -> f32 {\n    value * EXPOSURE\n}")
                 .language("rust")
                 .highlights([(0..5, HighlightStyle::color(rgb(0x8745a8).into()))])),
@@ -83,16 +94,26 @@ impl Render for Preview {
                             cx.notify();
                         }))
                         .w_full()
-                        .max_w(px(720.))
+                        .max_w(px(760.))
                         .mx_auto()
-                        .p_6()
-                        .rounded_lg()
+                        .p_8()
+                        .rounded_xl()
+                        .border_1()
+                        .border_color(rgb(0xe2e8f0))
                         .bg(rgb(0xffffff))
                         .text_color(rgb(0x28313b))
-                        .text_size(px(20.))
-                        .line_height(px(34.)),
+                        .text_size(px(17.))
+                        .line_height(px(29.)),
                 )
-                .child(div().mt_4().child(self.activation.clone())),
+                .child(
+                    div()
+                        .max_w(px(760.))
+                        .mx_auto()
+                        .mt_4()
+                        .text_size(px(12.))
+                        .text_color(rgb(0x64748b))
+                        .child(self.activation.clone()),
+                ),
         )
     }
 }

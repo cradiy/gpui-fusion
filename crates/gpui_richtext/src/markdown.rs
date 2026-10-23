@@ -3,6 +3,8 @@
 use crate::{compose::*, *};
 use anyhow::{Result, bail};
 use pulldown_cmark::{Event, Options, Parser, Tag};
+mod stream;
+pub use stream::MarkdownStream;
 
 struct Item {
     tag: Option<Tag<'static>>,

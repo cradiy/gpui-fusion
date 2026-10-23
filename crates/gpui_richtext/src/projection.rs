@@ -647,6 +647,7 @@ pub struct TextSpan {
 }
 
 /// Immutable text and source mapping, compiled outside the paint path.
+#[derive(Default)]
 pub struct Projection {
     text: SharedString,
     spans: Vec<TextSpan>,

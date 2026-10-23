@@ -1253,6 +1253,7 @@ pub struct InteractiveText {
     tooltip_id: Option<TooltipId>,
     clickable_ranges: Vec<Range<usize>>,
     selection_color: Option<crate::Hsla>,
+    preserve_selection_on_update: bool,
 }
 
 struct InteractiveTextClickEvent {
@@ -1283,6 +1284,7 @@ impl InteractiveText {
             tooltip_id: None,
             clickable_ranges: Vec::new(),
             selection_color: None,
+            preserve_selection_on_update: false,
         }
     }
 
@@ -1294,6 +1296,13 @@ impl InteractiveText {
     /// only activated when layout preserves the original text offsets.
     pub fn selectable(mut self, selection_color: impl Into<crate::Hsla>) -> Self {
         self.selection_color = Some(selection_color.into());
+        self
+    }
+
+    /// Retain the selection when text through its final selected byte is unchanged.
+    /// Updates affecting that prefix reset the selection. Disabled by default.
+    pub fn preserve_selection_on_update(mut self, preserve: bool) -> Self {
+        self.preserve_selection_on_update = preserve;
         self
     }
 
@@ -1388,7 +1397,10 @@ impl Element for InteractiveText {
                             .get_or_insert_with(|| Rc::new(RefCell::new(TextSelection::new(cx))));
                         let displayed_text =
                             self.text.layout.0.borrow().as_ref().unwrap().text.clone();
-                        if selection.borrow_mut().sync_text(displayed_text) {
+                        if selection
+                            .borrow_mut()
+                            .sync_text(displayed_text, self.preserve_selection_on_update)
+                        {
                             interactive_state.mouse_down_index.set(None);
                         }
                         window.set_focus_handle(&selection.borrow().focus, cx);

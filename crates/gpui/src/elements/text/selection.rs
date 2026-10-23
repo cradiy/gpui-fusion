@@ -34,9 +34,15 @@ impl TextSelection {
         }
     }
 
-    pub fn sync_text(&mut self, text: SharedString) -> bool {
+    pub fn sync_text(&mut self, text: SharedString, preserve: bool) -> bool {
         if self.text != text {
+            let end = self.range().end;
+            let keep =
+                preserve && !self.range().is_empty() && text.get(..end) == self.text.get(..end);
             self.text = text;
+            if keep {
+                return true;
+            }
             self.anchor = 0;
             self.head = 0;
             self.dragging = false;

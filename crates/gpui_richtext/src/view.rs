@@ -47,6 +47,7 @@ pub struct RichText {
     style: StyleRefinement,
     selection: Hsla,
     selectable: bool,
+    preserve_selection_on_update: bool,
     on_link_click: Option<LinkListener>,
     link_tooltips: bool,
     link_tooltip: Option<LinkTooltipBuilder>,
@@ -68,6 +69,7 @@ impl RichText {
             style: StyleRefinement::default(),
             selection: gpui::rgba(0x4488ff55).into(),
             selectable: true,
+            preserve_selection_on_update: false,
             on_link_click: None,
             link_tooltips: true,
             link_tooltip: None,
@@ -89,6 +91,12 @@ impl RichText {
 
     pub fn selectable(mut self, selectable: bool) -> Self {
         self.selectable = selectable;
+        self
+    }
+
+    /// Keep selections on updates that leave their text prefix unchanged.
+    pub fn preserve_selection_on_update(mut self, preserve: bool) -> Self {
+        self.preserve_selection_on_update = preserve;
         self
     }
 
@@ -348,6 +356,7 @@ impl RenderOnce for RichText {
         let header_projection = self.projection.clone();
         let id = self.id.clone();
         let mut text = InteractiveText::new(self.id, styled_text)
+            .preserve_selection_on_update(self.preserve_selection_on_update)
             .when(self.selectable, |text| text.selectable(self.selection));
         if self.link_tooltips && !self.projection.links().is_empty() {
             let projection = self.projection.clone();

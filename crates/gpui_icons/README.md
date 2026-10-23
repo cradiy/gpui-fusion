@@ -19,7 +19,7 @@ the file name including its extension.
 
 | Feature | Contents |
 | --- | --- |
-| `lucide-core` | Icons required by UIC components |
+| `lucide-core` | Icons required by built-in components |
 | `lucide-common` (default) | Common application actions, including `lucide-core` |
 | `lucide-media` | Audio, video, playback, and photography |
 | `lucide-files` | Documents, folders, storage, and libraries |

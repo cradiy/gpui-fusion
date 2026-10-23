@@ -9,6 +9,7 @@ readme = "README.md"
 
 [dependencies]
 gpui.workspace = true
+gpui_icons = { workspace = true, features = ["lucide-core"] }
 anyhow.workspace = true
 
 [dev-dependencies]

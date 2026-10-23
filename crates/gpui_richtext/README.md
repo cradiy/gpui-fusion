@@ -118,7 +118,9 @@ to keep neighboring blocks separate. Surface geometry follows the wrapped text
 layout, including empty and trailing lines, without inserting padding characters.
 
 Code blocks currently share the document's font size, line height, and wrapping.
-Each code block has a header displaying its optional language and a Copy button.
+Each code block has a header displaying its optional language and a copy icon
+with a "Copy code" tooltip. Register `gpui_icons::IconAssets` with the application
+or delegate icon paths to it from the application's asset source.
 Copy writes only that block's original source, including whitespace, to the system
 clipboard. Headers are excluded from text selection and document offsets.
 They have no independent horizontal scrollbar or line numbers.

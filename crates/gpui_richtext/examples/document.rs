@@ -98,14 +98,16 @@ impl Render for Preview {
 }
 
 fn main() {
-    gpui_platform::application().run(|cx: &mut App| {
-        cx.open_window(WindowOptions::default(), |_, cx| {
-            cx.new(|_| Preview {
-                document: document(),
-                activation: "Link activation is handled locally.".into(),
+    gpui_platform::application()
+        .with_assets(gpui_icons::IconAssets::new())
+        .run(|cx: &mut App| {
+            cx.open_window(WindowOptions::default(), |_, cx| {
+                cx.new(|_| Preview {
+                    document: document(),
+                    activation: "Link activation is handled locally.".into(),
+                })
             })
-        })
-        .unwrap();
-        cx.activate(true);
-    });
+            .unwrap();
+            cx.activate(true);
+        });
 }

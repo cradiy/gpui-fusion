@@ -1,10 +1,33 @@
 use crate::{BlockKind, CodeBlockStyle, LinkSpan, Projection};
 use gpui::prelude::*;
 use gpui::{
-    ElementId, Hsla, InteractiveText, IntoElement, Refineable, RenderOnce, StyleRefinement, Styled,
-    div,
+    AnimationExt, ElementId, Hsla, InteractiveText, IntoElement, Refineable, RenderOnce,
+    StyleRefinement, Styled, div,
 };
 use std::sync::Arc;
+use std::time::Duration;
+
+#[derive(Default)]
+struct CopyFeedback {
+    copied: bool,
+    generation: usize,
+    reset: Option<gpui::Task<()>>,
+}
+
+impl CopyFeedback {
+    fn copied(&mut self, cx: &mut gpui::Context<Self>) {
+        self.copied = true;
+        self.generation = self.generation.wrapping_add(1);
+        self.reset = Some(cx.spawn(async move |state, cx| {
+            cx.background_executor().timer(Duration::from_secs(2)).await;
+            let _ = state.update(cx, |state, cx| {
+                state.copied = false;
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+}
 
 type LinkListener = Box<dyn Fn(&LinkSpan, &mut gpui::Window, &mut gpui::App)>;
 type LinkTooltipBuilder =
@@ -209,6 +232,41 @@ impl RenderOnce for RichText {
                                 };
                                 let source =
                                     header_projection.text()[block.range.clone()].to_owned();
+                                let feedback = window.use_keyed_state(
+                                    ("code-copy-feedback", block.node.0 as usize),
+                                    cx,
+                                    |_, _| CopyFeedback::default(),
+                                );
+                                let copied = feedback.read(cx).copied;
+                                let generation = feedback.read(cx).generation;
+                                let icon = if copied {
+                                    gpui::svg()
+                                        .path(gpui_icons::GpuiIcons::LucideCheck)
+                                        .text_color(gpui::rgb(0x22a06b))
+                                        .size(gpui::px(16.))
+                                        .with_animation(
+                                            ("copy-success", generation),
+                                            gpui::Animation::new(Duration::from_secs(2)),
+                                            |icon, progress| {
+                                                let enter = (progress / 0.08).min(1.);
+                                                let opacity =
+                                                    enter.min(((1. - progress) / 0.1).min(1.));
+                                                icon.opacity(opacity).with_transformation(
+                                                    gpui::Transformation::scale(gpui::size(
+                                                        0.75 + 0.25 * enter,
+                                                        0.75 + 0.25 * enter,
+                                                    )),
+                                                )
+                                            },
+                                        )
+                                        .into_any_element()
+                                } else {
+                                    gpui::svg()
+                                        .path(gpui_icons::GpuiIcons::LucideCopy)
+                                        .text_color(gpui::rgb(0x64748b))
+                                        .size(gpui::px(16.))
+                                        .into_any_element()
+                                };
                                 let mut header = div()
                                     .w(bounds.size.width)
                                     .flex()
@@ -227,9 +285,16 @@ impl RenderOnce for RichText {
                                         div()
                                             .id(("copy-code", block.range.start))
                                             .flex_shrink_0()
-                                            .px_2()
+                                            .size(gpui::px(28.))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
                                             .rounded_sm()
                                             .cursor_pointer()
+                                            .aria_label("Copy code")
+                                            .tooltip(|_, cx| {
+                                                cx.new(|_| LinkTooltip("Copy code".into())).into()
+                                            })
                                             .hover(|style| style.bg(gpui::rgba(0x64748b25)))
                                             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
                                                 cx.stop_propagation()
@@ -239,8 +304,9 @@ impl RenderOnce for RichText {
                                                 cx.write_to_clipboard(
                                                     gpui::ClipboardItem::new_string(source.clone()),
                                                 );
+                                                feedback.update(cx, |state, cx| state.copied(cx));
                                             })
-                                            .child("Copy"),
+                                            .child(icon),
                                     )
                                     .into_any_element();
                                 header.layout_as_root(
@@ -276,6 +342,30 @@ impl RenderOnce for RichText {
 }
 
 struct LinkTooltip(gpui::SharedString);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[gpui::test]
+    fn copy_feedback_restarts_timeout_on_repeated_copy(cx: &mut gpui::TestAppContext) {
+        let feedback = cx.new(|_| CopyFeedback::default());
+        feedback.update(cx, |state, cx| state.copied(cx));
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_secs(1));
+        feedback.update(cx, |state, cx| {
+            assert!(state.copied);
+            state.copied(cx);
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_millis(1500));
+        cx.run_until_parked();
+        feedback.update(cx, |state, _| assert!(state.copied));
+        cx.executor().advance_clock(Duration::from_millis(500));
+        cx.run_until_parked();
+        feedback.update(cx, |state, _| assert!(!state.copied));
+    }
+}
 
 impl gpui::Render for LinkTooltip {
     fn render(

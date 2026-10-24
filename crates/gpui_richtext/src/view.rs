@@ -121,6 +121,8 @@ struct DetailsState {
 /// Table cells, alert bodies and surrounding text sections have independent selections.
 #[derive(Clone, IntoElement)]
 pub struct RichText {
+    math_style: crate::MathStyle,
+    mermaid_theme: crate::MermaidTheme,
     id: ElementId,
     projection: Arc<Projection>,
     style: StyleRefinement,
@@ -151,6 +153,8 @@ impl RichText {
     pub fn new(id: impl Into<ElementId>, projection: Arc<Projection>) -> Self {
         Self {
             id: id.into(),
+            math_style: crate::MathStyle::default(),
+            mermaid_theme: crate::MermaidTheme::default(),
             projection,
             style: StyleRefinement::default(),
             selection: gpui::rgba(0x4488ff55).into(),
@@ -180,6 +184,8 @@ impl RichText {
     /// Apply surface colors; compile with the same theme's registry for inline colors.
     /// Subsequent styling calls can override individual values.
     pub fn theme(mut self, theme: &crate::RichTextTheme) -> Self {
+        self.math_style = theme.math;
+        self.mermaid_theme = theme.mermaid;
         self.details_style = theme.details.clone();
         self = self.footnote_style(theme.footnote);
         self.alert_styles = theme.alerts.clone();
@@ -194,6 +200,30 @@ impl RichText {
     pub fn alert_style(mut self, kind: crate::AlertKind, style: crate::AlertStyle) -> Self {
         self.alert_styles[kind.index()] = style;
         self
+    }
+
+    pub fn math_style(mut self, style: crate::MathStyle) -> Self {
+        self.math_style = style;
+        self
+    }
+
+    pub fn mermaid_theme(mut self, theme: crate::MermaidTheme) -> Self {
+        self.mermaid_theme = theme;
+        self
+    }
+
+    fn graphic_options(&self, window: &gpui::Window) -> crate::GraphicRenderOptions {
+        let mut text = window.text_style();
+        text.refine(&self.style.text);
+        crate::GraphicRenderOptions {
+            font_size: self
+                .math_style
+                .font_size
+                .filter(|size| f32::from(*size).is_finite() && *size > gpui::px(0.))
+                .unwrap_or_else(|| text.font_size.to_pixels(window.rem_size())),
+            color: self.math_style.color.unwrap_or(text.color),
+            mermaid_theme: self.mermaid_theme,
+        }
     }
 
     pub fn details_style(mut self, style: crate::DetailsStyle) -> Self {
@@ -357,7 +387,7 @@ impl RenderOnce for RichText {
         let header_height = gpui::px(36.);
         let header_spacing = header_height + gpui::px(8.);
         let quote_color = self.quote_border_color;
-        let task_style = self.task_marker_style;
+        let task_style = self.task_marker_style.clone();
         let padding = self.code_block_style.padding.max(gpui::px(0.));
         let mut marker_text_style = window.text_style();
         marker_text_style.refine(&self.style.text);
@@ -475,9 +505,74 @@ impl RenderOnce for RichText {
             .filter(|block| matches!(block.kind, BlockKind::Code { .. }))
             .map(|block| block.range.clone())
             .collect();
+        let mut inline_graphics = Vec::new();
+        for span in self
+            .projection
+            .inline_math
+            .iter()
+            .filter(|_| marker_text_style.text_overflow.is_none())
+        {
+            let mut options = self.graphic_options(window);
+            if self.math_style.color.is_none() {
+                if let Some(color) = self
+                    .projection
+                    .spans()
+                    .iter()
+                    .find(|text| text.node == span.node)
+                    .and_then(|text| text.style.color)
+                {
+                    options.color = color;
+                }
+            }
+            if self.math_style.font_size.is_none() {
+                if let Some(block) = self
+                    .projection
+                    .blocks()
+                    .iter()
+                    .find(|block| block.range.contains(&span.range.start))
+                {
+                    if let BlockKind::Heading { level } = block.kind {
+                        options.font_size *= self.heading_styles[level.index()].font_scale;
+                    }
+                    if block.footnote {
+                        options.font_size *= self.footnote_style.font_scale;
+                    }
+                }
+            }
+            let state = window.with_id(self.id.clone(), |window| {
+                window.use_keyed_state(("inline-math", span.node.0 as usize), cx, |_, _| {
+                    crate::graphics::GraphicView::default()
+                })
+            });
+            state.update(cx, |state, cx| {
+                state.request(
+                    crate::Graphic::InlineMath(span.formula.clone()),
+                    options,
+                    cx,
+                )
+            });
+            if let Some(rendered) = state.read(cx).ready() {
+                if let Some(size) = rendered.size {
+                    inline_graphics.push((
+                        gpui::TextInlineBox {
+                            range: span.range.clone(),
+                            size,
+                            baseline: rendered.baseline,
+                        },
+                        rendered.image,
+                    ));
+                }
+            }
+        }
         let styled_text = self
             .projection
             .styled_text()
+            .with_inline_boxes(
+                inline_graphics
+                    .iter()
+                    .map(|(object, _)| object.clone())
+                    .collect(),
+            )
             .with_line_typography({
                 let body_size = marker_text_style.font_size.to_pixels(window.rem_size());
                 let mut typography = Vec::new();
@@ -534,6 +629,44 @@ impl RenderOnce for RichText {
                     .collect(),
             );
         let layout = styled_text.layout().clone();
+        let inline_layout = layout.clone();
+        let inline_overlay = gpui::canvas(
+            move |_, window, cx| {
+                let mut images = Vec::new();
+                for (object, image) in inline_graphics {
+                    if let Some(position) = inline_layout.baseline_for_index(object.range.start) {
+                        let mut element = gpui::img(image)
+                            .w(object.size.width)
+                            .h(object.size.height)
+                            .into_any_element();
+                        element.layout_as_root(
+                            gpui::size(
+                                gpui::AvailableSpace::Definite(object.size.width),
+                                gpui::AvailableSpace::Definite(object.size.height),
+                            ),
+                            window,
+                            cx,
+                        );
+                        element.prepaint_at(
+                            position - gpui::point(gpui::px(0.), object.baseline),
+                            window,
+                            cx,
+                        );
+                        images.push(element);
+                    }
+                }
+                images
+            },
+            |_, mut images, window, cx| {
+                for image in &mut images {
+                    image.paint(window, cx);
+                }
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full();
         let anchor_layout = layout.clone();
         let anchors = self.projection.anchors().to_vec();
         let navigation = self.navigation.clone().unwrap();
@@ -620,6 +753,7 @@ impl RenderOnce for RichText {
             return surface
                 .child(text)
                 .child(navigation_overlay)
+                .child(inline_overlay)
                 .into_any_element();
         }
         let style = self.code_block_style;
@@ -875,7 +1009,10 @@ impl RenderOnce for RichText {
                     .size_full(),
                 ),
         );
-        content.child(navigation_overlay).into_any_element()
+        content
+            .child(navigation_overlay)
+            .child(inline_overlay)
+            .into_any_element()
     }
 }
 
@@ -921,7 +1058,10 @@ impl RichText {
                 }
                 crate::projection::RenderPart::Embed(block) => {
                     let content = match &block.kind {
-                        BlockKind::Graphic(graphic) => {
+                        BlockKind::Graphic {
+                            graphic,
+                            code_language,
+                        } => {
                             let state = window.with_id(self.id.clone(), |window| {
                                 window.use_keyed_state(
                                     ("graphic", block.node.0 as usize),
@@ -929,9 +1069,11 @@ impl RichText {
                                     |_, _| crate::graphics::GraphicView::default(),
                                 )
                             });
-                            let dark = self.code_block_style.background.l < 0.5;
-                            state.update(cx, |state, cx| state.request(graphic.clone(), dark, cx));
-                            if matches!(graphic, crate::Graphic::Mermaid(_)) {
+                            let options = self.graphic_options(window);
+                            state.update(cx, |state, cx| {
+                                state.request(graphic.clone(), options, cx)
+                            });
+                            if let Some(language) = code_language {
                                 let style = &self.code_block_style;
                                 let feedback = window.with_id(self.id.clone(), |window| {
                                     window.use_keyed_state(
@@ -964,7 +1106,7 @@ impl RichText {
                                             .child(
                                                 div()
                                                     .font_weight(gpui::FontWeight::MEDIUM)
-                                                    .child("mermaid"),
+                                                    .child(language.clone()),
                                             )
                                             .child(code_copy_button(
                                                 ("copy-diagram", block.node.0 as usize).into(),

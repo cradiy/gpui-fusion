@@ -141,7 +141,10 @@ fn inline(item: &Item) -> Result<Option<NodeTree>> {
                     Some(text(value.to_string()))
                 }
                 Some(Event::Code(value)) => Some(code().child(text(value.to_string()))),
-                Some(Event::InlineMath(value)) => Some(text(format!("${value}$"))),
+                #[cfg(feature = "math")]
+                Some(Event::InlineMath(value)) => {
+                    Some(node(crate::MathInline(value.to_string().into())))
+                }
                 Some(Event::DisplayMath(value)) => Some(text(format!("$${value}$$"))),
                 Some(Event::SoftBreak) => Some(text(" ")),
                 Some(Event::HardBreak) => Some(hard_break()),
@@ -246,7 +249,7 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
                 if let pulldown_cmark::CodeBlockKind::Fenced(language) = kind {
                     if language.split_whitespace().next() == Some("mermaid") {
                         flush(&mut result, &mut pending);
-                        result.push(node(crate::Mermaid(plain(&item.children).into())));
+                        result.push(node(crate::MermaidCodeBlock(plain(&item.children).into())));
                         continue;
                     }
                 }

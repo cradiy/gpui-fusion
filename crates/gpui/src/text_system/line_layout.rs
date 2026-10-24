@@ -359,6 +359,80 @@ pub struct WrapBoundary {
 }
 
 impl WrappedLineLayout {
+    pub(super) fn with_inline_boxes(&self, text: &str, boxes: &[crate::TextInlineBox]) -> Self {
+        let source = &self.unwrapped_layout;
+        let mut runs = source.runs.clone();
+        let mut width = source.width;
+        let mut ascent = source.ascent;
+        let mut descent = source.descent;
+        for object in boxes {
+            let glyphs: Vec<_> = runs
+                .iter()
+                .flat_map(|run| &run.glyphs)
+                .filter(|glyph| {
+                    glyph.index < object.range.end && glyph.cluster_end > object.range.start
+                })
+                .collect();
+            if glyphs.is_empty()
+                || glyphs.iter().any(|glyph| {
+                    glyph.index < object.range.start || glyph.cluster_end > object.range.end
+                })
+            {
+                continue;
+            }
+            let left = glyphs.iter().map(|glyph| glyph.position.x).min().unwrap();
+            let right = glyphs
+                .iter()
+                .map(|glyph| glyph.position.x + glyph.advance)
+                .max()
+                .unwrap();
+            let delta = object.size.width - (right - left);
+            let mut replacement = (*glyphs[0]).clone();
+            replacement.position.x = left;
+            replacement.index = object.range.start;
+            replacement.cluster_end = object.range.end;
+            replacement.advance = object.size.width;
+            let mut inserted = false;
+            for run in &mut runs {
+                let mut result = Vec::with_capacity(run.glyphs.len());
+                for mut glyph in run.glyphs.drain(..) {
+                    if glyph.index >= object.range.start && glyph.index < object.range.end {
+                        if !inserted {
+                            result.push(replacement.clone());
+                            inserted = true;
+                        }
+                    } else {
+                        if glyph.position.x >= right {
+                            glyph.position.x += delta;
+                        }
+                        result.push(glyph);
+                    }
+                }
+                run.glyphs = result;
+            }
+            width += delta;
+            ascent = ascent.max(object.baseline);
+            descent = descent.max(object.size.height - object.baseline);
+        }
+        let layout = Arc::new(LineLayout {
+            font_size: source.font_size,
+            width,
+            ascent,
+            descent,
+            runs,
+            len: source.len,
+        });
+        let wrap_boundaries = self
+            .wrap_width
+            .map(|width| layout.compute_wrap_boundaries(text, width, None))
+            .unwrap_or_default();
+        Self {
+            unwrapped_layout: layout,
+            wrap_boundaries,
+            wrap_width: self.wrap_width,
+        }
+    }
+
     pub(super) fn with_tab_stops(&self, text: &str, stop: Pixels) -> Self {
         self.with_adjusted_spacing(text, Some(stop), 0, self.wrap_width)
     }

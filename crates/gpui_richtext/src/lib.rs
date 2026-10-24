@@ -1,7 +1,8 @@
 //! Extensible read-only text documents and a selectable GPUI presentation.
 //!
 //! Headings support distinct typography metrics; table cells wrap independently.
-//! Images render as blocks; arbitrary inline objects and virtualization are not provided.
+//! Images render as blocks; formulas support inline and display layout.
+//! Arbitrary inline nodes and virtualization are not provided.
 
 mod anchor;
 mod blocks;
@@ -14,7 +15,10 @@ mod containers;
 pub use containers::{Details, DetailsStyle};
 mod document;
 mod graphics;
-pub use graphics::{Graphic, MathBlock, Mermaid};
+pub use graphics::{
+    Graphic, GraphicRenderOptions, MathBlock, MathInline, MathStyle, Mermaid, MermaidCodeBlock,
+    MermaidTheme,
+};
 #[cfg(feature = "markdown")]
 pub mod markdown;
 mod projection;

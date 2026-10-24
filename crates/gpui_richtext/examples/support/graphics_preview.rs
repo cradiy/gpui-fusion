@@ -1,11 +1,11 @@
 use gpui::{App, Context, Render, Window, WindowOptions, div, prelude::*, px};
-use gpui_richtext::{CodeBlockLabels, Projection, RichText, RichTextTheme, markdown};
+use gpui_richtext::{CodeBlockLabels, Document, Projection, RichText, RichTextTheme};
 use std::sync::Arc;
 
 struct Preview {
     projection: Arc<Projection>,
     theme: RichTextTheme,
-    source: &'static str,
+    document: Document,
     dark: bool,
 }
 
@@ -35,12 +35,8 @@ impl Render for Preview {
                         } else {
                             RichTextTheme::light()
                         };
-                        view.projection = Arc::new(
-                            view.theme
-                                .registry()
-                                .compile(&markdown::parse(view.source).unwrap())
-                                .unwrap(),
-                        );
+                        view.projection =
+                            Arc::new(view.theme.registry().compile(&view.document).unwrap());
                         cx.notify();
                     })),
             )
@@ -64,23 +60,18 @@ impl Render for Preview {
     }
 }
 
-pub fn run(source: &'static str) {
+pub fn run(document: Document) {
     gpui_platform::application()
         .with_assets(gpui_icons::IconAssets)
         .run(move |cx: &mut App| {
             cx.open_window(WindowOptions::default(), |_, cx| {
                 cx.new(|_| {
                     let theme = RichTextTheme::dark();
-                    let projection = Arc::new(
-                        theme
-                            .registry()
-                            .compile(&markdown::parse(source).unwrap())
-                            .unwrap(),
-                    );
+                    let projection = Arc::new(theme.registry().compile(&document).unwrap());
                     Preview {
                         projection,
                         theme,
-                        source,
+                        document: document.clone(),
                         dark: true,
                     }
                 })

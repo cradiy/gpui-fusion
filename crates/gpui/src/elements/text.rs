@@ -398,6 +398,7 @@ impl IntoElement for SharedString {
 /// For text with a uniform style, you can usually avoid calling this constructor
 /// and just pass text directly.
 pub struct StyledText {
+    inline_boxes: Vec<TextInlineBox>,
     text: SharedString,
     runs: Option<Vec<TextRun>>,
     delayed_highlights: Option<Vec<(Range<usize>, HighlightStyle)>>,
@@ -407,6 +408,18 @@ pub struct StyledText {
     line_indents: Vec<TextLineIndent>,
     empty_line_heights: Vec<(usize, Pixels)>,
     line_typography: Vec<TextLineTypography>,
+}
+
+/// A single atomic inline object replacing a UTF-8 source range.
+/// Source glyphs are hidden; callers paint the object separately at its baseline position.
+#[derive(Clone, Debug)]
+pub struct TextInlineBox {
+    /// Nonempty UTF-8 byte range replaced by the object.
+    pub range: Range<usize>,
+    /// Width and total height reserved in logical pixels.
+    pub size: Size<Pixels>,
+    /// Distance from the object's top edge to the text baseline.
+    pub baseline: Pixels,
 }
 
 /// Typography for a newline-delimited source line, including its soft wraps.
@@ -433,9 +446,34 @@ pub struct TextLineIndent {
 }
 
 impl StyledText {
+    /// Replace sorted, non-overlapping source ranges with atomic layout boxes.
+    /// Invalid ranges or dimensions are ignored. Newlines inside an object do not break it.
+    /// Text-overflow truncation uses the original source representation.
+    pub fn with_inline_boxes(mut self, boxes: Vec<TextInlineBox>) -> Self {
+        let mut end = 0;
+        self.inline_boxes = boxes
+            .into_iter()
+            .filter(|object| {
+                let valid = object.range.start >= end
+                    && object.range.start < object.range.end
+                    && self.text.get(object.range.clone()).is_some()
+                    && [object.size.width, object.size.height, object.baseline]
+                        .iter()
+                        .all(|value| f32::from(*value).is_finite() && *value >= Pixels::ZERO)
+                    && object.baseline <= object.size.height;
+                if valid {
+                    end = object.range.end;
+                }
+                valid
+            })
+            .collect();
+        self
+    }
+
     /// Construct a new styled text element from the given string.
     pub fn new(text: impl Into<SharedString>) -> Self {
         StyledText {
+            inline_boxes: Vec::new(),
             text: text.into(),
             runs: None,
             delayed_highlights: None,
@@ -642,10 +680,53 @@ impl Element for StyledText {
             Self::apply_font_family_overrides(runs, overrides);
         }
 
+        if window.text_style().text_overflow.is_some() {
+            self.inline_boxes.clear();
+        }
+        if !self.inline_boxes.is_empty() {
+            let source = runs
+                .take()
+                .unwrap_or_else(|| vec![window.text_style().to_run(self.text.len())]);
+            let mut hidden = Vec::new();
+            let mut offset = 0;
+            for run in source {
+                let end = offset + run.len;
+                let mut boundaries = vec![offset, end];
+                for object in &self.inline_boxes {
+                    if object.range.start > offset && object.range.start < end {
+                        boundaries.push(object.range.start);
+                    }
+                    if object.range.end > offset && object.range.end < end {
+                        boundaries.push(object.range.end);
+                    }
+                }
+                boundaries.sort_unstable();
+                boundaries.dedup();
+                for pair in boundaries.windows(2) {
+                    let mut part = run.clone();
+                    part.len = pair[1] - pair[0];
+                    if self
+                        .inline_boxes
+                        .iter()
+                        .any(|object| object.range.contains(&pair[0]))
+                    {
+                        part.color = crate::transparent_black();
+                        part.underline = None;
+                        part.strikethrough = None;
+                        part.background_color = None;
+                    }
+                    hidden.push(part);
+                }
+                offset = end;
+            }
+            runs = Some(hidden);
+        }
+
         let layout_id = self.layout.layout(
             self.text.clone(),
             runs,
             TextLayoutOptions {
+                inline_boxes: std::mem::take(&mut self.inline_boxes),
                 line_top_spacing: std::mem::take(&mut self.line_top_spacing),
                 line_indents: std::mem::take(&mut self.line_indents),
                 empty_line_heights: std::mem::take(&mut self.empty_line_heights),
@@ -710,6 +791,7 @@ struct TextLayoutInner {
 
 #[derive(Default)]
 struct TextLayoutOptions {
+    inline_boxes: Vec<TextInlineBox>,
     line_top_spacing: Vec<(usize, Pixels)>,
     line_indents: Vec<TextLineIndent>,
     empty_line_heights: Vec<(usize, Pixels)>,
@@ -735,6 +817,7 @@ impl TextLayout {
         _: &mut App,
     ) -> LayoutId {
         let TextLayoutOptions {
+            inline_boxes,
             line_top_spacing,
             line_indents,
             empty_line_heights,
@@ -843,10 +926,22 @@ impl TextLayout {
                     .iter()
                     .map(|(start, metrics)| (*start, metrics.font_size))
                     .collect();
+                let shaping_text = if inline_boxes.is_empty() {
+                    text.clone()
+                } else {
+                    let mut shaping = text.to_string();
+                    for object in &inline_boxes {
+                        if let Some(source) = shaping.get(object.range.clone()) {
+                            let source = source.replace('\n', " ");
+                            shaping.replace_range(object.range.clone(), &source);
+                        }
+                    }
+                    shaping.into()
+                };
                 let Some(mut lines) = window
                     .text_system()
                     .shape_text_with_line_sizes(
-                        text.clone(),
+                        shaping_text,
                         font_size,
                         &runs,
                         wrap_width,            // Wrap if we know the width.
@@ -885,6 +980,26 @@ impl TextLayout {
                 let mut resolved_heights = Vec::new();
                 let mut remaining_wraps = text_style.line_clamp.map(|max| max.saturating_sub(1));
                 for line in &mut lines {
+                    if !inline_boxes.is_empty() {
+                        line.text = text[line_start..line_start + line.len()].to_owned().into();
+                    }
+                    let objects: Vec<_> = inline_boxes
+                        .iter()
+                        .filter(|object| {
+                            truncate_width.is_none()
+                                && object.range.start >= line_start
+                                && object.range.end <= line_start + line.len()
+                        })
+                        .map(|object| {
+                            let mut object = object.clone();
+                            object.range =
+                                object.range.start - line_start..object.range.end - line_start;
+                            object
+                        })
+                        .collect();
+                    if !objects.is_empty() {
+                        *line = std::mem::take(line).with_inline_boxes(&objects, remaining_wraps);
+                    }
                     let indent = indents.get(&line_start).filter(|indent| {
                         indent.width >= Pixels::ZERO
                             && f32::from(indent.width).is_finite()
@@ -917,7 +1032,7 @@ impl TextLayout {
                         resolved_spacing.push(top);
                     }
                     size.height += top;
-                    let row_height = heights
+                    let mut row_height = heights
                         .get(&line_start)
                         .copied()
                         .filter(|height| {
@@ -930,7 +1045,10 @@ impl TextLayout {
                                 .get(&line_start)
                                 .map_or(line_height, |metrics| metrics.line_height)
                         });
-                    if !heights.is_empty() || !typography.is_empty() {
+                    if !objects.is_empty() {
+                        row_height = row_height.max(line.ascent() + line.descent());
+                    }
+                    if !heights.is_empty() || !typography.is_empty() || !inline_boxes.is_empty() {
                         resolved_heights.push(row_height);
                     }
                     line_start += line.len() + 1;
@@ -1190,6 +1308,23 @@ impl TextLayout {
             .iter()
             .map(|line| line.layout.clone())
             .collect()
+    }
+
+    /// Position on the text baseline for a UTF-8 byte offset, after prepaint.
+    pub fn baseline_for_index(&self, index: usize) -> Option<Point<Pixels>> {
+        let mut position = self.position_for_index(index)?;
+        let state = self.0.borrow();
+        let state = state.as_ref()?;
+        let mut start = 0;
+        for (line_index, line) in state.lines.iter().enumerate() {
+            if index <= start + line.len() {
+                let height = state.height_for_line(line_index);
+                position.y += (height - line.ascent() - line.descent()) / 2. + line.ascent();
+                return Some(position);
+            }
+            start += line.len() + 1;
+        }
+        None
     }
 
     /// The bounds of this layout.

@@ -43,8 +43,8 @@ required-features = ["syntax-highlighting"]
 
 [[example]]
 name = "mermaid"
-required-features = ["markdown", "mermaid"]
+required-features = ["mermaid"]
 
 [[example]]
 name = "math"
-required-features = ["markdown", "math"]
+required-features = ["math"]

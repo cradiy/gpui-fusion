@@ -11,14 +11,14 @@ interactions. This crate renders documents; it does not provide an editor.
 - Display the result with `RichText`.
 - Optional features: `markdown` for parsing, `syntax-highlighting` for basic code colors,
   `syntax-extra` for the extended language set, `mermaid` for diagrams, and `math`
-  for block formulas.
+  for formulas.
 - See the [document example](examples/document.rs) for application setup.
 
 ```sh
 cargo run -p gpui_richtext --example document
 cargo run -p gpui_richtext --example code_highlighting --features syntax-extra
-cargo run -p gpui_richtext --example mermaid --features markdown,mermaid
-cargo run -p gpui_richtext --example math --features markdown,math
+cargo run -p gpui_richtext --example mermaid --features mermaid
+cargo run -p gpui_richtext --example math --features math
 ```
 
 ## License

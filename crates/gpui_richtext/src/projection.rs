@@ -20,7 +20,11 @@ pub struct Paragraph;
 
 /// The semantic contribution of a registered payload type.
 pub enum Contribution {
-    Graphic(crate::Graphic),
+    MathInline(crate::MathInline),
+    Graphic {
+        graphic: crate::Graphic,
+        code_language: Option<SharedString>,
+    },
     Details(crate::Details),
     Footnote {
         marker: ListMarker,
@@ -76,7 +80,7 @@ impl Contribution {
         matches!(
             self,
             Contribution::Paragraph(_)
-                | Contribution::Graphic(_)
+                | Contribution::Graphic { .. }
                 | Contribution::Details(_)
                 | Contribution::Alert(_)
                 | Contribution::DefinitionList
@@ -99,6 +103,7 @@ impl Contribution {
 
 #[derive(Default)]
 struct Compilation {
+    inline_math: Vec<InlineMathSpan>,
     cells: HashMap<NodeId, Arc<Projection>>,
     footnote: bool,
     anchors: Vec<crate::AnchorSpan>,
@@ -362,14 +367,27 @@ impl Registry {
         registry.register::<crate::Image>(|image| Ok(Contribution::Image(image.clone())));
         #[cfg(feature = "mermaid")]
         registry.register::<crate::Mermaid>(|value| {
-            Ok(Contribution::Graphic(crate::Graphic::Mermaid(
-                value.clone(),
-            )))
+            Ok(Contribution::Graphic {
+                graphic: crate::Graphic::Mermaid(value.clone()),
+                code_language: None,
+            })
+        });
+        #[cfg(feature = "mermaid")]
+        registry.register::<crate::MermaidCodeBlock>(|value| {
+            Ok(Contribution::Graphic {
+                graphic: crate::Graphic::Mermaid(crate::Mermaid(value.0.clone())),
+                code_language: Some("mermaid".into()),
+            })
         });
         #[cfg(feature = "math")]
         registry.register::<crate::MathBlock>(|value| {
-            Ok(Contribution::Graphic(crate::Graphic::Math(value.clone())))
+            Ok(Contribution::Graphic {
+                graphic: crate::Graphic::Math(value.clone()),
+                code_language: None,
+            })
         });
+        #[cfg(feature = "math")]
+        registry.register::<crate::MathInline>(|value| Ok(Contribution::MathInline(value.clone())));
         let quote_style = theme.quote.clone();
         registry.register::<crate::BlockQuote>(move |_| {
             Ok(Contribution::BlockQuote(quote_style.clone()))
@@ -488,6 +506,7 @@ impl Registry {
             *self.highlights.borrow_mut() = output.highlights;
         }
         let mut projection = Projection {
+            inline_math: output.inline_math,
             cells: output.cells,
             anchors: output.anchors,
             text: output.text.into(),
@@ -541,6 +560,12 @@ impl Registry {
                 let start = output.start_block();
                 output.text.push_str(&body.text);
                 output
+                    .inline_math
+                    .extend(body.inline_math.iter().cloned().map(|mut span| {
+                        span.range = start + span.range.start..start + span.range.end;
+                        span
+                    }));
+                output
                     .anchors
                     .extend(body.anchors.iter().cloned().map(|mut anchor| {
                         anchor.offset += start;
@@ -561,6 +586,7 @@ impl Registry {
                 #[cfg(feature = "syntax-highlighting")]
                 output.highlights.extend(body.highlights);
                 let mut projection = Projection {
+                    inline_math: body.inline_math,
                     cells: body.cells,
                     anchors: body.anchors,
                     text: body.text.into(),
@@ -614,15 +640,21 @@ impl Registry {
                 }
                 output.indent -= 1;
             }
-            leaf @ (Contribution::Rule | Contribution::Image(_) | Contribution::Graphic(_)) => {
+            leaf @ (Contribution::Rule | Contribution::Image(_) | Contribution::Graphic { .. }) => {
                 if !node.children.is_empty() {
                     bail!("leaf block {id:?} cannot have children");
                 }
                 let start = output.start_block();
                 let kind = match leaf {
-                    Contribution::Graphic(graphic) => {
+                    Contribution::Graphic {
+                        graphic,
+                        code_language,
+                    } => {
                         output.text.push_str(graphic.source());
-                        BlockKind::Graphic(graphic)
+                        BlockKind::Graphic {
+                            graphic,
+                            code_language,
+                        }
                     }
                     Contribution::Image(image) => {
                         output.text.push_str(&image.alt);
@@ -721,6 +753,25 @@ impl Registry {
             }
             Contribution::TableRow { .. } | Contribution::TableCell(_) => {
                 bail!("table row or cell {id:?} outside its table parent");
+            }
+            Contribution::MathInline(value) => {
+                if !node.children.is_empty() {
+                    bail!("inline formula {id:?} cannot have children");
+                }
+                let start = output.text.len();
+                output.text.push_str(&value.0);
+                let range = start..output.text.len();
+                output.inline_math.push(InlineMathSpan {
+                    node: id,
+                    range: range.clone(),
+                    formula: value,
+                });
+                output.spans.push(TextSpan {
+                    node: id,
+                    range,
+                    style: inherited.highlight,
+                    font_family: inherited.font_family,
+                });
             }
             Contribution::Text(value, style) => {
                 if !node.children.is_empty() {
@@ -969,6 +1020,12 @@ impl Registry {
                 }
                 output.text.push_str(&content.text);
                 output
+                    .inline_math
+                    .extend(content.inline_math.iter().cloned().map(|mut span| {
+                        span.range = cell_start + span.range.start..cell_start + span.range.end;
+                        span
+                    }));
+                output
                     .spans
                     .extend(content.spans.iter().cloned().map(|mut span| {
                         span.range = cell_start + span.range.start..cell_start + span.range.end;
@@ -989,6 +1046,7 @@ impl Registry {
                 #[cfg(feature = "syntax-highlighting")]
                 output.highlights.extend(content.highlights);
                 let mut projection = Projection {
+                    inline_math: content.inline_math,
                     cells: content.cells,
                     anchors: content.anchors,
                     text: content.text.into(),
@@ -1036,6 +1094,7 @@ pub struct TextSpan {
 /// Immutable text and source mapping, compiled outside the paint path.
 #[derive(Default, Debug)]
 pub struct Projection {
+    pub(crate) inline_math: Vec<InlineMathSpan>,
     cells: HashMap<NodeId, Arc<Projection>>,
     anchors: Vec<crate::AnchorSpan>,
     text: SharedString,
@@ -1043,6 +1102,13 @@ pub struct Projection {
     links: Vec<LinkSpan>,
     blocks: Vec<BlockSpan>,
     pub(crate) parts: Vec<RenderPart>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct InlineMathSpan {
+    pub node: NodeId,
+    pub range: Range<usize>,
+    pub formula: crate::MathInline,
 }
 
 #[derive(Debug)]
@@ -1087,7 +1153,11 @@ pub struct BlockSpan {
 
 #[derive(Clone, Debug)]
 pub enum BlockKind {
-    Graphic(crate::Graphic),
+    Graphic {
+        graphic: crate::Graphic,
+        /// A code header and surface are present only for a rendered code block.
+        code_language: Option<SharedString>,
+    },
     Details {
         details: crate::Details,
         body: Arc<Projection>,
@@ -1142,6 +1212,16 @@ impl Projection {
                     && candidate.start <= range.end
         };
         Arc::new(Self {
+            inline_math: self
+                .inline_math
+                .iter()
+                .filter(|span| span.range.start >= range.start && span.range.end <= range.end)
+                .cloned()
+                .map(|mut span| {
+                    span.range = span.range.start - range.start..span.range.end - range.start;
+                    span
+                })
+                .collect(),
             cells: HashMap::new(),
             anchors: self
                 .anchors
@@ -1183,7 +1263,7 @@ impl Projection {
                     !matches!(
                         block.kind,
                         BlockKind::Table(_)
-                            | BlockKind::Graphic(_)
+                            | BlockKind::Graphic { .. }
                             | BlockKind::Rule
                             | BlockKind::Image(_)
                             | BlockKind::Alert { .. }
@@ -1206,7 +1286,7 @@ impl Projection {
             matches!(
                 block.kind,
                 BlockKind::Table(_)
-                    | BlockKind::Graphic(_)
+                    | BlockKind::Graphic { .. }
                     | BlockKind::Rule
                     | BlockKind::Image(_)
                     | BlockKind::Alert { .. }
@@ -1221,7 +1301,7 @@ impl Projection {
             if !matches!(
                 block.kind,
                 BlockKind::Table(_)
-                    | BlockKind::Graphic(_)
+                    | BlockKind::Graphic { .. }
                     | BlockKind::Rule
                     | BlockKind::Image(_)
                     | BlockKind::Alert { .. }

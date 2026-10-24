@@ -5,6 +5,8 @@ use gpui::{Hsla, rgb, rgba};
 /// `RichText::theme` when rendering. Changing inline colors requires recompilation.
 #[derive(Clone)]
 pub struct RichTextTheme {
+    pub math: crate::MathStyle,
+    pub mermaid: crate::MermaidTheme,
     pub details: crate::DetailsStyle,
     pub footnote: crate::FootnoteStyle,
     /// Colors in Note, Tip, Important, Warning, Caution order.
@@ -30,6 +32,8 @@ impl Default for RichTextTheme {
 impl RichTextTheme {
     pub fn light() -> Self {
         Self {
+            math: crate::MathStyle::default(),
+            mermaid: crate::MermaidTheme::Light,
             details: crate::DetailsStyle {
                 background: rgb(0xffffff).into(),
                 header_background: rgb(0xf6f8fa).into(),
@@ -67,6 +71,8 @@ impl RichTextTheme {
         text.mark.highlight.background_color = Some(rgba(0xe5b70038).into());
         Self {
             alerts: Self::alert_colors([0x79b8ff, 0x56d6a0, 0xc4a0f5, 0xeac56b, 0xff8d95], 0.08),
+            math: crate::MathStyle::default(),
+            mermaid: crate::MermaidTheme::Dark,
             details: crate::DetailsStyle {
                 background: rgb(0x161b22).into(),
                 header_background: rgb(0x1b2430).into(),

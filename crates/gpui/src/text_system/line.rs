@@ -369,6 +369,19 @@ pub struct WrappedLine {
 }
 
 impl WrappedLine {
+    pub(crate) fn with_inline_boxes(
+        mut self,
+        boxes: &[crate::TextInlineBox],
+        max_wraps: Option<usize>,
+    ) -> Self {
+        let mut layout = self.layout.with_inline_boxes(&self.text, boxes);
+        if let Some(max) = max_wraps {
+            layout.wrap_boundaries.truncate(max);
+        }
+        self.layout = Arc::new(layout);
+        self
+    }
+
     pub(crate) fn with_collapsed_prefix(
         mut self,
         prefix_len: usize,

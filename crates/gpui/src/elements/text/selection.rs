@@ -20,6 +20,7 @@ pub(super) struct TextSelection {
     head: usize,
     dragging: bool,
     dragged: bool,
+    revision: u64,
 }
 
 impl TextSelection {
@@ -31,14 +32,18 @@ impl TextSelection {
             head: 0,
             dragging: false,
             dragged: false,
+            revision: 0,
         }
     }
 
-    pub fn sync_text(&mut self, text: SharedString, preserve: bool) -> bool {
-        if self.text != text {
+    pub fn sync_text(&mut self, text: SharedString, preserve: bool, revision: u64) -> bool {
+        if self.text != text || self.revision != revision {
             let end = self.range().end;
-            let keep =
-                preserve && !self.range().is_empty() && text.get(..end) == self.text.get(..end);
+            let keep = preserve
+                && self.revision == revision
+                && !self.range().is_empty()
+                && text.get(..end) == self.text.get(..end);
+            self.revision = revision;
             self.text = text;
             if keep {
                 return true;

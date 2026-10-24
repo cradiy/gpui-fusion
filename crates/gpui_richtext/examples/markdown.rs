@@ -10,6 +10,8 @@ struct Preview {
     scroll: gpui::ScrollHandle,
     task: Option<gpui::Task<()>>,
     error: Option<String>,
+    offset: usize,
+    paused: bool,
 }
 
 impl Preview {
@@ -17,12 +19,25 @@ impl Preview {
         self.stream.clear();
         self.scroll.set_offset(Default::default());
         self.error = None;
+        self.offset = 0;
+        self.resume(cx);
+    }
+
+    fn pause(&mut self, cx: &mut Context<Self>) {
+        self.task.take();
+        self.paused = true;
+        cx.notify();
+    }
+
+    fn resume(&mut self, cx: &mut Context<Self>) {
+        self.paused = false;
         let source = self.source.clone();
+        let offset = self.offset;
         self.task = Some(cx.spawn(async move |view, cx| {
-            let mut start = 0;
-            for end in source
+            let mut start = offset;
+            for end in source[offset..]
                 .char_indices()
-                .map(|(offset, _)| offset)
+                .map(|(index, _)| index + offset)
                 .skip(1)
                 .step_by(8)
                 .chain(std::iter::once(source.len()))
@@ -37,6 +52,7 @@ impl Preview {
                         .stream
                         .push_str(&source[start..end])
                         .and_then(|_| view.stream.flush());
+                    view.offset = end;
                     view.error = result.err().map(|error| error.to_string());
                     if end == source.len() {
                         if let Err(error) = view.stream.finish() {
@@ -59,6 +75,10 @@ impl Preview {
 }
 impl Render for Preview {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let at_bottom = (self.scroll.offset().y + self.scroll.max_offset().y).abs() < px(2.);
+        if at_bottom {
+            self.scroll.scroll_to_bottom();
+        }
         div()
             .size_full()
             .bg(rgb(0x0d1117))
@@ -72,11 +92,15 @@ impl Render for Preview {
                     .max_w(px(760.))
                     .mx_auto()
                     .flex()
+                    .flex_wrap()
+                    .gap_2()
                     .items_center()
                     .justify_between()
                     .text_color(rgb(0x9daec2))
                     .child(self.error.clone().unwrap_or_else(|| {
-                        if self.stream.is_finished() {
+                        if self.paused {
+                            "Paused"
+                        } else if self.stream.is_finished() {
                             "Complete"
                         } else {
                             "Streaming Markdown…"
@@ -85,14 +109,55 @@ impl Render for Preview {
                     }))
                     .child(
                         div()
-                            .id("replay")
-                            .px_3()
-                            .py_1()
-                            .rounded_md()
-                            .bg(rgb(0x263344))
-                            .cursor_pointer()
-                            .child("Replay")
-                            .on_click(cx.listener(|view, _, _, cx| view.replay(cx))),
+                            .flex()
+                            .flex_wrap()
+                            .gap_2()
+                            .when(!at_bottom, |controls| {
+                                controls.child(
+                                    div()
+                                        .id("latest")
+                                        .px_3()
+                                        .py_1()
+                                        .rounded_md()
+                                        .bg(rgb(0x263344))
+                                        .cursor_pointer()
+                                        .child("Latest")
+                                        .on_click(cx.listener(|view, _, _, cx| {
+                                            view.scroll.scroll_to_bottom();
+                                            cx.notify();
+                                        })),
+                                )
+                            })
+                            .when(!self.stream.is_finished(), |controls| {
+                                controls.child(
+                                    div()
+                                        .id("pause")
+                                        .px_3()
+                                        .py_1()
+                                        .rounded_md()
+                                        .bg(rgb(0x263344))
+                                        .cursor_pointer()
+                                        .child(if self.paused { "Resume" } else { "Pause" })
+                                        .on_click(cx.listener(|view, _, _, cx| {
+                                            if view.paused {
+                                                view.resume(cx);
+                                            } else {
+                                                view.pause(cx);
+                                            }
+                                        })),
+                                )
+                            })
+                            .child(
+                                div()
+                                    .id("replay")
+                                    .px_3()
+                                    .py_1()
+                                    .rounded_md()
+                                    .bg(rgb(0x263344))
+                                    .cursor_pointer()
+                                    .child("Replay")
+                                    .on_click(cx.listener(|view, _, _, cx| view.replay(cx))),
+                            ),
                     ),
             )
             .child(
@@ -102,6 +167,7 @@ impl Render for Preview {
                     .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
+                    .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()))
                     .child(
                         self.stream
                             .view("markdown")
@@ -178,6 +244,8 @@ fn main() {
                         scroll: gpui::ScrollHandle::new(),
                         task: None,
                         error: None,
+                        offset: 0,
+                        paused: false,
                     };
                     view.replay(cx);
                     view
@@ -186,4 +254,44 @@ fn main() {
             .unwrap();
             cx.activate(true);
         });
+}
+
+#[gpui::test]
+fn pause_and_resume_do_not_drop_or_duplicate_streamed_text(cx: &mut gpui::TestAppContext) {
+    let source: Arc<str> = "## Telemetry\n\n**温度** arrives in several packets.\n".into();
+    let expected = source.clone();
+    let preview = cx.new(|_| Preview {
+        stream: markdown::MarkdownStream::new(Registry::with_standard_nodes()),
+        source,
+        scroll: gpui::ScrollHandle::new(),
+        task: None,
+        error: None,
+        offset: 0,
+        paused: false,
+    });
+    preview.update(cx, |view, cx| view.replay(cx));
+    cx.run_until_parked();
+    cx.executor().advance_clock(Duration::from_millis(45));
+    cx.run_until_parked();
+    let paused_at = preview.update(cx, |view, cx| {
+        assert!(view.offset > 0 && view.offset < view.source.len());
+        view.pause(cx);
+        view.stream.source().to_owned()
+    });
+    cx.executor().advance_clock(Duration::from_secs(2));
+    cx.run_until_parked();
+    preview.update(cx, |view, cx| {
+        assert_eq!(view.stream.source(), paused_at);
+        view.resume(cx);
+    });
+    cx.run_until_parked();
+    for _ in 0..expected.chars().count() {
+        cx.executor().advance_clock(Duration::from_millis(45));
+        cx.run_until_parked();
+    }
+    preview.update(cx, |view, _| {
+        assert_eq!(view.stream.source(), expected.as_ref());
+        assert!(view.stream.is_finished());
+        assert!(view.error.is_none());
+    });
 }

@@ -60,6 +60,8 @@ pub enum Contribution {
 
 #[derive(Default)]
 struct Compilation {
+    #[cfg(feature = "syntax-highlighting")]
+    highlights: HashMap<NodeId, Arc<crate::syntax::CachedHighlight>>,
     indent: usize,
     quote_depth: usize,
     quote_path: Vec<NodeId>,
@@ -129,15 +131,59 @@ impl Compilation {
 
 type Resolver = Box<dyn Fn(&dyn Any) -> Result<Contribution>>;
 
+#[cfg(all(test, feature = "syntax-highlighting"))]
+mod highlight_cache_tests {
+    use super::*;
+    use crate::compose::*;
+
+    #[test]
+    fn unchanged_code_is_reused_and_removed_code_is_released() {
+        let registry = Registry::with_standard_nodes();
+        let document = Document::from_roots([node(
+            CodeBlock::new("let enabled = false;\n").language("rust"),
+        )])
+        .unwrap();
+        registry.compile(&document).unwrap();
+        let original = registry
+            .highlights
+            .borrow()
+            .values()
+            .next()
+            .unwrap()
+            .clone();
+        registry.compile(&document).unwrap();
+        assert!(Arc::ptr_eq(
+            &original,
+            registry.highlights.borrow().values().next().unwrap()
+        ));
+        let weak = Arc::downgrade(&original);
+        drop(original);
+        registry
+            .compile(&Document::from_roots([paragraph().child(text("No code remains."))]).unwrap())
+            .unwrap();
+        assert!(weak.upgrade().is_none());
+        assert!(registry.highlights.borrow().is_empty());
+        registry.compile(&document).unwrap();
+        let weak = Arc::downgrade(registry.highlights.borrow().values().next().unwrap());
+        registry.clear_highlight_cache();
+        assert!(weak.upgrade().is_none());
+    }
+}
+
 /// View-specific typed node resolution. Unknown payloads are errors.
 ///
 /// Resolving a document creates an immutable projection; replacing registrations
 /// affects only subsequently compiled projections.
+/// Built-in syntax highlighting retains only the last successful document's
+/// code blocks. Unchanged blocks reuse colors; growing blocks resume after the
+/// last complete source line.
 #[derive(Default)]
 pub struct Registry {
     resolvers: HashMap<TypeId, Resolver>,
     #[cfg(feature = "syntax-highlighting")]
     highlighter: Option<Arc<crate::syntax::SyntaxHighlighter>>,
+    #[cfg(feature = "syntax-highlighting")]
+    highlights: std::cell::RefCell<HashMap<NodeId, Arc<crate::syntax::CachedHighlight>>>,
 }
 
 impl Registry {
@@ -147,7 +193,13 @@ impl Registry {
         highlighter: Option<Arc<crate::syntax::SyntaxHighlighter>>,
     ) -> Self {
         self.highlighter = highlighter;
+        self.highlights.get_mut().clear();
         self
+    }
+    /// Release code highlight results retained from the last successful compilation.
+    #[cfg(feature = "syntax-highlighting")]
+    pub fn clear_highlight_cache(&self) {
+        self.highlights.borrow_mut().clear();
     }
     pub fn new() -> Self {
         Self::default()
@@ -265,6 +317,10 @@ impl Registry {
         let mut output = Compilation::default();
         for root in document.roots.iter() {
             self.append(document, *root, true, InlineStyle::default(), &mut output)?;
+        }
+        #[cfg(feature = "syntax-highlighting")]
+        {
+            *self.highlights.borrow_mut() = output.highlights;
         }
         let mut projection = Projection {
             text: output.text.into(),
@@ -467,7 +523,14 @@ impl Registry {
                         && let Some(language) = &block.language
                         && let Some(highlighter) = &self.highlighter
                     {
-                        block.highlights = highlighter.highlight(&block.text, language)?;
+                        let previous = self.highlights.borrow().get(&id).cloned();
+                        let highlights = highlighter.highlight_cached(
+                            block.text.clone(),
+                            language,
+                            previous.as_ref(),
+                        )?;
+                        block.highlights = highlights.ranges.clone();
+                        output.highlights.insert(id, highlights);
                     }
                     block
                 };

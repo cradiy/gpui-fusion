@@ -1254,6 +1254,7 @@ pub struct InteractiveText {
     clickable_ranges: Vec<Range<usize>>,
     selection_color: Option<crate::Hsla>,
     preserve_selection_on_update: bool,
+    selection_revision: u64,
 }
 
 struct InteractiveTextClickEvent {
@@ -1285,6 +1286,7 @@ impl InteractiveText {
             clickable_ranges: Vec::new(),
             selection_color: None,
             preserve_selection_on_update: false,
+            selection_revision: 0,
         }
     }
 
@@ -1303,6 +1305,12 @@ impl InteractiveText {
     /// Updates affecting that prefix reset the selection. Disabled by default.
     pub fn preserve_selection_on_update(mut self, preserve: bool) -> Self {
         self.preserve_selection_on_update = preserve;
+        self
+    }
+
+    /// Change this value to reset selection even when the displayed text is unchanged.
+    pub fn selection_revision(mut self, revision: u64) -> Self {
+        self.selection_revision = revision;
         self
     }
 
@@ -1397,10 +1405,11 @@ impl Element for InteractiveText {
                             .get_or_insert_with(|| Rc::new(RefCell::new(TextSelection::new(cx))));
                         let displayed_text =
                             self.text.layout.0.borrow().as_ref().unwrap().text.clone();
-                        if selection
-                            .borrow_mut()
-                            .sync_text(displayed_text, self.preserve_selection_on_update)
-                        {
+                        if selection.borrow_mut().sync_text(
+                            displayed_text,
+                            self.preserve_selection_on_update,
+                            self.selection_revision,
+                        ) {
                             interactive_state.mouse_down_index.set(None);
                         }
                         window.set_focus_handle(&selection.borrow().focus, cx);

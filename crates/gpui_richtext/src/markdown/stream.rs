@@ -15,6 +15,7 @@ pub struct MarkdownStream {
     projection: Arc<Projection>,
     dirty: bool,
     finished: bool,
+    revision: u64,
 }
 
 impl MarkdownStream {
@@ -25,6 +26,7 @@ impl MarkdownStream {
             projection: Arc::default(),
             dirty: false,
             finished: false,
+            revision: 0,
         }
     }
 
@@ -69,10 +71,15 @@ impl MarkdownStream {
 
     /// Build a view retaining selections whose text prefix survives an update.
     pub fn view(&self, id: impl Into<gpui::ElementId>) -> RichText {
-        RichText::new(id, self.projection.clone()).preserve_selection_on_update(true)
+        RichText::new(id, self.projection.clone())
+            .preserve_selection_on_update(true)
+            .selection_revision(self.revision)
     }
 
     pub fn clear(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+        #[cfg(feature = "syntax-highlighting")]
+        self.registry.clear_highlight_cache();
         self.source.clear();
         self.projection = Arc::default();
         self.dirty = false;

@@ -137,4 +137,32 @@ fn published_suffix_updates_preserve_selection_but_prefix_changes_clear_it(
             .as_deref(),
         Some("unchanged")
     );
+    visual.simulate_keystrokes(&gpui::platform_shortcut("ctrl-a"));
+    visual.simulate_keystrokes(&gpui::platform_shortcut("ctrl-c"));
+    assert_ne!(
+        visual
+            .update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))
+            .as_deref(),
+        Some("unchanged")
+    );
+    window
+        .update(&mut visual.cx, |page, _, cx| {
+            let source = page.0.source().to_owned();
+            page.0.clear();
+            page.0.push_str(&source).unwrap();
+            page.0.finish().unwrap();
+            cx.notify();
+        })
+        .unwrap();
+    visual.update(|window, cx| {
+        window.draw(cx).clear();
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string("unchanged".into()));
+    });
+    visual.simulate_keystrokes(&gpui::platform_shortcut("ctrl-c"));
+    assert_eq!(
+        visual
+            .update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))
+            .as_deref(),
+        Some("unchanged")
+    );
 }

@@ -86,13 +86,24 @@ pub struct TextTheme {
     pub code_block: InlineStyle,
     pub link: InlineStyle,
     pub footnote_backlink: InlineStyle,
+    pub footnote: InlineStyle,
 }
 
 impl Default for TextTheme {
     fn default() -> Self {
         Self {
+            footnote: HighlightStyle {
+                color: Some(gpui::rgb(0x526174).into()),
+                ..Default::default()
+            }
+            .into(),
             footnote_backlink: HighlightStyle {
-                color: Some(gpui::rgb(0x64748b).into()),
+                color: Some(gpui::rgb(0x2563eb).into()),
+                underline: Some(UnderlineStyle {
+                    thickness: px(1.),
+                    color: None,
+                    wavy: false,
+                }),
                 ..Default::default()
             }
             .into(),

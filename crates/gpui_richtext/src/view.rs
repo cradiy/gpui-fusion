@@ -64,6 +64,7 @@ pub struct RichText {
     alert_styles: [crate::AlertStyle; 5],
     navigation: Option<Rc<std::cell::RefCell<AnchorPositions>>>,
     scroll_handle: Option<gpui::ScrollHandle>,
+    footnote_style: crate::FootnoteStyle,
 }
 
 impl RichText {
@@ -90,12 +91,14 @@ impl RichText {
             alert_styles: crate::RichTextTheme::light().alerts,
             navigation: None,
             scroll_handle: None,
+            footnote_style: crate::FootnoteStyle::default(),
         }
     }
 
     /// Apply surface colors; compile with the same theme's registry for inline colors.
     /// Subsequent styling calls can override individual values.
     pub fn theme(mut self, theme: &crate::RichTextTheme) -> Self {
+        self = self.footnote_style(theme.footnote);
         self.alert_styles = theme.alerts.clone();
         self.selection = theme.selection;
         self.quote_border_color = theme.quote_border;
@@ -113,6 +116,17 @@ impl RichText {
     /// Scroll this enclosing viewport when an internal document link is activated.
     pub fn scroll_handle(mut self, handle: &gpui::ScrollHandle) -> Self {
         self.scroll_handle = Some(handle.clone());
+        self
+    }
+
+    /// Nonpositive or nonfinite metrics retain their existing values.
+    pub fn footnote_style(mut self, style: crate::FootnoteStyle) -> Self {
+        if style.font_scale.is_finite() && style.font_scale > 0. {
+            self.footnote_style.font_scale = style.font_scale;
+        }
+        if style.line_height.is_finite() && style.line_height > 0. {
+            self.footnote_style.line_height = style.line_height;
+        }
         self
     }
 
@@ -250,6 +264,12 @@ impl RenderOnce for RichText {
             .filter_map(|block| {
                 if let BlockKind::ListItem { marker } = block.kind {
                     let mut marker_style = marker_text_style.clone();
+                    if block.footnote {
+                        marker_style.font_size =
+                            (marker_style.font_size.to_pixels(window.rem_size())
+                                * self.footnote_style.font_scale)
+                                .into();
+                    }
                     if let Some(span) = self
                         .projection
                         .spans()
@@ -355,10 +375,24 @@ impl RenderOnce for RichText {
                 let body_size = marker_text_style.font_size.to_pixels(window.rem_size());
                 let mut typography = Vec::new();
                 for block in self.projection.blocks() {
-                    if let BlockKind::Heading { level } = block.kind {
-                        let style = self.heading_styles[level.index()];
-                        let font_size = body_size * style.font_scale;
-                        let line_height = font_size * style.line_height;
+                    let metrics = match block.kind {
+                        BlockKind::Heading { level } => {
+                            let style = self.heading_styles[level.index()];
+                            let scale = if block.footnote {
+                                self.footnote_style.font_scale
+                            } else {
+                                1.
+                            };
+                            Some((body_size * style.font_scale * scale, style.line_height))
+                        }
+                        _ if block.footnote => Some((
+                            body_size * self.footnote_style.font_scale,
+                            self.footnote_style.line_height,
+                        )),
+                        _ => None,
+                    };
+                    if let Some((font_size, line_ratio)) = metrics {
+                        let line_height = font_size * line_ratio;
                         for start in std::iter::once(block.range.start).chain(
                             self.projection.text()[block.range.clone()]
                                 .match_indices('\n')
@@ -906,6 +940,7 @@ impl RichText {
                         surface.child(self.block_surface(content, block.indent, block.quote_depth));
                 }
                 crate::projection::RenderPart::Table {
+                    footnote,
                     indent,
                     quote_depth,
                     node,
@@ -994,6 +1029,13 @@ impl RichText {
                                     self.fragment(cell)
                                         .w_full()
                                         .min_h(line_height)
+                                        .when(*footnote, |view| {
+                                            let size =
+                                                text_style.font_size.to_pixels(window.rem_size())
+                                                    * self.footnote_style.font_scale;
+                                            view.text_size(size)
+                                                .line_height(size * self.footnote_style.line_height)
+                                        })
                                         .text_align(column.align),
                                 ),
                             );

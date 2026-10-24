@@ -20,6 +20,10 @@ pub struct Paragraph;
 
 /// The semantic contribution of a registered payload type.
 pub enum Contribution {
+    Footnote {
+        marker: ListMarker,
+        style: InlineStyle,
+    },
     Anchor(SharedString),
     Alert(crate::Alert),
     DefinitionList,
@@ -66,6 +70,7 @@ pub enum Contribution {
 
 #[derive(Default)]
 struct Compilation {
+    footnote: bool,
     anchors: Vec<crate::AnchorSpan>,
     #[cfg(feature = "syntax-highlighting")]
     highlights: HashMap<NodeId, Arc<crate::syntax::CachedHighlight>>,
@@ -123,6 +128,7 @@ impl Compilation {
             push(offset..block.text.len(), HighlightStyle::default());
         }
         self.blocks.push(BlockSpan {
+            footnote: self.footnote,
             indent: self.indent,
             quote_depth: self.quote_depth,
             quote_path: self.quote_path.clone(),
@@ -225,10 +231,11 @@ impl Registry {
         }
         registry.register::<crate::Rule>(|_| Ok(Contribution::Rule));
         registry.register::<crate::Anchor>(|anchor| Ok(Contribution::Anchor(anchor.0.clone())));
-        registry.register::<crate::Footnote>(|note| {
-            Ok(Contribution::ListEntry {
+        let footnote_style = theme.footnote.clone();
+        registry.register::<crate::Footnote>(move |note| {
+            Ok(Contribution::Footnote {
                 marker: ListMarker::Number(note.number),
-                style: InlineStyle::default(),
+                style: footnote_style.clone(),
             })
         });
         let anchor_style = theme.link.clone();
@@ -405,6 +412,7 @@ impl Registry {
                     | Contribution::Image(_)
                     | Contribution::BlockQuote(_)
                     | Contribution::ListEntry { .. }
+                    | Contribution::Footnote { .. }
                     | Contribution::Table(_)
                     | Contribution::Heading { .. }
                     | Contribution::Quote(_)
@@ -418,6 +426,7 @@ impl Registry {
                 if root { "block" } else { "inline" }
             );
         }
+        let is_footnote = matches!(contribution, Contribution::Footnote { .. });
         match contribution {
             Contribution::Anchor(name) => {
                 if name.is_empty() {
@@ -432,7 +441,10 @@ impl Registry {
                 }
             }
             Contribution::Alert(alert) => {
-                let mut body = Compilation::default();
+                let mut body = Compilation {
+                    footnote: output.footnote,
+                    ..Default::default()
+                };
                 for child in &node.children {
                     self.append(document, *child, true, inherited.clone(), &mut body)?;
                 }
@@ -468,6 +480,7 @@ impl Registry {
                 };
                 projection.prepare_parts();
                 output.blocks.push(BlockSpan {
+                    footnote: output.footnote,
                     node: id,
                     range: start..output.text.len(),
                     indent: output.indent,
@@ -520,6 +533,7 @@ impl Registry {
                     _ => BlockKind::Rule,
                 };
                 output.blocks.push(BlockSpan {
+                    footnote: output.footnote,
                     node: id,
                     range: start..output.text.len(),
                     kind,
@@ -537,7 +551,10 @@ impl Registry {
                 output.quote_depth -= 1;
                 output.quote_path.pop();
             }
-            Contribution::ListEntry { marker, style } => {
+            Contribution::ListEntry { marker, style }
+            | Contribution::Footnote { marker, style } => {
+                let previous_footnote = output.footnote;
+                output.footnote |= is_footnote;
                 let style = inherited.inherit(&style);
                 let start = output.start_block();
                 output.text.push_str(&marker.text());
@@ -570,6 +587,7 @@ impl Registry {
                     }
                 }
                 output.blocks.push(BlockSpan {
+                    footnote: output.footnote,
                     node: id,
                     range: start..output.text.len(),
                     kind: BlockKind::ListItem { marker },
@@ -586,6 +604,7 @@ impl Registry {
                     self.append(document, *child, true, style.clone(), output)?;
                 }
                 output.indent -= 1;
+                output.footnote = previous_footnote;
             }
             Contribution::Table(table) => {
                 self.append_table(document, id, table, inherited, output)?
@@ -648,6 +667,7 @@ impl Registry {
                     self.append(document, *child, false, style.clone(), output)?;
                 }
                 output.blocks.push(BlockSpan {
+                    footnote: output.footnote,
                     indent: output.indent,
                     quote_depth: output.quote_depth,
                     quote_path: output.quote_path.clone(),
@@ -834,6 +854,7 @@ impl Registry {
             });
         }
         output.blocks.push(BlockSpan {
+            footnote: output.footnote,
             indent: output.indent,
             quote_depth: output.quote_depth,
             quote_path: output.quote_path.clone(),
@@ -885,6 +906,7 @@ pub(crate) enum RenderPart {
     Text(CellProjection),
     Embed(BlockSpan),
     Table {
+        footnote: bool,
         indent: usize,
         quote_depth: usize,
         node: NodeId,
@@ -896,6 +918,7 @@ pub(crate) enum RenderPart {
 /// A leaf block's range, excluding separators inserted between blocks.
 #[derive(Clone, Debug)]
 pub struct BlockSpan {
+    pub footnote: bool,
     pub indent: usize,
     pub quote_depth: usize,
     pub(crate) quote_path: Vec<NodeId>,
@@ -1044,6 +1067,7 @@ impl Projection {
             }
             if let BlockKind::Table(table) = &block.kind {
                 parts.push(RenderPart::Table {
+                    footnote: block.footnote,
                     indent: block.indent,
                     quote_depth: block.quote_depth,
                     node: block.node,

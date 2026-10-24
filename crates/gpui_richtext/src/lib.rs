@@ -5,7 +5,9 @@
 
 mod anchor;
 mod blocks;
-pub use anchor::{Anchor, AnchorLink, AnchorSpan, Footnote, FootnoteBacklink, LinkKind};
+pub use anchor::{
+    Anchor, AnchorLink, AnchorSpan, Footnote, FootnoteBacklink, FootnoteStyle, LinkKind,
+};
 mod code_block;
 pub mod compose;
 mod containers;

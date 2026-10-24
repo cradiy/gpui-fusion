@@ -13,6 +13,22 @@ pub struct Footnote {
     pub number: u32,
 }
 
+/// Footnote metrics relative to the inherited body font size.
+#[derive(Clone, Copy)]
+pub struct FootnoteStyle {
+    pub font_scale: f32,
+    pub line_height: f32,
+}
+
+impl Default for FootnoteStyle {
+    fn default() -> Self {
+        Self {
+            font_scale: 0.875,
+            line_height: 1.55,
+        }
+    }
+}
+
 /// A return link to a footnote's reference, with separate theme styling.
 pub struct FootnoteBacklink {
     pub target: SharedString,

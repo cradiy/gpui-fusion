@@ -43,16 +43,9 @@ pub(super) fn convert(mut items: Vec<Item>) -> Result<Vec<NodeTree>> {
                 target: format!("footnote-ref-{number}-{occurrence}").into(),
             })
             .child(text(if counts[&order[index]].1 == 1 {
-                "↑".to_owned()
+                "↩".to_owned()
             } else {
-                let digits: String = occurrence
-                    .to_string()
-                    .bytes()
-                    .map(|digit| {
-                        ['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'][(digit - b'0') as usize]
-                    })
-                    .collect();
-                format!("↑{digits}")
+                format!("↩{occurrence}")
             }))
         });
         if body

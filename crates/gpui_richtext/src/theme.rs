@@ -5,6 +5,8 @@ use gpui::{Hsla, rgb, rgba};
 /// `RichText::theme` when rendering. Changing inline colors requires recompilation.
 #[derive(Clone)]
 pub struct RichTextTheme {
+    /// Colors in Note, Tip, Important, Warning, Caution order.
+    pub alerts: [crate::AlertStyle; 5],
     pub text: TextTheme,
     pub foreground: Hsla,
     pub background: Hsla,
@@ -26,6 +28,7 @@ impl Default for RichTextTheme {
 impl RichTextTheme {
     pub fn light() -> Self {
         Self {
+            alerts: Self::alert_colors([0x2563eb, 0x16805d, 0x8250c4, 0x9a6700, 0xcf353d], 0.06),
             text: TextTheme::default(),
             foreground: rgb(0x273444).into(),
             background: rgb(0xffffff).into(),
@@ -50,6 +53,7 @@ impl RichTextTheme {
         text.code.highlight.background_color = Some(rgb(0x283343).into());
         text.mark.highlight.background_color = Some(rgba(0xe5b70038).into());
         Self {
+            alerts: Self::alert_colors([0x79b8ff, 0x56d6a0, 0xc4a0f5, 0xeac56b, 0xff8d95], 0.08),
             text,
             foreground: rgb(0xdce4ee).into(),
             background: rgb(0x161b22).into(),
@@ -81,6 +85,38 @@ impl RichTextTheme {
             #[cfg(feature = "syntax-highlighting")]
             syntax: crate::syntax::SyntaxTheme::Dark,
         }
+    }
+
+    fn alert_colors(colors: [u32; 5], opacity: f32) -> [crate::AlertStyle; 5] {
+        use gpui_icons::GpuiIcons;
+        let icons = [
+            GpuiIcons::LucideInfo,
+            GpuiIcons::LucideLightbulb,
+            GpuiIcons::LucideCircleAlert,
+            GpuiIcons::LucideTriangleAlert,
+            GpuiIcons::LucideOctagonAlert,
+        ];
+        std::array::from_fn(|index| {
+            let accent: Hsla = rgb(colors[index]).into();
+            crate::AlertStyle {
+                accent,
+                header_background: Hsla {
+                    a: opacity,
+                    ..accent
+                },
+                header_border: Hsla { a: 0.16, ..accent },
+                header_icon: Some(icons[index].path().into()),
+                background: Hsla {
+                    a: opacity,
+                    ..accent
+                },
+                title: None,
+            }
+        })
+    }
+
+    pub fn alert_mut(&mut self, kind: crate::AlertKind) -> &mut crate::AlertStyle {
+        &mut self.alerts[kind.index()]
     }
 
     /// Register standard nodes and the feature-enabled syntax highlighter.

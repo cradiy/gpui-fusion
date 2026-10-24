@@ -71,6 +71,7 @@ impl Link {
 /// recompiling with a different theme does not mutate existing projections.
 #[derive(Clone, Debug)]
 pub struct TextTheme {
+    pub definition_term: InlineStyle,
     pub table_header: InlineStyle,
     pub table_cell: InlineStyle,
     pub headings: [InlineStyle; 6],
@@ -89,6 +90,7 @@ pub struct TextTheme {
 impl Default for TextTheme {
     fn default() -> Self {
         Self {
+            definition_term: HighlightStyle::from(FontWeight::SEMIBOLD).into(),
             table_header: HighlightStyle::from(FontWeight::SEMIBOLD).into(),
             table_cell: InlineStyle::default(),
             headings: std::array::from_fn(|index| {

@@ -63,6 +63,22 @@ pub fn quote() -> NodeTree {
 pub fn block_quote() -> NodeTree {
     node(crate::BlockQuote)
 }
+
+pub fn alert(kind: crate::AlertKind) -> NodeTree {
+    node(crate::Alert::new(kind))
+}
+
+pub fn definition_list() -> NodeTree {
+    node(crate::DefinitionList)
+}
+
+pub fn definition_term() -> NodeTree {
+    node(crate::DefinitionTerm)
+}
+
+pub fn definition_description() -> NodeTree {
+    node(crate::DefinitionDescription)
+}
 pub fn list_entry(marker: crate::ListMarker) -> NodeTree {
     node(crate::ListEntry(marker))
 }

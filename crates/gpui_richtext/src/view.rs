@@ -39,7 +39,7 @@ type ImageResolver = Rc<dyn Fn(&crate::Image) -> gpui::ImageSource>;
 ///
 /// Use a stable ID and reuse the projection between frames. Surface and inherited
 /// typography use `Styled`. Selection uses GPUI's read-only system integration.
-/// Table cells and surrounding text sections have independent selections.
+/// Table cells, alert bodies and surrounding text sections have independent selections.
 #[derive(Clone, IntoElement)]
 pub struct RichText {
     id: ElementId,
@@ -60,6 +60,7 @@ pub struct RichText {
     table_style: crate::TableStyle,
     heading_styles: [crate::HeadingStyle; 6],
     image_source: Option<ImageResolver>,
+    alert_styles: [crate::AlertStyle; 5],
 }
 
 impl RichText {
@@ -83,18 +84,25 @@ impl RichText {
             table_style: crate::TableStyle::default(),
             heading_styles: crate::HeadingStyle::defaults(),
             image_source: None,
+            alert_styles: crate::RichTextTheme::light().alerts,
         }
     }
 
     /// Apply surface colors; compile with the same theme's registry for inline colors.
     /// Subsequent styling calls can override individual values.
     pub fn theme(mut self, theme: &crate::RichTextTheme) -> Self {
+        self.alert_styles = theme.alerts.clone();
         self.selection = theme.selection;
         self.quote_border_color = theme.quote_border;
         self.code_block_style = theme.code_block.clone();
         self.table_style = theme.table.clone();
         self.task_marker_style = theme.task_marker.clone();
         self.bg(theme.background).text_color(theme.foreground)
+    }
+
+    pub fn alert_style(mut self, kind: crate::AlertKind, style: crate::AlertStyle) -> Self {
+        self.alert_styles[kind.index()] = style;
+        self
     }
 
     pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
@@ -768,6 +776,54 @@ impl RichText {
                 }
                 crate::projection::RenderPart::Embed(block) => {
                     let content = match &block.kind {
+                        BlockKind::Alert { alert, body } => {
+                            let style = &self.alert_styles[alert.kind.index()];
+                            let title = alert.title.clone().or_else(|| style.title.clone());
+                            div()
+                                .w_full()
+                                .min_w_0()
+                                .border_l(gpui::px(3.))
+                                .border_color(style.accent)
+                                .bg(style.background)
+                                .rounded_r(gpui::px(6.))
+                                .overflow_hidden()
+                                .when_some(title, |view, title| {
+                                    view.child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .px(gpui::px(16.))
+                                            .py(gpui::px(8.))
+                                            .bg(style.header_background)
+                                            .border_b_1()
+                                            .border_color(style.header_border)
+                                            .text_color(style.accent)
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .when_some(style.header_icon.clone(), |header, icon| {
+                                                header.child(
+                                                    gpui::svg()
+                                                        .path(icon)
+                                                        .size(gpui::px(16.))
+                                                        .flex_shrink_0()
+                                                        .text_color(style.accent),
+                                                )
+                                            })
+                                            .child(div().min_w_0().child(title)),
+                                    )
+                                })
+                                .child(
+                                    div().px(gpui::px(16.)).py(gpui::px(8.)).child(
+                                        self.fragment(&crate::projection::CellProjection {
+                                            node: block.node,
+                                            offset: block.range.start,
+                                            projection: body.clone(),
+                                        })
+                                        .w_full(),
+                                    ),
+                                )
+                                .into_any_element()
+                        }
                         BlockKind::Rule => div()
                             .w_full()
                             .h(gpui::px(1.))

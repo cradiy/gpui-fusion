@@ -20,6 +20,10 @@ pub struct Paragraph;
 
 /// The semantic contribution of a registered payload type.
 pub enum Contribution {
+    Alert(crate::Alert),
+    DefinitionList,
+    DefinitionTerm(InlineStyle),
+    DefinitionDescription,
     Rule,
     Image(crate::Image),
     BlockQuote(InlineStyle),
@@ -217,6 +221,14 @@ impl Registry {
             registry.highlighter = Some(Arc::new(crate::syntax::SyntaxHighlighter::default()));
         }
         registry.register::<crate::Rule>(|_| Ok(Contribution::Rule));
+        registry.register::<crate::Alert>(|alert| Ok(Contribution::Alert(alert.clone())));
+        registry.register::<crate::DefinitionList>(|_| Ok(Contribution::DefinitionList));
+        let term_style = theme.definition_term.clone();
+        registry.register::<crate::DefinitionTerm>(move |_| {
+            Ok(Contribution::DefinitionTerm(term_style.clone()))
+        });
+        registry
+            .register::<crate::DefinitionDescription>(|_| Ok(Contribution::DefinitionDescription));
         registry.register::<crate::Image>(|image| Ok(Contribution::Image(image.clone())));
         let quote_style = theme.quote.clone();
         registry.register::<crate::BlockQuote>(move |_| {
@@ -347,6 +359,10 @@ impl Registry {
             != matches!(
                 contribution,
                 Contribution::Paragraph(_)
+                    | Contribution::Alert(_)
+                    | Contribution::DefinitionList
+                    | Contribution::DefinitionTerm(_)
+                    | Contribution::DefinitionDescription
                     | Contribution::Rule
                     | Contribution::Image(_)
                     | Contribution::BlockQuote(_)
@@ -365,6 +381,75 @@ impl Registry {
             );
         }
         match contribution {
+            Contribution::Alert(alert) => {
+                let mut body = Compilation::default();
+                for child in &node.children {
+                    self.append(document, *child, true, inherited.clone(), &mut body)?;
+                }
+                let start = output.start_block();
+                output.text.push_str(&body.text);
+                output
+                    .spans
+                    .extend(body.spans.iter().cloned().map(|mut span| {
+                        span.range = start + span.range.start..start + span.range.end;
+                        span
+                    }));
+                output
+                    .links
+                    .extend(body.links.iter().cloned().map(|mut link| {
+                        link.range = start + link.range.start..start + link.range.end;
+                        link
+                    }));
+                #[cfg(feature = "syntax-highlighting")]
+                output.highlights.extend(body.highlights);
+                let mut projection = Projection {
+                    text: body.text.into(),
+                    spans: body.spans,
+                    links: body.links,
+                    blocks: body.blocks,
+                    parts: Vec::new(),
+                };
+                projection.prepare_parts();
+                output.blocks.push(BlockSpan {
+                    node: id,
+                    range: start..output.text.len(),
+                    indent: output.indent,
+                    quote_depth: output.quote_depth,
+                    quote_path: output.quote_path.clone(),
+                    kind: BlockKind::Alert {
+                        alert,
+                        body: Arc::new(projection),
+                    },
+                });
+            }
+            Contribution::DefinitionList => {
+                let mut has_term = false;
+                let mut has_description = false;
+                for child in &node.children {
+                    match self.resolve_node(document, *child)? {
+                        Contribution::DefinitionTerm(_) => {
+                            if has_term && !has_description {
+                                bail!("definition term requires a description");
+                            }
+                            has_term = true;
+                            has_description = false;
+                        }
+                        Contribution::DefinitionDescription if has_term => has_description = true,
+                        _ => bail!("definition list requires terms followed by descriptions"),
+                    }
+                    self.append(document, *child, true, inherited.clone(), output)?;
+                }
+                if has_term && !has_description {
+                    bail!("definition term requires a description");
+                }
+            }
+            Contribution::DefinitionDescription => {
+                output.indent += 1;
+                for child in &node.children {
+                    self.append(document, *child, true, inherited.clone(), output)?;
+                }
+                output.indent -= 1;
+            }
             leaf @ (Contribution::Rule | Contribution::Image(_)) => {
                 if !node.children.is_empty() {
                     bail!("leaf block {id:?} cannot have children");
@@ -465,11 +550,13 @@ impl Registry {
                 });
             }
             block @ (Contribution::Paragraph(_)
+            | Contribution::DefinitionTerm(_)
             | Contribution::Heading { .. }
             | Contribution::Quote(_)
             | Contribution::ListItem { .. }) => {
                 let (kind, style, prefix) = match block {
                     Contribution::Paragraph(style) => (BlockKind::Paragraph, style.into(), None),
+                    Contribution::DefinitionTerm(style) => (BlockKind::DefinitionTerm, style, None),
                     Contribution::Heading { level, style } => {
                         (BlockKind::Heading { level }, style, None)
                     }
@@ -710,7 +797,7 @@ pub struct TextSpan {
 }
 
 /// Immutable text and source mapping, compiled outside the paint path.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Projection {
     text: SharedString,
     spans: Vec<TextSpan>,
@@ -719,18 +806,21 @@ pub struct Projection {
     pub(crate) parts: Vec<RenderPart>,
 }
 
+#[derive(Debug)]
 pub(crate) struct CellProjection {
     pub node: NodeId,
     pub offset: usize,
     pub projection: Arc<Projection>,
 }
 
+#[derive(Debug)]
 pub(crate) struct RowProjection {
     pub node: NodeId,
     pub header: bool,
     pub cells: Vec<CellProjection>,
 }
 
+#[derive(Debug)]
 pub(crate) enum RenderPart {
     Text(CellProjection),
     Embed(BlockSpan),
@@ -756,14 +846,25 @@ pub struct BlockSpan {
 
 #[derive(Clone, Debug)]
 pub enum BlockKind {
+    Alert {
+        alert: crate::Alert,
+        body: Arc<Projection>,
+    },
+    DefinitionTerm,
     Rule,
     Image(crate::Image),
     Table(crate::TableBlock),
     Paragraph,
-    Heading { level: HeadingLevel },
+    Heading {
+        level: HeadingLevel,
+    },
     Quote,
-    ListItem { marker: ListMarker },
-    Code { language: Option<SharedString> },
+    ListItem {
+        marker: ListMarker,
+    },
+    Code {
+        language: Option<SharedString>,
+    },
 }
 
 /// An actionable range in the projected text; the destination is opaque to GPUI.
@@ -821,7 +922,10 @@ impl Projection {
                 .filter(|block| {
                     !matches!(
                         block.kind,
-                        BlockKind::Table(_) | BlockKind::Rule | BlockKind::Image(_)
+                        BlockKind::Table(_)
+                            | BlockKind::Rule
+                            | BlockKind::Image(_)
+                            | BlockKind::Alert { .. }
                     ) && block.range.start >= range.start
                         && block.range.end <= range.end
                 })
@@ -839,7 +943,10 @@ impl Projection {
         if !self.blocks.iter().any(|block| {
             matches!(
                 block.kind,
-                BlockKind::Table(_) | BlockKind::Rule | BlockKind::Image(_)
+                BlockKind::Table(_)
+                    | BlockKind::Rule
+                    | BlockKind::Image(_)
+                    | BlockKind::Alert { .. }
             )
         }) {
             return;
@@ -849,7 +956,10 @@ impl Projection {
         for (index, block) in self.blocks.iter().enumerate() {
             if !matches!(
                 block.kind,
-                BlockKind::Table(_) | BlockKind::Rule | BlockKind::Image(_)
+                BlockKind::Table(_)
+                    | BlockKind::Rule
+                    | BlockKind::Image(_)
+                    | BlockKind::Alert { .. }
             ) {
                 continue;
             }

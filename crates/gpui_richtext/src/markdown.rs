@@ -12,11 +12,15 @@ struct Item {
     children: Vec<Item>,
 }
 
-/// Parse paragraphs, headings, lists, quotations, tables, images and fenced code.
+/// Parse paragraphs, headings, lists, quotations, alerts, definition lists,
+/// tables, images and fenced code.
 /// Parsing performs no asset loading or URL navigation.
 pub fn parse(source: &str) -> Result<Document> {
-    let options =
-        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    let options = Options::ENABLE_TABLES
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_GFM
+        | Options::ENABLE_DEFINITION_LIST;
     let mut stack = vec![Item {
         tag: None,
         event: None,
@@ -117,7 +121,24 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
                 })
                 .children(inlines(&item.children)?),
             ),
-            Some(Tag::BlockQuote(_)) => Some(node(BlockQuote).children(blocks(&item.children)?)),
+            Some(Tag::BlockQuote(kind)) => Some(match kind {
+                Some(kind) => node(Alert::new(match kind {
+                    pulldown_cmark::BlockQuoteKind::Note => AlertKind::Note,
+                    pulldown_cmark::BlockQuoteKind::Tip => AlertKind::Tip,
+                    pulldown_cmark::BlockQuoteKind::Important => AlertKind::Important,
+                    pulldown_cmark::BlockQuoteKind::Warning => AlertKind::Warning,
+                    pulldown_cmark::BlockQuoteKind::Caution => AlertKind::Caution,
+                }))
+                .children(blocks(&item.children)?),
+                None => node(BlockQuote).children(blocks(&item.children)?),
+            }),
+            Some(Tag::DefinitionList) => Some(definition_list().children(blocks(&item.children)?)),
+            Some(Tag::DefinitionListTitle) => {
+                Some(definition_term().children(inlines(&item.children)?))
+            }
+            Some(Tag::DefinitionListDefinition) => {
+                Some(definition_description().children(blocks(&item.children)?))
+            }
             Some(Tag::List(start)) => {
                 let mut entries = Vec::new();
                 for (index, entry) in item.children.iter().enumerate() {

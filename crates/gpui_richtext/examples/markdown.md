@@ -4,6 +4,33 @@ Inspect **structured payloads**, compare *decoded fields*, and follow a [protoco
 
 ## Processing pipeline
 
+> [!NOTE]
+> Decoded values retain their original byte offsets.
+
+> [!TIP]
+> Compare a short capture before opening a large recording.
+
+> [!IMPORTANT]
+> Choose the protocol revision before interpreting payload fields.
+
+> [!WARNING]
+> An incomplete capture can omit the end of a message.
+
+> [!CAUTION]
+> Treat commands extracted from a capture as untrusted data.
+
+### Terminology
+
+Frame
+: A complete unit received from the transport.
+
+Payload
+: The message content after its framing header.
+
+: Its interpretation depends on the negotiated revision.
+
+### Steps
+
 1. Read the packet header.
    - Check the magic bytes.
    - Validate the payload length.

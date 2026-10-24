@@ -205,7 +205,16 @@ fn main() {
             env!("CARGO_MANIFEST_DIR")
         ),
     );
-    let theme = RichTextTheme::dark();
+    let mut theme = RichTextTheme::dark();
+    for (kind, title) in [
+        (gpui_richtext::AlertKind::Note, "Note"),
+        (gpui_richtext::AlertKind::Tip, "Tip"),
+        (gpui_richtext::AlertKind::Important, "Important"),
+        (gpui_richtext::AlertKind::Warning, "Warning"),
+        (gpui_richtext::AlertKind::Caution, "Caution"),
+    ] {
+        theme.alert_mut(kind).title = Some(title.into());
+    }
     let registry = theme.registry();
     let stream = markdown::MarkdownStream::new(registry);
     gpui_platform::application()

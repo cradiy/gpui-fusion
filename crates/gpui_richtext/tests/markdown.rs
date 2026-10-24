@@ -67,3 +67,58 @@ fn image_splits_paragraph_without_losing_text_and_html_stays_literal() {
         "Above \n\nPlot\n\n below.\n\n<span>literal</span>"
     );
 }
+
+#[test]
+fn callout_children_keep_local_and_document_coordinates_during_streaming() {
+    let source = "Preamble\n\n> [!WARNING]\n> Read [limits](app:limits).\n>\n> > [!TIP]\n> > Cache **温度**.\n>\n> ```text\n> stable\n> ```\n\nCodec\n: Converts bytes.\n\n: Accepts a [profile](app:profile).\n\nWindow\n: A bounded interval.\n";
+    let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    let projection = stream.finish().unwrap();
+    let callout = &projection.blocks()[1];
+    let BlockKind::Alert { alert, body } = &callout.kind else {
+        panic!("callout missing")
+    };
+    assert_eq!(alert.kind, gpui_richtext::AlertKind::Warning);
+    assert_eq!(
+        &projection.text()[callout.range.clone()],
+        body.text().as_ref()
+    );
+    let link = &body.links()[0];
+    assert_eq!(&body.text()[link.range.clone()], "limits");
+    assert_eq!(
+        projection.links()[0].range.start,
+        callout.range.start + link.range.start
+    );
+    let BlockKind::Alert { body: nested, .. } = &body.blocks()[1].kind else {
+        panic!("nested callout missing")
+    };
+    let span = nested
+        .spans()
+        .iter()
+        .find(|span| span.style.font_weight.is_some())
+        .unwrap();
+    assert_eq!(&nested.text()[span.range.clone()], "温度");
+    assert_eq!(
+        projection.offset(span.node, 0),
+        Some(callout.range.start + body.blocks()[1].range.start + span.range.start)
+    );
+    let terms: Vec<_> = projection
+        .blocks()
+        .iter()
+        .filter(|block| matches!(block.kind, BlockKind::DefinitionTerm))
+        .collect();
+    assert_eq!(terms.len(), 2);
+    let descriptions: Vec<_> = projection
+        .blocks()
+        .iter()
+        .filter(|block| block.indent == 1)
+        .collect();
+    assert_eq!(descriptions.len(), 3);
+    assert_eq!(
+        projection.links().last().unwrap().target.as_ref(),
+        "app:profile"
+    );
+}

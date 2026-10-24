@@ -6,6 +6,7 @@
 mod blocks;
 mod code_block;
 pub mod compose;
+mod containers;
 mod document;
 #[cfg(feature = "markdown")]
 pub mod markdown;
@@ -23,6 +24,9 @@ pub use blocks::{
 };
 pub use code_block::{CodeBlock, CodeBlockLabels, CodeBlockStyle};
 pub use compose::NodeTree;
+pub use containers::{
+    Alert, AlertKind, AlertStyle, DefinitionDescription, DefinitionList, DefinitionTerm,
+};
 pub use document::{Document, Node, NodeId};
 pub use projection::{
     BlockKind, BlockSpan, Contribution, LinkSpan, Paragraph, Projection, Registry, Span, Text,

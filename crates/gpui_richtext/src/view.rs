@@ -86,6 +86,17 @@ impl RichText {
         }
     }
 
+    /// Apply surface colors; compile with the same theme's registry for inline colors.
+    /// Subsequent styling calls can override individual values.
+    pub fn theme(mut self, theme: &crate::RichTextTheme) -> Self {
+        self.selection = theme.selection;
+        self.quote_border_color = theme.quote_border;
+        self.code_block_style = theme.code_block.clone();
+        self.table_style = theme.table.clone();
+        self.task_marker_style = theme.task_marker.clone();
+        self.bg(theme.background).text_color(theme.foreground)
+    }
+
     pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
         self.selection = color.into();
         self
@@ -437,6 +448,29 @@ impl RenderOnce for RichText {
                                     style.border_color,
                                     gpui::BorderStyle::default(),
                                 ));
+                                let radius = (style.corner_radius - gpui::px(1.)).max(gpui::px(0.));
+                                window.paint_quad(
+                                    gpui::fill(
+                                        gpui::Bounds::new(
+                                            block_bounds.origin
+                                                + gpui::point(gpui::px(1.), gpui::px(1.)),
+                                            gpui::size(
+                                                (block_bounds.size.width - gpui::px(2.))
+                                                    .max(gpui::px(0.)),
+                                                header_height + vertical_padding - gpui::px(1.),
+                                            ),
+                                        ),
+                                        style.header_background,
+                                    )
+                                    .corner_radii(
+                                        gpui::Corners {
+                                            top_left: radius,
+                                            top_right: radius,
+                                            bottom_left: gpui::px(0.),
+                                            bottom_right: gpui::px(0.),
+                                        },
+                                    ),
+                                );
                             }
                             for (range, indent, level, starts_code, ends_code) in quote_ranges {
                                 let Some(start) = layout.position_for_index(range.start) else {
@@ -591,7 +625,7 @@ impl RenderOnce for RichText {
                                 } else {
                                     gpui::svg()
                                         .path(gpui_icons::GpuiIcons::LucideCopy)
-                                        .text_color(style.header_color)
+                                        .text_color(style.copy_icon_color)
                                         .size(gpui::px(16.))
                                         .into_any_element()
                                 };
@@ -640,6 +674,9 @@ impl RenderOnce for RichText {
                                             })
                                             .hover(move |button| {
                                                 button.bg(style.button_hover_background)
+                                            })
+                                            .active(move |button| {
+                                                button.bg(style.button_active_background)
                                             })
                                             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
                                                 cx.stop_propagation()

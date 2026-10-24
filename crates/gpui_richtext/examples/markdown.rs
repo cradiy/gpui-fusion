@@ -1,10 +1,9 @@
 use gpui::{App, Context, Render, Window, WindowOptions, div, prelude::*, px, rgb};
-use gpui_richtext::{
-    CodeBlockLabels, CodeBlockStyle, Registry, TableStyle, TaskMarkerStyle, TextTheme, markdown,
-};
+use gpui_richtext::{CodeBlockLabels, RichTextTheme, markdown};
 use std::{sync::Arc, time::Duration};
 
 struct Preview {
+    theme: RichTextTheme,
     stream: markdown::MarkdownStream,
     source: Arc<str>,
     scroll: gpui::ScrollHandle,
@@ -120,6 +119,8 @@ impl Render for Preview {
                                         .py_1()
                                         .rounded_md()
                                         .bg(rgb(0x263344))
+                                        .hover(|style| style.bg(rgb(0x34475e)))
+                                        .active(|style| style.bg(rgb(0x405570)))
                                         .cursor_pointer()
                                         .child("Latest")
                                         .on_click(cx.listener(|view, _, _, cx| {
@@ -136,6 +137,8 @@ impl Render for Preview {
                                         .py_1()
                                         .rounded_md()
                                         .bg(rgb(0x263344))
+                                        .hover(|style| style.bg(rgb(0x34475e)))
+                                        .active(|style| style.bg(rgb(0x405570)))
                                         .cursor_pointer()
                                         .child(if self.paused { "Resume" } else { "Pause" })
                                         .on_click(cx.listener(|view, _, _, cx| {
@@ -154,6 +157,8 @@ impl Render for Preview {
                                     .py_1()
                                     .rounded_md()
                                     .bg(rgb(0x263344))
+                                    .hover(|style| style.bg(rgb(0x34475e)))
+                                    .active(|style| style.bg(rgb(0x405570)))
                                     .cursor_pointer()
                                     .child("Replay")
                                     .on_click(cx.listener(|view, _, _, cx| view.replay(cx))),
@@ -175,28 +180,7 @@ impl Render for Preview {
                             .image_source(|image| {
                                 std::path::PathBuf::from(image.source.as_ref()).into()
                             })
-                            .quote_border_color(rgb(0x526176))
-                            .selection_color(gpui::rgba(0x539bf555))
-                            .table_style(TableStyle {
-                                background: rgb(0x161b22).into(),
-                                header_background: rgb(0x212936).into(),
-                                alternate_background: Some(rgb(0x1b222c).into()),
-                                border_color: rgb(0x303b4a).into(),
-                                ..Default::default()
-                            })
-                            .code_block_style(CodeBlockStyle {
-                                background: rgb(0x10161e).into(),
-                                border_color: rgb(0x303b4a).into(),
-                                header_color: rgb(0x9daec2).into(),
-                                button_hover_background: rgb(0x263344).into(),
-                                copy_success_color: rgb(0x56d6a0).into(),
-                                ..Default::default()
-                            })
-                            .task_marker_style(TaskMarkerStyle {
-                                border: rgb(0x6b7b90).into(),
-                                checked_background: rgb(0x25866b).into(),
-                                check: rgb(0xffffff).into(),
-                            })
+                            .theme(&self.theme)
                             .code_block_labels(CodeBlockLabels {
                                 copy: "Copy code".into(),
                                 copied: "Copied".into(),
@@ -206,8 +190,6 @@ impl Render for Preview {
                             .mx_auto()
                             .p_6()
                             .rounded_lg()
-                            .bg(rgb(0x161b22))
-                            .text_color(rgb(0xdce4ee))
                             .text_size(px(16.))
                             .line_height(px(26.)),
                     ),
@@ -223,15 +205,8 @@ fn main() {
             env!("CARGO_MANIFEST_DIR")
         ),
     );
-    let mut theme = TextTheme::default();
-    theme.link.highlight.color = Some(rgb(0x79b8ff).into());
-    theme.code.highlight.background_color = Some(rgb(0x283343).into());
-    let registry = Registry::with_theme(theme);
-    #[cfg(feature = "syntax-highlighting")]
-    let registry =
-        registry.syntax_highlighter(Some(Arc::new(gpui_richtext::syntax::SyntaxHighlighter {
-            theme: gpui_richtext::syntax::SyntaxTheme::Dark,
-        })));
+    let theme = RichTextTheme::dark();
+    let registry = theme.registry();
     let stream = markdown::MarkdownStream::new(registry);
     gpui_platform::application()
         .with_assets(gpui_icons::IconAssets::new())
@@ -239,6 +214,7 @@ fn main() {
             cx.open_window(WindowOptions::default(), |_, cx| {
                 cx.new(|cx| {
                     let mut view = Preview {
+                        theme,
                         stream,
                         source: source.into(),
                         scroll: gpui::ScrollHandle::new(),
@@ -261,7 +237,8 @@ fn pause_and_resume_do_not_drop_or_duplicate_streamed_text(cx: &mut gpui::TestAp
     let source: Arc<str> = "## Telemetry\n\n**温度** arrives in several packets.\n".into();
     let expected = source.clone();
     let preview = cx.new(|_| Preview {
-        stream: markdown::MarkdownStream::new(Registry::with_standard_nodes()),
+        theme: RichTextTheme::dark(),
+        stream: markdown::MarkdownStream::new(RichTextTheme::dark().registry()),
         source,
         scroll: gpui::ScrollHandle::new(),
         task: None,

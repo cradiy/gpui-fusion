@@ -14,6 +14,7 @@ mod styles;
 #[cfg(feature = "syntax-highlighting")]
 pub mod syntax;
 mod table;
+mod theme;
 mod view;
 pub use blocks::{BlockQuote, Image, ListEntry, Rule};
 
@@ -35,4 +36,5 @@ pub use table::{
     CellVerticalAlign, ColumnWidth, Table, TableBlock, TableCell, TableCellSpan, TableColumn,
     TableRow, TableRowSpan, TableStyle,
 };
+pub use theme::RichTextTheme;
 pub use view::RichText;

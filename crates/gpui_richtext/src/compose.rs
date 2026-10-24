@@ -113,9 +113,7 @@ pub fn anchor(name: impl Into<SharedString>) -> NodeTree {
 }
 
 pub fn anchor_link(target: impl Into<SharedString>) -> NodeTree {
-    node(crate::AnchorLink {
-        target: target.into(),
-    })
+    node(crate::AnchorLink::new(target))
 }
 pub fn link_with_text(target: impl Into<SharedString>, text: impl Into<SharedString>) -> NodeTree {
     node(Link::new(target).text(text))

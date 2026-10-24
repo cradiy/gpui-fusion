@@ -65,6 +65,7 @@ pub enum Contribution {
         kind: crate::LinkKind,
         target: SharedString,
         text: Option<SharedString>,
+        title: Option<SharedString>,
         style: InlineStyle,
     },
 }
@@ -334,6 +335,7 @@ impl Registry {
                 kind: crate::LinkKind::Anchor,
                 target: link.target.clone(),
                 text: None,
+                title: None,
                 style: backlink_style.clone(),
             })
         });
@@ -342,6 +344,7 @@ impl Registry {
                 kind: crate::LinkKind::Anchor,
                 target: link.target.clone(),
                 text: None,
+                title: link.title.clone(),
                 style: anchor_style.clone(),
             })
         });
@@ -407,6 +410,7 @@ impl Registry {
                 kind: crate::LinkKind::External,
                 target: link.link.clone(),
                 text: link.text.clone(),
+                title: link.title.clone(),
                 style: theme.link.clone(),
             })
         });
@@ -614,6 +618,7 @@ impl Registry {
                                 kind: image.link_kind,
                                 node: id,
                                 target: target.clone(),
+                                title: image.link_title.clone(),
                                 range: start..output.text.len(),
                             });
                         }
@@ -811,6 +816,7 @@ impl Registry {
                 kind,
                 target,
                 text,
+                title,
                 style,
             } => {
                 if output.inside_link {
@@ -845,6 +851,7 @@ impl Registry {
                         kind,
                         node: id,
                         target,
+                        title,
                         range: start..output.text.len(),
                     });
                 }
@@ -1095,6 +1102,8 @@ pub struct LinkSpan {
     pub kind: crate::LinkKind,
     pub node: NodeId,
     pub target: SharedString,
+    /// Optional destination description supplied by the document.
+    pub title: Option<SharedString>,
     pub range: Range<usize>,
 }
 

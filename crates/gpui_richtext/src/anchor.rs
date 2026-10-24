@@ -6,6 +6,21 @@ pub struct Anchor(pub SharedString);
 /// An inline link to a named destination within the same rich-text view.
 pub struct AnchorLink {
     pub target: SharedString,
+    pub title: Option<SharedString>,
+}
+
+impl AnchorLink {
+    pub fn new(target: impl Into<SharedString>) -> Self {
+        Self {
+            target: target.into(),
+            title: None,
+        }
+    }
+
+    pub fn title(mut self, title: impl Into<SharedString>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
 }
 
 /// A numbered footnote containing block content.

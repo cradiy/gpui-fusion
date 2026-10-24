@@ -53,6 +53,7 @@ pub struct Group;
 pub struct Link {
     pub link: SharedString,
     pub text: Option<SharedString>,
+    pub title: Option<SharedString>,
 }
 
 impl Link {
@@ -60,7 +61,13 @@ impl Link {
         Self {
             link: link.into(),
             text: None,
+            title: None,
         }
+    }
+
+    pub fn title(mut self, title: impl Into<SharedString>) -> Self {
+        self.title = Some(title.into());
+        self
     }
 
     pub fn text(mut self, text: impl Into<SharedString>) -> Self {

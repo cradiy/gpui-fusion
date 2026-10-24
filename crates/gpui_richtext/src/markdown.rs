@@ -120,7 +120,9 @@ fn inline(item: &Item) -> Result<Option<NodeTree>> {
         Some(Tag::Emphasis) => emphasis(),
         Some(Tag::Strong) => strong(),
         Some(Tag::Strikethrough) => strikethrough(),
-        Some(Tag::Link { dest_url, .. }) => markdown_link(dest_url),
+        Some(Tag::Link {
+            dest_url, title, ..
+        }) => markdown_link(dest_url, title),
         Some(_) => bail!("unsupported block inside inline Markdown content"),
         None => {
             return Ok(match &item.event {
@@ -302,14 +304,16 @@ fn contains_image(item: &Item) -> bool {
     matches!(item.tag, Some(Tag::Image { .. })) || item.children.iter().any(contains_image)
 }
 
-fn split_images(item: &Item, target: Option<&str>) -> Result<Vec<ImagePart>> {
+fn split_images(item: &Item, target: Option<(&str, &str)>) -> Result<Vec<ImagePart>> {
     if let Some(Tag::Image {
         dest_url, title, ..
     }) = &item.tag
     {
         let mut image = Image::new(dest_url.to_string(), plain(&item.children));
-        image.link = target.map(|target| target.to_owned().into());
-        if let Some(fragment) = target.and_then(|target| target.strip_prefix('#')) {
+        image.link = target.map(|(target, _)| target.to_owned().into());
+        image.link_title =
+            target.and_then(|(_, title)| (!title.is_empty()).then(|| title.to_owned().into()));
+        if let Some(fragment) = target.and_then(|(target, _)| target.strip_prefix('#')) {
             image.link = Some(headings::target(fragment).into());
             image.link_kind = LinkKind::Anchor;
         }
@@ -321,8 +325,11 @@ fn split_images(item: &Item, target: Option<&str>) -> Result<Vec<ImagePart>> {
     if !contains_image(item) {
         return Ok(inline(item)?.into_iter().map(ImagePart::Inline).collect());
     }
-    let target = if let Some(Tag::Link { dest_url, .. }) = &item.tag {
-        Some(dest_url.as_ref())
+    let target = if let Some(Tag::Link {
+        dest_url, title, ..
+    }) = &item.tag
+    {
+        Some((dest_url.as_ref(), title.as_ref()))
     } else {
         target
     };
@@ -335,7 +342,9 @@ fn split_images(item: &Item, target: Option<&str>) -> Result<Vec<ImagePart>> {
                         kind.node()
                     } else {
                         match &item.tag {
-                            Some(Tag::Link { dest_url, .. }) => markdown_link(dest_url),
+                            Some(Tag::Link {
+                                dest_url, title, ..
+                            }) => markdown_link(dest_url, title),
                             Some(Tag::Strong) => strong(),
                             Some(Tag::Emphasis) => emphasis(),
                             Some(Tag::Strikethrough) => strikethrough(),
@@ -351,10 +360,18 @@ fn split_images(item: &Item, target: Option<&str>) -> Result<Vec<ImagePart>> {
     Ok(parts)
 }
 
-fn markdown_link(target: &str) -> NodeTree {
+fn markdown_link(target: &str, title: &str) -> NodeTree {
+    let title = (!title.is_empty()).then(|| title.to_owned().into());
     if let Some(fragment) = target.strip_prefix('#') {
-        anchor_link(headings::target(fragment))
+        node(AnchorLink {
+            target: headings::target(fragment).into(),
+            title,
+        })
     } else {
-        link(target.to_owned())
+        node(Link {
+            link: target.to_owned().into(),
+            text: None,
+            title,
+        })
     }
 }

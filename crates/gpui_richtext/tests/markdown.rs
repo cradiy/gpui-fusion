@@ -370,3 +370,62 @@ fn inline_html_preserves_styles_links_images_and_literal_boundaries() {
     }
     assert_eq!(stream.finish().unwrap().text(), projection.text());
 }
+
+#[test]
+fn link_titles_survive_reference_resolution_image_splitting_and_streaming() {
+    let source = "[Export][archive]\n\n| Action |\n| --- |\n| [**Open** ![badge](badge.svg \"Badge artwork\") bundle][archive] |\n\n[![badge](badge.svg \"Badge artwork\")][archive]\n\n[Jump](#attachments \"Attachment index\")\n\n## Attachments\n\n[archive]: app:exports \"Download &amp; inspect\"\n";
+    let registry = Registry::with_standard_nodes();
+    let projection = registry.compile(&markdown::parse(source).unwrap()).unwrap();
+    let external: Vec<_> = projection
+        .links()
+        .iter()
+        .filter(|link| link.kind == gpui_richtext::LinkKind::External)
+        .collect();
+    assert_eq!(
+        external
+            .iter()
+            .map(|link| &projection.text()[link.range.clone()])
+            .collect::<Vec<_>>(),
+        ["Export", "Open", " ", "badge", " bundle", "badge"]
+    );
+    for link in external {
+        assert_eq!(link.title.as_deref(), Some("Download & inspect"));
+        assert_eq!(link.target.as_ref(), "app:exports");
+        assert!(!projection.text()[link.range.clone()].contains("Download"));
+    }
+    let internal = projection
+        .links()
+        .iter()
+        .find(|link| link.kind == gpui_richtext::LinkKind::Anchor)
+        .unwrap();
+    assert_eq!(internal.title.as_deref(), Some("Attachment index"));
+    let image = projection
+        .blocks()
+        .iter()
+        .find_map(|block| match &block.kind {
+            BlockKind::Image(image) => Some(image),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(image.title.as_deref(), Some("Badge artwork"));
+    assert_eq!(image.link_title.as_deref(), Some("Download & inspect"));
+    let mut stream = markdown::MarkdownStream::new(registry);
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    let streamed = stream.finish().unwrap();
+    assert_eq!(streamed.text(), projection.text());
+    assert_eq!(
+        streamed
+            .links()
+            .iter()
+            .map(|link| (&link.target, &link.title, &link.range))
+            .collect::<Vec<_>>(),
+        projection
+            .links()
+            .iter()
+            .map(|link| (&link.target, &link.title, &link.range))
+            .collect::<Vec<_>>()
+    );
+}

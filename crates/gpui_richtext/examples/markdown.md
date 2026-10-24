@@ -2,7 +2,7 @@
 
 [Pipeline](#processing-pipeline) · [Field summary](#field-summary) · [Artwork](#artwork)
 
-Inspect **structured payloads**, compare *decoded fields*, and follow a [protocol reference](https://www.rfc-editor.org/).[^capture]
+Inspect **structured payloads**, compare *decoded fields*, and follow a [protocol reference](https://www.rfc-editor.org/ "RFC publications and technical references").[^capture]
 
 ## Processing pipeline
 

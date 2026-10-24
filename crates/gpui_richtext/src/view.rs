@@ -206,6 +206,8 @@ impl RichText {
     }
 
     /// Enable destination tooltips, including on links without activation handlers.
+    /// External links show their title above the destination. Internal links show
+    /// a tooltip only when a title is supplied.
     pub fn link_tooltips(mut self, enabled: bool) -> Self {
         self.link_tooltips = enabled;
         self
@@ -473,13 +475,10 @@ impl RenderOnce for RichText {
                     .links()
                     .iter()
                     .find(|link| link.range.contains(&index))?;
-                if link.kind == crate::LinkKind::Anchor {
-                    return None;
-                }
                 if let Some(builder) = &builder {
                     builder(link, window, cx)
                 } else {
-                    Some(cx.new(|_| LinkTooltip(link.target.clone())).into())
+                    LinkTooltip::for_link(link).map(|tooltip| cx.new(|_| tooltip).into())
                 }
             });
         }
@@ -1048,6 +1047,18 @@ impl RichText {
                                 .max_w_full()
                                 .with_fallback(move || div().child(alt.clone()).into_any_element())
                                 .when_some(link, |view, link| {
+                                    let tooltip = link.clone();
+                                    let view = view.when(self.link_tooltips, |view| {
+                                        let builder = self.link_tooltip.clone();
+                                        view.optional_tooltip(move |window, cx| {
+                                            if let Some(builder) = &builder {
+                                                builder(&tooltip, window, cx)
+                                            } else {
+                                                LinkTooltip::for_link(&tooltip)
+                                                    .map(|tooltip| cx.new(|_| tooltip).into())
+                                            }
+                                        })
+                                    });
                                     if link.kind == crate::LinkKind::Anchor {
                                         let navigation = self.navigation.clone().unwrap();
                                         return view.when_some(
@@ -1070,29 +1081,12 @@ impl RichText {
                                             },
                                         );
                                     }
-                                    let tooltip = link.clone();
-                                    view.when(self.link_tooltips, |view| {
-                                        let builder = self.link_tooltip.clone();
-                                        view.optional_tooltip(move |window, cx| {
-                                            if let Some(builder) = &builder {
-                                                builder(&tooltip, window, cx)
-                                            } else {
-                                                Some(
-                                                    cx.new(|_| LinkTooltip(tooltip.target.clone()))
-                                                        .into(),
-                                                )
-                                            }
+                                    view.when_some(self.on_link_click.clone(), |view, listener| {
+                                        view.cursor_pointer().on_click(move |_, window, cx| {
+                                            cx.stop_propagation();
+                                            listener(&link, window, cx);
                                         })
                                     })
-                                    .when_some(
-                                        self.on_link_click.clone(),
-                                        |view, listener| {
-                                            view.cursor_pointer().on_click(move |_, window, cx| {
-                                                cx.stop_propagation();
-                                                listener(&link, window, cx);
-                                            })
-                                        },
-                                    )
                                 })
                                 .when(image.link.is_none(), |view| {
                                     view.when_some(image.title.clone(), |view, title| {
@@ -1257,6 +1251,19 @@ impl RichText {
 }
 
 struct LinkTooltip(gpui::SharedString);
+
+impl LinkTooltip {
+    fn for_link(link: &LinkSpan) -> Option<Self> {
+        let title = link.title.as_ref().filter(|title| !title.is_empty());
+        match link.kind {
+            crate::LinkKind::Anchor => title.cloned().map(Self),
+            crate::LinkKind::External => Some(Self(match title {
+                Some(title) if title != &link.target => format!("{title}\n{}", link.target).into(),
+                _ => link.target.clone(),
+            })),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

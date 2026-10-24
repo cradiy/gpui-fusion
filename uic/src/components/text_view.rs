@@ -1,6 +1,6 @@
 use gpui::{
     ElementId, Hsla, InteractiveText, IntoElement, Refineable, RenderOnce, SharedString,
-    StyleRefinement, Styled, StyledText, div, prelude::*,
+    StyleRefinement, Styled, StyledText, TextSelectionHandle, div, prelude::*,
 };
 
 /// Read-only text with selection and system clipboard support.
@@ -11,6 +11,7 @@ pub struct TextView {
     selectable: bool,
     selection: Hsla,
     style: StyleRefinement,
+    selection_handle: Option<TextSelectionHandle>,
 }
 
 impl TextView {
@@ -26,6 +27,7 @@ impl TextView {
             selectable: true,
             selection: gpui::rgba(0x4488ff55).into(),
             style: StyleRefinement::default(),
+            selection_handle: None,
         }
     }
 
@@ -35,6 +37,12 @@ impl TextView {
     }
     pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
         self.selection = color.into();
+        self
+    }
+
+    /// Exposes read-only selection state and displayed range geometry.
+    pub fn selection_handle(mut self, handle: &TextSelectionHandle) -> Self {
+        self.selection_handle = Some(handle.clone());
         self
     }
 }
@@ -51,6 +59,9 @@ impl RenderOnce for TextView {
         surface.style().refine(&self.style);
         surface.child(
             InteractiveText::new(self.id, self.text)
+                .when_some(self.selection_handle, |text, handle| {
+                    text.selection_handle(&handle)
+                })
                 .when(self.selectable, |text| text.selectable(self.selection)),
         )
     }

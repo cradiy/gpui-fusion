@@ -20,6 +20,7 @@ use std::{
 
 mod selection;
 use selection::TextSelection;
+pub use selection::{TextRangeFragment, TextSelectionHandle, TextSelectionSnapshot};
 
 /// An [`Element`] that renders text.
 ///
@@ -1428,6 +1429,7 @@ pub struct InteractiveText {
     selection_color: Option<crate::Hsla>,
     preserve_selection_on_update: bool,
     selection_revision: u64,
+    selection_handle: Option<TextSelectionHandle>,
 }
 
 struct InteractiveTextClickEvent {
@@ -1460,6 +1462,7 @@ impl InteractiveText {
             selection_color: None,
             preserve_selection_on_update: false,
             selection_revision: 0,
+            selection_handle: None,
         }
     }
 
@@ -1471,6 +1474,13 @@ impl InteractiveText {
     /// only activated when layout preserves the original text offsets.
     pub fn selectable(mut self, selection_color: impl Into<crate::Hsla>) -> Self {
         self.selection_color = Some(selection_color.into());
+        self
+    }
+
+    /// Registers read-only selection and range geometry for this text occurrence.
+    /// Geometry remains available when selection is disabled.
+    pub fn selection_handle(mut self, handle: &TextSelectionHandle) -> Self {
+        self.selection_handle = Some(handle.clone());
         self
     }
 
@@ -1600,6 +1610,17 @@ impl Element for InteractiveText {
 
                 self.text
                     .prepaint(None, inspector_id, bounds, state, window, cx);
+                if let Some(handle) = &self.selection_handle {
+                    handle.register(
+                        self.text.layout(),
+                        interactive_state
+                            .as_ref()
+                            .and_then(|state| state.selection.clone()),
+                        self.selection_revision,
+                        bounds,
+                        window,
+                    );
+                }
                 let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
                 if self.tooltip_builder.is_some()
                     && let Some(state) = interactive_state.as_mut()

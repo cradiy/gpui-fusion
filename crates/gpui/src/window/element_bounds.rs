@@ -1,6 +1,6 @@
 use crate::{Bounds, Hitbox, HitboxId, Pixels, Point, PointerMapping, Window};
 use collections::FxHashMap;
-use std::{ops::Range, rc::Rc};
+use std::{any::Any, ops::Range, rc::Rc};
 
 /// A stable handle to an element's geometry in a window.
 ///
@@ -13,6 +13,24 @@ use std::{ops::Range, rc::Rc};
 pub struct ElementBounds(Rc<()>);
 
 impl ElementBounds {
+    pub(crate) fn data<'a, T: Any>(&self, window: &'a Window) -> Option<&'a T> {
+        self.geometry(window)?.data.as_ref()?.downcast_ref()
+    }
+
+    pub(crate) fn map_fragment(
+        &self,
+        bounds: Bounds<Pixels>,
+        window: &Window,
+    ) -> Option<(Bounds<Pixels>, Option<Bounds<Pixels>>)> {
+        let entry = self.geometry(window)?;
+        let full = entry.mapping.bounds_to_display(bounds)?;
+        let visible = entry.mapping.visible_bounds_to_display(
+            bounds.intersect(&entry.clip),
+            Bounds::new(Point::default(), window.viewport_size()),
+        );
+        Some((full, visible))
+    }
+
     fn id(&self) -> usize {
         Rc::as_ptr(&self.0) as usize
     }
@@ -95,6 +113,7 @@ struct Registration {
     clip: Bounds<Pixels>,
     mapping: PointerMapping,
     hitbox: Option<HitboxId>,
+    data: Option<Rc<dyn Any>>,
 }
 
 #[derive(Default)]
@@ -154,6 +173,15 @@ impl Window {
     /// a deferred overlay. Cache replay keeps registrations current without invoking
     /// the element's prepaint callback again.
     pub fn track_element_bounds(&mut self, handle: &ElementBounds, bounds: Bounds<Pixels>) {
+        self.track_element_bounds_with_data(handle, bounds, None);
+    }
+
+    pub(crate) fn track_element_bounds_with_data(
+        &mut self,
+        handle: &ElementBounds,
+        bounds: Bounds<Pixels>,
+        data: Option<Rc<dyn Any>>,
+    ) {
         self.invalidator.debug_assert_prepaint();
         self.next_frame.tracked_bounds.push(Registration {
             handle: handle.clone(),
@@ -161,6 +189,7 @@ impl Window {
             clip: self.content_mask().bounds,
             mapping: self.pointer_mapping.clone(),
             hitbox: None,
+            data,
         });
     }
 
@@ -172,6 +201,7 @@ impl Window {
             clip: hitbox.content_mask.bounds,
             mapping: hitbox.pointer_mapping.clone(),
             hitbox: Some(hitbox.id),
+            data: None,
         });
     }
 }

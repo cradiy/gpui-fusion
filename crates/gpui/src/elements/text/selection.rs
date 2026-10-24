@@ -11,7 +11,116 @@ use std::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
+#[cfg(test)]
+mod geometry_tests;
 mod platform;
+
+/// Read-only access to an interactive text occurrence's selection and geometry.
+///
+/// Attach one handle per occurrence. Queries use the frame being built during
+/// drawing and the last completed frame otherwise. Query after the text has
+/// prepainted, for example from a deferred overlay. Removed or unregistered text
+/// returns `None`; querying never changes selection or focus.
+#[derive(Clone, Default)]
+pub struct TextSelectionHandle(crate::ElementBounds);
+
+/// A selection in the displayed text, using UTF-8 byte offsets.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextSelectionSnapshot {
+    /// Displayed text corresponding to these offsets, including any ellipsis.
+    pub text: SharedString,
+    /// The fixed end of the selection.
+    pub anchor: usize,
+    /// The moving end of the selection.
+    pub head: usize,
+}
+
+impl TextSelectionSnapshot {
+    /// The ordered selection range. A collapsed selection has an empty range.
+    pub fn range(&self) -> Range<usize> {
+        self.anchor.min(self.head)..self.anchor.max(self.head)
+    }
+}
+
+/// One visual selection fragment in window logical pixels.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextRangeFragment {
+    /// Axis-aligned bounds before viewport and ancestor clipping.
+    pub bounds: Bounds<Pixels>,
+    /// Clipped bounds, or `None` when this fragment is entirely outside the clip.
+    /// Occlusion by other elements is not considered.
+    pub visible_bounds: Option<Bounds<Pixels>>,
+}
+
+struct SelectionGeometry {
+    text: SharedString,
+    revision: u64,
+    rows: Vec<Row>,
+    selection: Option<Rc<RefCell<TextSelection>>>,
+}
+
+impl TextSelectionHandle {
+    /// Returns the current selection, or `None` if selection is disabled or the
+    /// displayed text no longer matches the registered frame.
+    pub fn selection(&self, window: &Window) -> Option<TextSelectionSnapshot> {
+        let geometry = self.0.data::<SelectionGeometry>(window)?;
+        let selection = geometry.selection.as_ref()?.borrow();
+        if selection.text != geometry.text || selection.revision != geometry.revision {
+            return None;
+        }
+        Some(TextSelectionSnapshot {
+            text: geometry.text.clone(),
+            anchor: selection.anchor,
+            head: selection.head,
+        })
+    }
+
+    /// Returns visual fragments for a UTF-8 byte range in the registered displayed
+    /// text. Wrapping and bidirectional runs can produce multiple fragments.
+    /// Empty ranges return an empty vector. Invalid ranges, missing layout, and
+    /// transforms without a forward map return `None`. Fully clipped fragments
+    /// remain in the result with `visible_bounds: None`.
+    pub fn range_geometry(
+        &self,
+        range: Range<usize>,
+        window: &Window,
+    ) -> Option<Vec<TextRangeFragment>> {
+        let geometry = self.0.data::<SelectionGeometry>(window)?;
+        geometry.text.get(range.clone())?;
+        range_rects(&geometry.rows, range)
+            .into_iter()
+            .map(|bounds| {
+                let (bounds, visible_bounds) = self.0.map_fragment(bounds, window)?;
+                Some(TextRangeFragment {
+                    bounds,
+                    visible_bounds,
+                })
+            })
+            .collect()
+    }
+
+    pub(super) fn register(
+        &self,
+        layout: &TextLayout,
+        selection: Option<Rc<RefCell<TextSelection>>>,
+        revision: u64,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
+    ) {
+        let text = layout.0.borrow().as_ref().unwrap().text.clone();
+        let rows = rows(layout, window.text_style().text_align);
+        window.track_element_bounds_with_data(
+            &self.0,
+            bounds,
+            Some(Rc::new(SelectionGeometry {
+                text,
+                revision,
+                rows,
+                selection,
+            })),
+        );
+    }
+}
 
 pub(super) struct TextSelection {
     pub focus: FocusHandle,
@@ -166,8 +275,18 @@ pub(super) fn selection_quads(
     if selected.is_empty() {
         return Vec::new();
     }
+    range_rects(&rows(layout, align), selected)
+        .into_iter()
+        .map(|bounds| fill(bounds, color))
+        .collect()
+}
+
+fn range_rects(rows: &[Row], selected: Range<usize>) -> Vec<Bounds<Pixels>> {
+    if selected.is_empty() {
+        return Vec::new();
+    }
     let mut quads = Vec::new();
-    for row in rows(layout, align) {
+    for row in rows {
         if row.range.is_empty() {
             continue;
         }
@@ -186,22 +305,16 @@ pub(super) fn selection_quads(
                     right += px(3.);
                     newline = false;
                 }
-                quads.push(fill(
-                    Bounds::new(
-                        row.origin + point(left - row.base_x, px(0.)),
-                        size(right - left, row.height),
-                    ),
-                    color,
+                quads.push(Bounds::new(
+                    row.origin + point(left - row.base_x, px(0.)),
+                    size(right - left, row.height),
                 ));
             }
         }
         if newline {
-            quads.push(fill(
-                Bounds::new(
-                    row.origin + point(row.width, px(0.)),
-                    size(px(3.), row.height),
-                ),
-                color,
+            quads.push(Bounds::new(
+                row.origin + point(row.width, px(0.)),
+                size(px(3.), row.height),
             ));
         }
     }
@@ -460,6 +573,7 @@ mod tests {
     struct Demo {
         text: SharedString,
         layout: TextLayout,
+        selection_handle: TextSelectionHandle,
         clicks: usize,
         align: TextAlign,
         truncate: bool,
@@ -477,6 +591,7 @@ mod tests {
                     .when(self.truncate, |this| this.truncate())
                     .child(
                         InteractiveText::new("selectable", text)
+                            .selection_handle(&self.selection_handle)
                             .selectable(crate::rgba(0x4488ff55))
                             .on_click(vec![0..4], move |index, window, cx| {
                                 clicked(&index, window, cx)
@@ -486,8 +601,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn bidi_readonly_selection_uses_visual_spans_and_alignment() {
+    #[crate::test]
+    fn bidi_readonly_selection_uses_visual_spans_and_alignment(cx: &mut TestAppContext) {
         use crate::{
             FontId, GlyphId, LineLayout, ShapedGlyph, ShapedRun, WrappedLine, WrappedLineLayout,
         };
@@ -560,6 +675,67 @@ mod tests {
         let rows = rows(&layout, TextAlign::Right);
         assert_eq!(index_at(&rows, point(px(299.), px(55.))), 1);
         assert_eq!(character_at(&rows, point(px(285.), px(55.))), Some(3));
+
+        let (_, mut visual) = setup(cx, TextAlign::Left);
+        let handle = TextSelectionHandle::default();
+        visual.draw(
+            Point::default(),
+            size(
+                crate::AvailableSpace::Definite(px(400.)),
+                crate::AvailableSpace::Definite(px(200.)),
+            ),
+            move |_, _| {
+                div().size_full().text_align(TextAlign::Right).child(
+                    crate::canvas(
+                        move |bounds, window, _| {
+                            let transform =
+                                crate::PointerTransform::affine(crate::TransformationMatrix {
+                                    translation: [8., 6.],
+                                    ..crate::TransformationMatrix::unit()
+                                })
+                                .unwrap();
+                            window.with_content_mask(
+                                Some(crate::ContentMask {
+                                    bounds: Bounds::new(
+                                        point(px(255.), px(0.)),
+                                        size(px(30.), px(100.)),
+                                    ),
+                                }),
+                                |window| {
+                                    window.with_pointer_transform(bounds, transform, |window| {
+                                        handle.register(&layout, None, 0, bounds, window);
+                                        let fragments =
+                                            handle.range_geometry(0..3, window).unwrap();
+                                        assert_eq!(fragments.len(), 2);
+                                        assert_eq!(
+                                            fragments[0].bounds.origin,
+                                            point(px(258.), px(56.))
+                                        );
+                                        assert_eq!(
+                                            fragments[1].bounds.origin,
+                                            point(px(298.), px(56.))
+                                        );
+                                        assert!(fragments[0].visible_bounds.is_some());
+                                        assert!(fragments[1].visible_bounds.is_none());
+                                        let _: Result<(), ()> = window.transact(|window| {
+                                            window.track_element_bounds(&handle.0, bounds);
+                                            assert!(handle.range_geometry(0..3, window).is_none());
+                                            Err(())
+                                        });
+                                        assert_eq!(
+                                            handle.range_geometry(0..3, window).unwrap(),
+                                            fragments
+                                        );
+                                    });
+                                },
+                            );
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .size_full(),
+                )
+            },
+        );
     }
 
     #[gpui::test]
@@ -863,6 +1039,7 @@ mod tests {
         let window = cx.open_window(size(px(400.), px(400.)), move |_, _| Demo {
             text: "link 中文😀\nA long styled line that wraps across several rows.\n\nLast".into(),
             layout: TextLayout::default(),
+            selection_handle: TextSelectionHandle::default(),
             clicks: 0,
             align,
             truncate: false,
@@ -908,6 +1085,14 @@ mod tests {
         visual.simulate_mouse_down(end, MouseButton::Left, Default::default());
         visual.simulate_mouse_move(start, MouseButton::Left, Default::default());
         visual.simulate_mouse_up(start, MouseButton::Left, Default::default());
+        window
+            .update(&mut visual.cx, |view, window, _| {
+                let selection = view.selection_handle.selection(window).unwrap();
+                assert_eq!(selection.anchor, 35);
+                assert_eq!(selection.head, 5);
+                assert_eq!(selection.range(), 5..35);
+            })
+            .unwrap();
         let expected = window
             .update(&mut visual.cx, |view, _, _| view.text[5..35].to_owned())
             .unwrap();

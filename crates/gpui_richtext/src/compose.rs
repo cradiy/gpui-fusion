@@ -181,3 +181,7 @@ impl Document {
         Self::new(nodes, roots)
     }
 }
+
+pub fn keyboard() -> NodeTree {
+    node(crate::Keyboard)
+}

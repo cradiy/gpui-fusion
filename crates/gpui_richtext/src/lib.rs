@@ -38,8 +38,8 @@ pub use projection::{
     TextSpan,
 };
 pub use styles::{
-    Code, Emphasis, Group, HardBreak, InlineStyle, Link, Mark, Strikethrough, Strong, TextTheme,
-    Underline,
+    Code, Emphasis, Group, HardBreak, InlineStyle, Keyboard, Link, Mark, Strikethrough, Strong,
+    TextTheme, Underline,
 };
 pub use table::{
     CellVerticalAlign, ColumnWidth, Table, TableBlock, TableCell, TableCellSpan, TableColumn,

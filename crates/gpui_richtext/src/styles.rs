@@ -43,6 +43,8 @@ pub struct Strikethrough;
 pub struct Mark;
 /// Inline code container. Its children remain selectable text.
 pub struct Code;
+/// Keyboard input rendered as selectable inline text.
+pub struct Keyboard;
 /// A leaf contributing one newline within a paragraph.
 pub struct HardBreak;
 /// A group of paragraphs or nested block groups.
@@ -83,6 +85,7 @@ pub struct TextTheme {
     pub strikethrough: InlineStyle,
     pub mark: InlineStyle,
     pub code: InlineStyle,
+    pub keyboard: InlineStyle,
     pub code_block: InlineStyle,
     pub link: InlineStyle,
     pub footnote_backlink: InlineStyle,
@@ -144,6 +147,14 @@ impl Default for TextTheme {
                 ..Default::default()
             }
             .into(),
+            keyboard: InlineStyle {
+                highlight: HighlightStyle {
+                    background_color: Some(rgba(0x64748b20).into()),
+                    font_weight: Some(FontWeight::MEDIUM),
+                    ..Default::default()
+                },
+                font_family: Some("monospace".into()),
+            },
             code: InlineStyle {
                 highlight: HighlightStyle {
                     background_color: Some(rgba(0x80808020).into()),

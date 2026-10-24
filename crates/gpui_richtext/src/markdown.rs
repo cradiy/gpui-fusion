@@ -1,16 +1,18 @@
 //! Markdown conversion into editable-by-the-producer rich-text node snapshots.
 //! Images occupy their own blocks. Standalone details/summary tags form collapsible
-//! blocks; other HTML is displayed as literal text.
+//! blocks. Inline kbd, mark, u, and br tags are supported; other HTML is literal text.
 use crate::{compose::*, *};
 use anyhow::{Result, bail};
 use pulldown_cmark::{Event, Options, Parser, Tag};
 mod details;
 mod footnotes;
 mod headings;
+mod inline_html;
 mod stream;
 pub use stream::MarkdownStream;
 
 struct Item {
+    inline_kind: Option<inline_html::Kind>,
     details: Option<Details>,
     reference: Option<(usize, usize)>,
     tag: Option<Tag<'static>>,
@@ -26,8 +28,10 @@ struct Item {
 /// Fragment links resolve to heading IDs within this document.
 /// Disclosure tags occupy their own lines; summaries use one line. An optional
 /// `open` attribute on `<details>` sets the initial expanded state.
+/// Attribute-free inline `kbd`, `mark`, and `u` pairs stay within a Markdown
+/// container. Unmatched tags remain literal. Inline `br` inserts a newline.
 pub fn parse(source: &str) -> Result<Document> {
-    let mut items = parse_items(source, 0)?;
+    let mut items = inline_html::normalize(parse_items(source, 0)?, 0)?;
     headings::assign(&mut items)?;
     Document::from_roots(footnotes::convert(items)?)
 }
@@ -44,6 +48,7 @@ fn parse_items(source: &str, depth: usize) -> Result<Vec<Item>> {
         | Options::ENABLE_FOOTNOTES
         | Options::ENABLE_HEADING_ATTRIBUTES;
     let mut stack = vec![Item {
+        inline_kind: None,
         details: None,
         reference: None,
         tag: None,
@@ -56,6 +61,7 @@ fn parse_items(source: &str, depth: usize) -> Result<Vec<Item>> {
         }
         match event {
             Event::Start(tag) => stack.push(Item {
+                inline_kind: None,
                 details: None,
                 reference: None,
                 tag: Some(tag.into_static()),
@@ -67,6 +73,7 @@ fn parse_items(source: &str, depth: usize) -> Result<Vec<Item>> {
                 stack.last_mut().unwrap().children.push(item);
             }
             event => stack.last_mut().unwrap().children.push(Item {
+                inline_kind: None,
                 details: None,
                 reference: None,
                 tag: None,
@@ -99,6 +106,9 @@ fn task(items: &[Item]) -> Option<bool> {
 }
 
 fn inline(item: &Item) -> Result<Option<NodeTree>> {
+    if let Some(kind) = item.inline_kind {
+        return Ok(Some(kind.node().children(inlines(&item.children)?)));
+    }
     if let Some((number, occurrence)) = item.reference {
         return Ok(Some(
             anchor(format!("footnote-ref-{number}-{occurrence}")).child(
@@ -145,10 +155,12 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
             result.push(node(details.clone()).children(blocks(&item.children)?));
             continue;
         }
-        if matches!(
-            item.tag,
-            Some(Tag::Link { .. } | Tag::Strong | Tag::Emphasis | Tag::Strikethrough)
-        ) && contains_image(item)
+        if (item.inline_kind.is_some()
+            || matches!(
+                item.tag,
+                Some(Tag::Link { .. } | Tag::Strong | Tag::Emphasis | Tag::Strikethrough)
+            ))
+            && contains_image(item)
         {
             for part in split_images(item, None)? {
                 match part {
@@ -319,12 +331,16 @@ fn split_images(item: &Item, target: Option<&str>) -> Result<Vec<ImagePart>> {
         for part in split_images(child, target)? {
             parts.push(match part {
                 ImagePart::Inline(child) => {
-                    let wrapper = match &item.tag {
-                        Some(Tag::Link { dest_url, .. }) => markdown_link(dest_url),
-                        Some(Tag::Strong) => strong(),
-                        Some(Tag::Emphasis) => emphasis(),
-                        Some(Tag::Strikethrough) => strikethrough(),
-                        _ => bail!("unsupported image container"),
+                    let wrapper = if let Some(kind) = item.inline_kind {
+                        kind.node()
+                    } else {
+                        match &item.tag {
+                            Some(Tag::Link { dest_url, .. }) => markdown_link(dest_url),
+                            Some(Tag::Strong) => strong(),
+                            Some(Tag::Emphasis) => emphasis(),
+                            Some(Tag::Strikethrough) => strikethrough(),
+                            _ => bail!("unsupported image container"),
+                        }
                     };
                     ImagePart::Inline(wrapper.child(child))
                 }

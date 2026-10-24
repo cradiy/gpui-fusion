@@ -110,6 +110,7 @@ pub(super) fn normalize(items: Vec<Item>, depth: usize) -> Result<Vec<Item>> {
                     anyhow::bail!("Markdown exceeds nesting limits");
                 }
                 stack.push(Item {
+                    inline_kind: None,
                     details: Some(Details::new("").open(open)),
                     reference: None,
                     tag: None,
@@ -145,6 +146,7 @@ fn push(result: &mut Vec<Item>, stack: &mut [Item], item: Item) {
 
 fn raw_item(text: String) -> Item {
     Item {
+        inline_kind: None,
         details: None,
         reference: None,
         tag: None,

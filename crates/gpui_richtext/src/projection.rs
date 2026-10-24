@@ -421,6 +421,9 @@ impl Registry {
             Ok(Contribution::StyledInline(theme.strikethrough.clone()))
         });
         registry.register::<Mark>(move |_| Ok(Contribution::StyledInline(theme.mark.clone())));
+        registry.register::<crate::Keyboard>(move |_| {
+            Ok(Contribution::StyledInline(theme.keyboard.clone()))
+        });
         registry.register::<Code>(move |_| Ok(Contribution::StyledInline(theme.code.clone())));
         registry.register::<CodeBlock>(move |block| {
             Ok(Contribution::CodeBlock {

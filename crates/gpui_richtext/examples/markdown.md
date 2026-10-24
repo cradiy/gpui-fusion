@@ -84,3 +84,7 @@ let preserve_unknown = true;
 The artwork is loaded from a local file. Text following an image remains selectable.[^capture]
 
 [^capture]: Capture files retain the transport representation. Decoding produces a separate interpretation without changing those bytes.
+
+## Reading controls
+
+Press <kbd>F3</kbd> to locate the next match. <mark>Selected matches</mark> remain visible while reviewing <u>pending entries</u>.<br>Use the navigation links to return to a section.

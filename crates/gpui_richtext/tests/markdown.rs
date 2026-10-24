@@ -312,3 +312,61 @@ fn callout_children_keep_local_and_document_coordinates_during_streaming() {
         "app:profile"
     );
 }
+
+#[test]
+fn inline_html_preserves_styles_links_images_and_literal_boundaries() {
+    let source = "# <mark>Review</mark>\n\nPress <kbd>F8</kbd>; <mark>**urgent** [record](app:record) <u>later</u></mark><br>plain ` <kbd>x</kbd> ` <u>unclosed\n\n| Label | Value |\n| --- | --- |\n| <mark>Flag</mark> | <kbd>Tab</kbd> |\n\nImage <mark>before ![plot](plot.svg) after</mark>.\n\nOpaque <kbd class=\"key\">raw</kbd>.\n";
+    let theme = gpui_richtext::RichTextTheme::dark();
+    let projection = theme
+        .registry()
+        .compile(&markdown::parse(source).unwrap())
+        .unwrap();
+    assert!(
+        projection
+            .text()
+            .contains("Press F8; urgent record later\nplain <kbd>x</kbd> <u>unclosed")
+    );
+    assert!(projection.text().contains("<kbd class=\"key\">raw</kbd>"));
+    let styled = |value: &str| {
+        let start = projection.text().find(value).unwrap();
+        projection
+            .spans()
+            .iter()
+            .find(|span| span.range.contains(&start))
+            .unwrap()
+    };
+    assert_eq!(styled("F8").font_family.as_deref(), Some("monospace"));
+    assert_eq!(
+        styled("urgent").style.font_weight,
+        Some(gpui::FontWeight::BOLD)
+    );
+    assert_eq!(
+        styled("urgent").style.background_color,
+        theme.text.mark.highlight.background_color
+    );
+    assert!(styled("later").style.underline.is_some());
+    assert_eq!(
+        styled("after").style.background_color,
+        theme.text.mark.highlight.background_color
+    );
+    assert!(styled("plain").style.background_color.is_none());
+    assert_eq!(projection.links()[0].target.as_ref(), "app:record");
+    assert!(
+        projection
+            .blocks()
+            .iter()
+            .any(|block| matches!(block.kind, BlockKind::Image(_)))
+    );
+    assert!(
+        projection
+            .anchors()
+            .iter()
+            .any(|anchor| anchor.name.as_ref() == "heading:review")
+    );
+    let mut stream = markdown::MarkdownStream::new(theme.registry());
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    assert_eq!(stream.finish().unwrap().text(), projection.text());
+}

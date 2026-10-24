@@ -82,7 +82,8 @@ pub struct TableRow {
     pub header: bool,
 }
 
-/// A cell containing inline nodes. Empty cells are supported.
+/// A cell containing either inline nodes or block nodes. Wrap inline content in
+/// paragraphs when combining it with images or other blocks. Empty cells are supported.
 pub struct TableCell;
 
 /// Compiled cell content in the document's text stream.

@@ -60,7 +60,9 @@ Payload
 
 ## Application artwork
 
-[![Application icon](IMAGE_SOURCE "Project artwork")](https://github.com/zed-industries/zed)
+| Preview | Details |
+| :---: | :--- |
+| [![Application icon](IMAGE_SOURCE "Project artwork")](https://github.com/zed-industries/zed) | **Project artwork** loaded from a local file. Open the preview to visit its source project. |
 
 The artwork is loaded from a local file. Text following an image remains selectable.[^capture]
 

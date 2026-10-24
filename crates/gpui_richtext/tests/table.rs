@@ -66,7 +66,7 @@ fn invalid_table_structure_and_column_dimensions_are_rejected() {
         table()
             .child(table_row().child(table_cell()))
             .child(table_row().child(table_cell()).child(table_cell())),
-        table().child(table_row().child(table_cell().child(paragraph()))),
+        table().child(table_row().child(table_cell().child(paragraph()).child(text("mixed")))),
         paragraph().child(table_row().child(table_cell())),
         table_cell().child(text("orphan")),
         node(Table::new().columns([TableColumn::flex(f32::NAN)]))

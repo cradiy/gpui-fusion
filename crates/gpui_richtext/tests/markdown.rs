@@ -2,6 +2,29 @@
 use gpui_richtext::{BlockKind, ListMarker, Registry, markdown};
 
 #[test]
+fn table_images_compile_during_streaming_without_absorbing_adjacent_cells() {
+    let source = "| Asset | Label |\n| --- | --- |\n| Before [![图](plot.svg)](app:plot) after | **Legend** |\n";
+    let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    let projection = stream.finish().unwrap();
+    let BlockKind::Table(table) = &projection.blocks()[0].kind else {
+        panic!("table missing")
+    };
+    let row = &table.rows[1];
+    assert_eq!(
+        &projection.text()[row.cells[0].range.clone()],
+        "Before \n\n图\n\n after"
+    );
+    assert_eq!(&projection.text()[row.cells[1].range.clone()], "Legend");
+    let link = &projection.links()[0];
+    assert_eq!(&projection.text()[link.range.clone()], "图");
+    assert_eq!(link.target.as_ref(), "app:plot");
+}
+
+#[test]
 fn linked_images_split_styled_paragraphs_without_losing_targets_or_text() {
     let source = "**Before [![地图](map.png \"Overview\") *catalog*](app:atlas) after**.\n\n[![](empty.png)](app:empty)\n";
     let projection = Registry::with_standard_nodes()

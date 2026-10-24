@@ -1068,13 +1068,18 @@ impl RichText {
                                     self.fragment(cell)
                                         .w_full()
                                         .min_h(line_height)
-                                        .when(*footnote, |view| {
-                                            let size =
-                                                text_style.font_size.to_pixels(window.rem_size())
+                                        .when(
+                                            *footnote && cell.projection.blocks().is_empty(),
+                                            |view| {
+                                                let size = text_style
+                                                    .font_size
+                                                    .to_pixels(window.rem_size())
                                                     * self.footnote_style.font_scale;
-                                            view.text_size(size)
-                                                .line_height(size * self.footnote_style.line_height)
-                                        })
+                                                view.text_size(size).line_height(
+                                                    size * self.footnote_style.line_height,
+                                                )
+                                            },
+                                        )
                                         .text_align(column.align),
                                 ),
                             );

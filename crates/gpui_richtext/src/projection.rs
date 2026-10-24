@@ -68,8 +68,33 @@ pub enum Contribution {
     },
 }
 
+impl Contribution {
+    fn is_block(&self) -> bool {
+        matches!(
+            self,
+            Contribution::Paragraph(_)
+                | Contribution::Alert(_)
+                | Contribution::DefinitionList
+                | Contribution::DefinitionTerm(_)
+                | Contribution::DefinitionDescription
+                | Contribution::Rule
+                | Contribution::Image(_)
+                | Contribution::BlockQuote(_)
+                | Contribution::ListEntry { .. }
+                | Contribution::Footnote { .. }
+                | Contribution::Table(_)
+                | Contribution::Heading { .. }
+                | Contribution::Quote(_)
+                | Contribution::ListItem { .. }
+                | Contribution::Blocks(_)
+                | Contribution::CodeBlock { .. }
+        )
+    }
+}
+
 #[derive(Default)]
 struct Compilation {
+    cells: HashMap<NodeId, Arc<Projection>>,
     footnote: bool,
     anchors: Vec<crate::AnchorSpan>,
     #[cfg(feature = "syntax-highlighting")]
@@ -143,6 +168,68 @@ impl Compilation {
 }
 
 type Resolver = Box<dyn Fn(&dyn Any) -> Result<Contribution>>;
+
+#[cfg(test)]
+mod cell_content_tests {
+    use super::*;
+    use crate::compose::*;
+
+    #[test]
+    fn cell_projections_keep_images_empty_links_and_global_source_coordinates() {
+        let document = Document::from_roots([
+            paragraph().child(text("Lead")),
+            table().child(
+                table_row()
+                    .child(
+                        table_cell()
+                            .child(paragraph().child(text("Before")))
+                            .child(node(
+                                crate::Image::new("assets/diagram.svg", "図").link("app:diagram"),
+                            ))
+                            .child(paragraph().child(link_with_text("app:details", "Details"))),
+                    )
+                    .child(table_cell().child(node(
+                        crate::Image::new("assets/empty.svg", "").link("app:empty"),
+                    ))),
+            ),
+            paragraph().child(text("Tail")),
+        ])
+        .unwrap();
+        let projection = Registry::with_standard_nodes().compile(&document).unwrap();
+        let RenderPart::Table { rows, .. } = &projection.parts[1] else {
+            panic!("missing table")
+        };
+        let first = &rows[0].cells[0];
+        assert!(matches!(
+            &first.projection.parts[1],
+            RenderPart::Embed(BlockSpan {
+                kind: BlockKind::Image(_),
+                ..
+            })
+        ));
+        assert_eq!(first.projection.text().as_ref(), "Before\n\n図\n\nDetails");
+        let local = first.projection.links().last().unwrap();
+        let global = projection
+            .links()
+            .iter()
+            .find(|link| link.node == local.node)
+            .unwrap();
+        assert_eq!(global.range.start, first.offset + local.range.start);
+        assert_eq!(&projection.text()[global.range.clone()], "Details");
+        let empty = &rows[0].cells[1].projection;
+        assert!(empty.text().is_empty());
+        assert!(matches!(
+            &empty.parts[0],
+            RenderPart::Embed(BlockSpan {
+                kind: BlockKind::Image(_),
+                ..
+            })
+        ));
+        assert_eq!(empty.links()[0].target.as_ref(), "app:empty");
+        assert!(empty.links()[0].range.is_empty());
+        assert!(projection.text().ends_with("\n\nTail"));
+    }
+}
 
 #[cfg(all(test, feature = "syntax-highlighting"))]
 mod highlight_cache_tests {
@@ -379,6 +466,7 @@ impl Registry {
             *self.highlights.borrow_mut() = output.highlights;
         }
         let mut projection = Projection {
+            cells: output.cells,
             anchors: output.anchors,
             text: output.text.into(),
             spans: output.spans,
@@ -400,27 +488,7 @@ impl Registry {
     ) -> Result<()> {
         let node = &document.nodes[&id];
         let contribution = self.resolve_node(document, id)?;
-        if root
-            != matches!(
-                contribution,
-                Contribution::Paragraph(_)
-                    | Contribution::Alert(_)
-                    | Contribution::DefinitionList
-                    | Contribution::DefinitionTerm(_)
-                    | Contribution::DefinitionDescription
-                    | Contribution::Rule
-                    | Contribution::Image(_)
-                    | Contribution::BlockQuote(_)
-                    | Contribution::ListEntry { .. }
-                    | Contribution::Footnote { .. }
-                    | Contribution::Table(_)
-                    | Contribution::Heading { .. }
-                    | Contribution::Quote(_)
-                    | Contribution::ListItem { .. }
-                    | Contribution::Blocks(_)
-                    | Contribution::CodeBlock { .. }
-            )
-        {
+        if root != contribution.is_block() {
             bail!(
                 "node {id:?}: expected {} content",
                 if root { "block" } else { "inline" }
@@ -471,6 +539,7 @@ impl Registry {
                 #[cfg(feature = "syntax-highlighting")]
                 output.highlights.extend(body.highlights);
                 let mut projection = Projection {
+                    cells: body.cells,
                     anchors: body.anchors,
                     text: body.text.into(),
                     spans: body.spans,
@@ -842,17 +911,62 @@ impl Registry {
                 let cell_start = output.text.len();
                 let style = row_style.inherit(&style);
                 let cell_node = &document.nodes[&cell_id];
+                let block_content = cell_node
+                    .children
+                    .first()
+                    .map(|child| {
+                        self.resolve_node(document, *child)
+                            .map(|contribution| contribution.is_block())
+                    })
+                    .transpose()?
+                    .unwrap_or(false);
+                let mut content = Compilation {
+                    footnote: output.footnote,
+                    ..Default::default()
+                };
                 for child in &cell_node.children {
-                    self.append(document, *child, false, style.clone(), output)?;
+                    self.append(document, *child, block_content, style.clone(), &mut content)?;
                 }
                 if cell_node.children.is_empty() {
-                    output.spans.push(TextSpan {
+                    content.spans.push(TextSpan {
                         node: cell_id,
-                        range: cell_start..cell_start,
+                        range: 0..0,
                         style: style.highlight,
                         font_family: style.font_family,
                     });
                 }
+                output.text.push_str(&content.text);
+                output
+                    .spans
+                    .extend(content.spans.iter().cloned().map(|mut span| {
+                        span.range = cell_start + span.range.start..cell_start + span.range.end;
+                        span
+                    }));
+                output
+                    .links
+                    .extend(content.links.iter().cloned().map(|mut link| {
+                        link.range = cell_start + link.range.start..cell_start + link.range.end;
+                        link
+                    }));
+                output
+                    .anchors
+                    .extend(content.anchors.iter().cloned().map(|mut anchor| {
+                        anchor.offset += cell_start;
+                        anchor
+                    }));
+                #[cfg(feature = "syntax-highlighting")]
+                output.highlights.extend(content.highlights);
+                let mut projection = Projection {
+                    cells: content.cells,
+                    anchors: content.anchors,
+                    text: content.text.into(),
+                    spans: content.spans,
+                    links: content.links,
+                    blocks: content.blocks,
+                    parts: Vec::new(),
+                };
+                projection.prepare_parts();
+                output.cells.insert(cell_id, Arc::new(projection));
                 cells.push(crate::TableCellSpan {
                     node: cell_id,
                     range: cell_start..output.text.len(),
@@ -890,6 +1004,7 @@ pub struct TextSpan {
 /// Immutable text and source mapping, compiled outside the paint path.
 #[derive(Default, Debug)]
 pub struct Projection {
+    cells: HashMap<NodeId, Arc<Projection>>,
     anchors: Vec<crate::AnchorSpan>,
     text: SharedString,
     spans: Vec<TextSpan>,
@@ -988,6 +1103,7 @@ impl Projection {
                     && candidate.start <= range.end
         };
         Arc::new(Self {
+            cells: HashMap::new(),
             anchors: self
                 .anchors
                 .iter()
@@ -1095,7 +1211,7 @@ impl Projection {
                                 .map(|cell| CellProjection {
                                     node: cell.node,
                                     offset: cell.range.start,
-                                    projection: self.slice(cell.range.clone()),
+                                    projection: self.cells[&cell.node].clone(),
                                 })
                                 .collect(),
                         })

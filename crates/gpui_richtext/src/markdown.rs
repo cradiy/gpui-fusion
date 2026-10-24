@@ -213,7 +213,12 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
                 for row in &item.children {
                     let mut cells = Vec::new();
                     for cell in &row.children {
-                        cells.push(table_cell().children(inlines(&cell.children)?));
+                        let content = if cell.children.iter().any(contains_image) {
+                            blocks(&cell.children)?
+                        } else {
+                            inlines(&cell.children)?
+                        };
+                        cells.push(table_cell().children(content));
                     }
                     rows.push(
                         node(TableRow {

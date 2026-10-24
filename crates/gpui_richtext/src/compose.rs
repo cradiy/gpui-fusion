@@ -64,6 +64,10 @@ pub fn block_quote() -> NodeTree {
     node(crate::BlockQuote)
 }
 
+pub fn details(summary: impl Into<SharedString>) -> NodeTree {
+    node(crate::Details::new(summary))
+}
+
 pub fn alert(kind: crate::AlertKind) -> NodeTree {
     node(crate::Alert::new(kind))
 }

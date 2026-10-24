@@ -54,6 +54,21 @@ Payload
 
 ## Field summary
 
+<details>
+<summary>Decode options</summary>
+
+Keep the original frame when testing a different decoder configuration.
+
+- Preserve unknown fields.
+- Display byte offsets alongside interpreted values.
+
+```rust
+let strict = false;
+let preserve_unknown = true;
+```
+
+</details>
+
 | Field | Encoding | Bytes |
 | :--- | :---: | ---: |
 | Signature | ASCII | 4 |

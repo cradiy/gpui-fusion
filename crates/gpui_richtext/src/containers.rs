@@ -50,3 +50,34 @@ pub struct DefinitionList;
 pub struct DefinitionTerm;
 /// Block content describing the preceding term.
 pub struct DefinitionDescription;
+
+/// A collapsible block container with an application-supplied summary.
+#[derive(Clone, Debug)]
+pub struct Details {
+    pub summary: SharedString,
+    /// Initial state for a newly mounted view.
+    pub open: bool,
+}
+
+impl Details {
+    pub fn new(summary: impl Into<SharedString>) -> Self {
+        Self {
+            summary: summary.into(),
+            open: false,
+        }
+    }
+
+    pub fn open(mut self, open: bool) -> Self {
+        self.open = open;
+        self
+    }
+}
+
+#[derive(Clone)]
+pub struct DetailsStyle {
+    pub background: Hsla,
+    pub header_background: Hsla,
+    pub header_hover_background: Hsla,
+    pub border: Hsla,
+    pub icon: Hsla,
+}

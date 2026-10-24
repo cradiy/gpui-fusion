@@ -20,6 +20,7 @@ pub struct Paragraph;
 
 /// The semantic contribution of a registered payload type.
 pub enum Contribution {
+    Details(crate::Details),
     Footnote {
         marker: ListMarker,
         style: InlineStyle,
@@ -73,6 +74,7 @@ impl Contribution {
         matches!(
             self,
             Contribution::Paragraph(_)
+                | Contribution::Details(_)
                 | Contribution::Alert(_)
                 | Contribution::DefinitionList
                 | Contribution::DefinitionTerm(_)
@@ -344,6 +346,7 @@ impl Registry {
             })
         });
         registry.register::<crate::Alert>(|alert| Ok(Contribution::Alert(alert.clone())));
+        registry.register::<crate::Details>(|details| Ok(Contribution::Details(details.clone())));
         registry.register::<crate::DefinitionList>(|_| Ok(Contribution::DefinitionList));
         let term_style = theme.definition_term.clone();
         registry.register::<crate::DefinitionTerm>(move |_| {
@@ -508,7 +511,7 @@ impl Registry {
                     self.append(document, *child, false, inherited.clone(), output)?;
                 }
             }
-            Contribution::Alert(alert) => {
+            container @ (Contribution::Alert(_) | Contribution::Details(_)) => {
                 let mut body = Compilation {
                     footnote: output.footnote,
                     ..Default::default()
@@ -548,6 +551,12 @@ impl Registry {
                     parts: Vec::new(),
                 };
                 projection.prepare_parts();
+                let body = Arc::new(projection);
+                let kind = match container {
+                    Contribution::Alert(alert) => BlockKind::Alert { alert, body },
+                    Contribution::Details(details) => BlockKind::Details { details, body },
+                    _ => unreachable!(),
+                };
                 output.blocks.push(BlockSpan {
                     footnote: output.footnote,
                     node: id,
@@ -555,10 +564,7 @@ impl Registry {
                     indent: output.indent,
                     quote_depth: output.quote_depth,
                     quote_path: output.quote_path.clone(),
-                    kind: BlockKind::Alert {
-                        alert,
-                        body: Arc::new(projection),
-                    },
+                    kind,
                 });
             }
             Contribution::DefinitionList => {
@@ -1055,6 +1061,10 @@ pub struct BlockSpan {
 
 #[derive(Clone, Debug)]
 pub enum BlockKind {
+    Details {
+        details: crate::Details,
+        body: Arc<Projection>,
+    },
     Alert {
         alert: crate::Alert,
         body: Arc<Projection>,
@@ -1147,6 +1157,7 @@ impl Projection {
                             | BlockKind::Rule
                             | BlockKind::Image(_)
                             | BlockKind::Alert { .. }
+                            | BlockKind::Details { .. }
                     ) && block.range.start >= range.start
                         && block.range.end <= range.end
                 })
@@ -1168,6 +1179,7 @@ impl Projection {
                     | BlockKind::Rule
                     | BlockKind::Image(_)
                     | BlockKind::Alert { .. }
+                    | BlockKind::Details { .. }
             )
         }) {
             return;
@@ -1181,6 +1193,7 @@ impl Projection {
                     | BlockKind::Rule
                     | BlockKind::Image(_)
                     | BlockKind::Alert { .. }
+                    | BlockKind::Details { .. }
             ) {
                 continue;
             }

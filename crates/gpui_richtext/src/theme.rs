@@ -5,6 +5,7 @@ use gpui::{Hsla, rgb, rgba};
 /// `RichText::theme` when rendering. Changing inline colors requires recompilation.
 #[derive(Clone)]
 pub struct RichTextTheme {
+    pub details: crate::DetailsStyle,
     pub footnote: crate::FootnoteStyle,
     /// Colors in Note, Tip, Important, Warning, Caution order.
     pub alerts: [crate::AlertStyle; 5],
@@ -29,6 +30,13 @@ impl Default for RichTextTheme {
 impl RichTextTheme {
     pub fn light() -> Self {
         Self {
+            details: crate::DetailsStyle {
+                background: rgb(0xffffff).into(),
+                header_background: rgb(0xf6f8fa).into(),
+                header_hover_background: rgb(0xeef2f6).into(),
+                border: rgb(0xd6dee8).into(),
+                icon: rgb(0x64748b).into(),
+            },
             footnote: crate::FootnoteStyle::default(),
             alerts: Self::alert_colors([0x2563eb, 0x16805d, 0x8250c4, 0x9a6700, 0xcf353d], 0.06),
             text: TextTheme::default(),
@@ -58,6 +66,13 @@ impl RichTextTheme {
         text.mark.highlight.background_color = Some(rgba(0xe5b70038).into());
         Self {
             alerts: Self::alert_colors([0x79b8ff, 0x56d6a0, 0xc4a0f5, 0xeac56b, 0xff8d95], 0.08),
+            details: crate::DetailsStyle {
+                background: rgb(0x161b22).into(),
+                header_background: rgb(0x1b2430).into(),
+                header_hover_background: rgb(0x263344).into(),
+                border: rgb(0x303b4a).into(),
+                icon: rgb(0x9daec2).into(),
+            },
             footnote: crate::FootnoteStyle::default(),
             text,
             foreground: rgb(0xdce4ee).into(),

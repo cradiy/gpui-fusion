@@ -36,6 +36,11 @@ type LinkTooltipBuilder =
 type ImageResolver = Rc<dyn Fn(&crate::Image) -> gpui::ImageSource>;
 type AnchorPositions = std::collections::HashMap<gpui::SharedString, gpui::Point<gpui::Pixels>>;
 
+struct DetailsState {
+    open: bool,
+    focus: gpui::FocusHandle,
+}
+
 /// Selectable rich text over a compiled node document.
 ///
 /// Use a stable ID and reuse the projection between frames. Surface and inherited
@@ -65,6 +70,7 @@ pub struct RichText {
     navigation: Option<Rc<std::cell::RefCell<AnchorPositions>>>,
     scroll_handle: Option<gpui::ScrollHandle>,
     footnote_style: crate::FootnoteStyle,
+    details_style: crate::DetailsStyle,
 }
 
 impl RichText {
@@ -92,12 +98,14 @@ impl RichText {
             navigation: None,
             scroll_handle: None,
             footnote_style: crate::FootnoteStyle::default(),
+            details_style: crate::RichTextTheme::light().details,
         }
     }
 
     /// Apply surface colors; compile with the same theme's registry for inline colors.
     /// Subsequent styling calls can override individual values.
     pub fn theme(mut self, theme: &crate::RichTextTheme) -> Self {
+        self.details_style = theme.details.clone();
         self = self.footnote_style(theme.footnote);
         self.alert_styles = theme.alerts.clone();
         self.selection = theme.selection;
@@ -110,6 +118,11 @@ impl RichText {
 
     pub fn alert_style(mut self, kind: crate::AlertKind, style: crate::AlertStyle) -> Self {
         self.alert_styles[kind.index()] = style;
+        self
+    }
+
+    pub fn details_style(mut self, style: crate::DetailsStyle) -> Self {
+        self.details_style = style;
         self
     }
 
@@ -238,12 +251,12 @@ impl RichText {
 }
 
 impl RenderOnce for RichText {
-    fn render(mut self, window: &mut gpui::Window, _: &mut gpui::App) -> impl IntoElement {
+    fn render(mut self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
         if self.navigation.is_none() {
             self.navigation = Some(Rc::default());
         }
         if !self.projection.parts.is_empty() {
-            return self.render_parts(window);
+            return self.render_parts(window, cx);
         }
         let mut surface = div().relative().whitespace_normal();
         surface.style().refine(&self.style);
@@ -852,7 +865,7 @@ impl RichText {
         child
     }
 
-    fn render_parts(&self, window: &gpui::Window) -> gpui::AnyElement {
+    fn render_parts(&self, window: &mut gpui::Window, cx: &mut gpui::App) -> gpui::AnyElement {
         let mut text_style = window.text_style();
         text_style.refine(&self.style.text);
         let line_height = text_style.line_height_in_pixels(window.rem_size());
@@ -870,6 +883,101 @@ impl RichText {
                 }
                 crate::projection::RenderPart::Embed(block) => {
                     let content = match &block.kind {
+                        BlockKind::Details { details, body } => {
+                            let state = window.with_id(self.id.clone(), |window| {
+                                window.use_keyed_state(
+                                    ("details-state", block.node.0 as usize),
+                                    cx,
+                                    |_, cx| DetailsState {
+                                        open: details.open,
+                                        focus: cx.focus_handle().tab_stop(true),
+                                    },
+                                )
+                            });
+                            let expanded = state.read(cx).open;
+                            let focus = state.read(cx).focus.clone();
+                            let key_state = state.clone();
+                            let style = &self.details_style;
+                            let hover = style.header_hover_background;
+                            div()
+                                .w_full()
+                                .min_w_0()
+                                .border_1()
+                                .border_color(style.border)
+                                .rounded(gpui::px(6.))
+                                .overflow_hidden()
+                                .bg(style.background)
+                                .child(
+                                    div()
+                                        .id(("details-summary", block.node.0 as usize))
+                                        .track_focus(&focus)
+                                        .aria_label(details.summary.clone())
+                                        .aria_expanded(expanded)
+                                        .role(gpui::Role::Button)
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .px(gpui::px(12.))
+                                        .py(gpui::px(8.))
+                                        .cursor_pointer()
+                                        .bg(style.header_background)
+                                        .hover(move |header| header.bg(hover))
+                                        .focus_visible(move |header| header.bg(hover))
+                                        .when(expanded, |header| {
+                                            header.border_b_1().border_color(style.border)
+                                        })
+                                        .on_click(move |_, window, cx| {
+                                            cx.stop_propagation();
+                                            focus.focus(window, cx);
+                                            state.update(cx, |state, cx| {
+                                                state.open = !state.open;
+                                                cx.notify();
+                                            });
+                                        })
+                                        .on_key_down(move |event, _, cx| {
+                                            if matches!(
+                                                event.keystroke.key.as_str(),
+                                                "enter" | "space"
+                                            ) {
+                                                cx.stop_propagation();
+                                                key_state.update(cx, |state, cx| {
+                                                    state.open = !state.open;
+                                                    cx.notify();
+                                                });
+                                            }
+                                        })
+                                        .child(
+                                            gpui::svg()
+                                                .path(if expanded {
+                                                    gpui_icons::GpuiIcons::LucideChevronDown
+                                                } else {
+                                                    gpui_icons::GpuiIcons::LucideChevronRight
+                                                })
+                                                .size(gpui::px(16.))
+                                                .flex_shrink_0()
+                                                .text_color(style.icon),
+                                        )
+                                        .child(
+                                            div()
+                                                .min_w_0()
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .child(details.summary.clone()),
+                                        ),
+                                )
+                                .when(expanded, |view| {
+                                    view.child(
+                                        div().px(gpui::px(12.)).py(gpui::px(8.)).child(
+                                            self.fragment(&crate::projection::CellProjection {
+                                                node: block.node,
+                                                offset: block.range.start,
+                                                projection: body.clone(),
+                                            })
+                                            .w_full(),
+                                        ),
+                                    )
+                                })
+                                .into_any_element()
+                        }
                         BlockKind::Alert { alert, body } => {
                             let style = &self.alert_styles[alert.kind.index()];
                             let title = alert.title.clone().or_else(|| style.title.clone());
@@ -1153,6 +1261,77 @@ struct LinkTooltip(gpui::SharedString);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn details_toggle_by_pointer_and_keyboard_and_retain_state_after_resize(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use crate::compose::*;
+        struct Page {
+            projection: Arc<Projection>,
+            scroll: gpui::ScrollHandle,
+        }
+        impl gpui::Render for Page {
+            fn render(
+                &mut self,
+                _: &mut gpui::Window,
+                _: &mut gpui::Context<Self>,
+            ) -> impl IntoElement {
+                div()
+                    .id("viewport")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .child(
+                        RichText::new("document", self.projection.clone())
+                            .w_full()
+                            .text_size(gpui::px(16.))
+                            .line_height(gpui::px(24.)),
+                    )
+            }
+        }
+        let document = crate::Document::from_roots([details("Metrics")
+            .children((0..24).map(|index| paragraph().child(text(format!("Sample {index}")))))])
+        .unwrap();
+        let projection = Arc::new(
+            crate::Registry::with_standard_nodes()
+                .compile(&document)
+                .unwrap(),
+        );
+        let scroll = gpui::ScrollHandle::new();
+        let observed = scroll.clone();
+        let window = cx.open_window(gpui::size(gpui::px(400.), gpui::px(200.)), move |_, _| {
+            Page { projection, scroll }
+        });
+        let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.update(|window, cx| {
+            window.draw(cx).clear();
+        });
+        assert_eq!(observed.max_offset().y, gpui::px(0.));
+        visual.simulate_click(
+            gpui::point(gpui::px(24.), gpui::px(20.)),
+            Default::default(),
+        );
+        visual.update(|window, cx| {
+            window.draw(cx).clear();
+        });
+        assert!(observed.max_offset().y > gpui::px(200.));
+        visual.simulate_resize(gpui::size(gpui::px(240.), gpui::px(200.)));
+        visual.update(|window, cx| {
+            window.draw(cx).clear();
+        });
+        assert!(observed.max_offset().y > gpui::px(200.));
+        visual.simulate_keystrokes("space");
+        visual.update(|window, cx| {
+            window.draw(cx).clear();
+        });
+        assert_eq!(observed.max_offset().y, gpui::px(0.));
+        visual.simulate_keystrokes("enter");
+        visual.update(|window, cx| {
+            window.draw(cx).clear();
+        });
+        assert!(observed.max_offset().y > gpui::px(200.));
+    }
 
     #[gpui::test]
     fn internal_links_scroll_across_fragments_and_back_after_reflow(cx: &mut gpui::TestAppContext) {

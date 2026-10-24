@@ -11,6 +11,7 @@ pub use anchor::{
 mod code_block;
 pub mod compose;
 mod containers;
+pub use containers::{Details, DetailsStyle};
 mod document;
 #[cfg(feature = "markdown")]
 pub mod markdown;

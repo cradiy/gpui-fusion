@@ -2,6 +2,41 @@
 use gpui_richtext::{BlockKind, ListMarker, Registry, markdown};
 
 #[test]
+fn disclosures_parse_nested_markdown_without_consuming_fenced_tags() {
+    let source = "<details open>\n<summary>Diagnostics &amp; logs</summary>\n\nRead [report](app:report).\n\n```html\n</details>\n```\n\n<details>\n<summary>Trace</summary>\n\n| Key | Value |\n| --- | --- |\n| Mode | Debug |\n\n</details>\n\n</details>\n\nAfter.\n";
+    let registry = Registry::with_standard_nodes();
+    let projection = registry.compile(&markdown::parse(source).unwrap()).unwrap();
+    let BlockKind::Details { details, body } = &projection.blocks()[0].kind else {
+        panic!("missing details")
+    };
+    assert!(details.open);
+    assert_eq!(details.summary.as_ref(), "Diagnostics & logs");
+    assert_eq!(body.links()[0].target.as_ref(), "app:report");
+    let code = body
+        .blocks()
+        .iter()
+        .find(|block| matches!(block.kind, BlockKind::Code { .. }))
+        .unwrap();
+    assert_eq!(&body.text()[code.range.clone()], "</details>\n");
+    let BlockKind::Details {
+        details: nested,
+        body: nested_body,
+    } = &body.blocks()[2].kind
+    else {
+        panic!("missing nested details")
+    };
+    assert!(!nested.open);
+    assert!(matches!(nested_body.blocks()[0].kind, BlockKind::Table(_)));
+    assert!(projection.text().ends_with("\n\nAfter."));
+    let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    assert_eq!(stream.finish().unwrap().text(), projection.text());
+}
+
+#[test]
 fn heading_fragments_resolve_unicode_duplicates_explicit_ids_and_image_links() {
     let source = "[First](#温度) [Second](#温度-1) [Named](#sensor) [Encoded](#%E6%B8%A9%E5%BA%A6)\n\n# **温度**\n\n## 温度\n\n## Display `mode` {#sensor}\n\n[![Jump](jump.svg)](#sensor)\n\n# footnote-1\n\nText[^detail].\n\n[^detail]: Additional data.\n";
     let registry = Registry::with_standard_nodes();

@@ -1,14 +1,17 @@
 //! Markdown conversion into editable-by-the-producer rich-text node snapshots.
-//! Images occupy their own blocks. HTML is displayed as literal text.
+//! Images occupy their own blocks. Standalone details/summary tags form collapsible
+//! blocks; other HTML is displayed as literal text.
 use crate::{compose::*, *};
 use anyhow::{Result, bail};
 use pulldown_cmark::{Event, Options, Parser, Tag};
+mod details;
 mod footnotes;
 mod headings;
 mod stream;
 pub use stream::MarkdownStream;
 
 struct Item {
+    details: Option<Details>,
     reference: Option<(usize, usize)>,
     tag: Option<Tag<'static>>,
     event: Option<Event<'static>>,
@@ -21,7 +24,18 @@ struct Item {
 /// Headings accept `{#id}`; otherwise IDs use lowercase letters and digits with
 /// whitespace replaced by hyphens. Duplicate generated IDs receive numeric suffixes.
 /// Fragment links resolve to heading IDs within this document.
+/// Disclosure tags occupy their own lines; summaries use one line. An optional
+/// `open` attribute on `<details>` sets the initial expanded state.
 pub fn parse(source: &str) -> Result<Document> {
+    let mut items = parse_items(source, 0)?;
+    headings::assign(&mut items)?;
+    Document::from_roots(footnotes::convert(items)?)
+}
+
+fn parse_items(source: &str, depth: usize) -> Result<Vec<Item>> {
+    if depth > 256 {
+        bail!("Markdown exceeds nesting limits");
+    }
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
@@ -30,6 +44,7 @@ pub fn parse(source: &str) -> Result<Document> {
         | Options::ENABLE_FOOTNOTES
         | Options::ENABLE_HEADING_ATTRIBUTES;
     let mut stack = vec![Item {
+        details: None,
         reference: None,
         tag: None,
         event: None,
@@ -41,6 +56,7 @@ pub fn parse(source: &str) -> Result<Document> {
         }
         match event {
             Event::Start(tag) => stack.push(Item {
+                details: None,
                 reference: None,
                 tag: Some(tag.into_static()),
                 event: None,
@@ -51,6 +67,7 @@ pub fn parse(source: &str) -> Result<Document> {
                 stack.last_mut().unwrap().children.push(item);
             }
             event => stack.last_mut().unwrap().children.push(Item {
+                details: None,
                 reference: None,
                 tag: None,
                 event: Some(event.into_static()),
@@ -58,9 +75,7 @@ pub fn parse(source: &str) -> Result<Document> {
             }),
         }
     }
-    let mut items = stack.pop().unwrap().children;
-    headings::assign(&mut items)?;
-    Document::from_roots(footnotes::convert(items)?)
+    details::normalize(stack.pop().unwrap().children, depth)
 }
 
 fn plain(items: &[Item]) -> String {
@@ -125,6 +140,11 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
     let mut result = Vec::new();
     let mut pending = Vec::new();
     for item in items {
+        if let Some(details) = &item.details {
+            flush(&mut result, &mut pending);
+            result.push(node(details.clone()).children(blocks(&item.children)?));
+            continue;
+        }
         if matches!(
             item.tag,
             Some(Tag::Link { .. } | Tag::Strong | Tag::Emphasis | Tag::Strikethrough)

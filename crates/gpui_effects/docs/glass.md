@@ -49,7 +49,7 @@ FrostedGlass::new()
 
 Use `FrostedGlassAppearance::dark()` or `::light()` as a starting point, or
 construct the public appearance struct directly. `blur_radius` controls the
-two-dimensional Gaussian kernel; `sheen` controls the subtle glass surface;
+renderer’s separable Gaussian blur; `sheen` controls the subtle glass surface;
 `merge_distance` controls how close two shapes must be before their masks join.
 
 `FrostedGlassAppearance` contains only glass-material parameters. Use the

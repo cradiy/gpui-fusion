@@ -34,6 +34,8 @@ thread_local! {
 
 /// Returns the host platform while the Android application's main function is running.
 /// Android applications must be created by a `GpuiSession` with a live Surface.
+/// This startup accessor panics outside the application main function. Use `App`
+/// service methods during event callbacks, or retain platform service handles at startup.
 pub fn current_platform() -> Rc<AndroidPlatform> {
     CURRENT
         .with(|current| {
@@ -471,6 +473,36 @@ impl Host {
         })
     }
 
+    pub fn audio_output_operation(&self, operation: i32, token: u64, id: &str) -> Result<()> {
+        self.with_env(|env| {
+            let id = env.new_string(id)?;
+            env.call_method(
+                self.object.as_obj(),
+                "audioOutputOperation",
+                "(IJLjava/lang/String;)V",
+                &[
+                    JValue::Int(operation),
+                    JValue::Long(token as i64),
+                    JValue::Object(&id),
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn audio_output_authorization_required(&self) -> Result<bool> {
+        self.with_env(|env| {
+            Ok(env
+                .call_method(
+                    self.object.as_obj(),
+                    "audioOutputAuthorizationRequired",
+                    "()Z",
+                    &[],
+                )?
+                .z()?)
+        })
+    }
+
     pub fn network_status(&self) -> Result<i32> {
         self.with_env(|env| {
             Ok(env
@@ -899,6 +931,11 @@ pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
             "nativePermissionResult",
             "(JJI)V",
             permission_result as *mut c_void,
+        ),
+        method(
+            "nativeAudioOutputs",
+            "(JJLjava/lang/String;Ljava/lang/String;)V",
+            audio_outputs as *mut c_void,
         ),
         method(
             "nativeNetworkChanged",
@@ -1859,6 +1896,31 @@ extern "system" fn settings_result(
                 .platform
                 .services
                 .settings_result(token as u64, error);
+        }
+        Ok(())
+    });
+}
+
+extern "system" fn audio_outputs(
+    mut env: JNIEnv,
+    _: JClass,
+    id: jlong,
+    token: jlong,
+    json: JString,
+    error: JString,
+) {
+    call(&mut env, |env| {
+        if let Ok(session) = session(id) {
+            let json: String = env.get_string(&json)?.into();
+            let error = if error.is_null() {
+                None
+            } else {
+                Some(env.get_string(&error)?.into())
+            };
+            session
+                .platform
+                .services
+                .audio_outputs_changed(token as u64, &json, error);
         }
         Ok(())
     });

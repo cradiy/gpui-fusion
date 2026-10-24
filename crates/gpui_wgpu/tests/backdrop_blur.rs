@@ -67,3 +67,52 @@ fn large_backdrop_blurs_have_a_continuous_falloff_without_repeated_strokes() -> 
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn large_backdrop_radius_continues_to_spread_beyond_sixty_four_device_pixels() -> anyhow::Result<()>
+{
+    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(256), DevicePixels(256)))?;
+    let viewport = bounds(0., 0., 256., 256.);
+    let mut spreads = Vec::new();
+    for radius in [64., 128.] {
+        let mut scene = Scene::default();
+        for (bounds, color) in [(viewport, 0x000000), (bounds(124., 0., 8., 256.), 0xffffff)] {
+            scene.insert_primitive(Quad {
+                bounds,
+                content_mask: ContentMask { bounds: viewport },
+                background: rgb(color).into(),
+                ..Default::default()
+            });
+        }
+        scene.insert_primitive(BackdropBlur {
+            order: 0,
+            bounds: viewport,
+            content_mask: ContentMask { bounds: viewport },
+            corner_radii: Default::default(),
+            blur_radius: P(radius),
+            opacity: 1.,
+            shader: None,
+            uniforms: Default::default(),
+            time: 0.,
+            pointer: point(0., 0.),
+            pointer_active: false,
+        });
+        scene.finish();
+        let image = renderer.render_rgba(&scene)?;
+        let mut weight = 0.;
+        let mut moment = 0.;
+        for x in 0..256 {
+            let value = image[(128 * 256 + x) * 4] as f64;
+            weight += value;
+            moment += value * (x as f64 - 127.5).powi(2);
+        }
+        anyhow::ensure!(weight > 0., "the blurred stripe must remain visible");
+        spreads.push(moment / weight);
+    }
+    assert!(
+        spreads[1] > spreads[0] * 2.,
+        "large blur radii must broaden the image instead of saturating at 64 pixels: {spreads:?}"
+    );
+    Ok(())
+}

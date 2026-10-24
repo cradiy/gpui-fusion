@@ -2,29 +2,6 @@ fn saturate(value: f32) -> f32 {
     return clamp(value, 0.0, 1.0);
 }
 
-fn gaussian_backdrop(input: BackdropInput, radius: f32) -> vec3<f32> {
-    let weights = array<f32, 9>(
-        0.02763,
-        0.06628,
-        0.12383,
-        0.18017,
-        0.20418,
-        0.18017,
-        0.12383,
-        0.06628,
-        0.02763,
-    );
-    let step_size = max(radius, 0.0) * 0.25;
-    var color = vec3<f32>(0.0);
-    for (var y = 0u; y < 9u; y = y + 1u) {
-        for (var x = 0u; x < 9u; x = x + 1u) {
-            let offset = vec2<f32>(f32(x) - 4.0, f32(y) - 4.0) * step_size;
-            color += sample_raw_backdrop(input, offset).rgb * weights[x] * weights[y];
-        }
-    }
-    return color;
-}
-
 fn rounded_rect(position: vec2<f32>, half_size: vec2<f32>, radius: f32) -> f32 {
     let safe_half = max(half_size, vec2<f32>(1.0));
     let safe_radius = clamp(radius, 0.0, min(safe_half.x, safe_half.y));
@@ -70,7 +47,7 @@ fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
     let coverage = 1.0 - smoothstep(-0.70, 0.70, sdf);
     let inside = max(-sdf, 0.0);
 
-    var color = gaussian_backdrop(input, appearance.x);
+    var color = sample_blurred_backdrop(input, vec2<f32>(0.0)).rgb;
 
     let luminance = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
     color = mix(vec3<f32>(luminance), color, max(appearance.y, 0.0));

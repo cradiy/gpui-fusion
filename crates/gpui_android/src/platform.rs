@@ -240,6 +240,37 @@ fn unsupported<T>() -> oneshot::Receiver<Result<T>> {
 }
 
 impl Platform for AndroidPlatform {
+    fn observe_audio_outputs(
+        &self,
+        callback: Box<dyn FnMut(Result<gpui::AudioOutputState>)>,
+    ) -> Result<Subscription> {
+        self.services.observe_audio_outputs(callback)
+    }
+    fn select_audio_output(&self, id: &str) -> Result<()> {
+        self.host.audio_output_operation(2, 0, id)
+    }
+    fn authorize_audio_outputs(&self) -> futures::future::LocalBoxFuture<'static, Result<bool>> {
+        let host = self.host.clone();
+        let permissions = self.permissions();
+        Box::pin(async move {
+            if host.audio_output_authorization_required()? {
+                for permission in [
+                    "android.permission.BLUETOOTH_CONNECT",
+                    "android.permission.BLUETOOTH_SCAN",
+                ] {
+                    if permissions.request(permission).await? != crate::PermissionStatus::Granted {
+                        return Ok(false);
+                    }
+                }
+            }
+            host.audio_output_operation(4, 0, "")?;
+            Ok(true)
+        })
+    }
+    fn open_audio_output_settings(&self) -> Task<Result<()>> {
+        self.services.open_audio_output_settings(&self.foreground)
+    }
+
     fn network_status(&self) -> Result<NetworkStatus> {
         self.services.network_status()
     }

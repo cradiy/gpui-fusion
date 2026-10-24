@@ -231,9 +231,13 @@ impl RenderOnce for FrostedGlass {
                     .with_slot(SURFACE_SLOT, [appearance.sheen.max(0.0), 0.0, 0.0, 0.0]);
 
                 window.paint_backdrop_effect(
-                    PaintBackdropEffect::new(bounds, px(0.0), shader.clone())
-                        .uniforms(uniforms)
-                        .corner_radii(Corners::default()),
+                    PaintBackdropEffect::new(
+                        bounds,
+                        appearance.blur_radius.max(px(0.)),
+                        shader.clone(),
+                    )
+                    .uniforms(uniforms)
+                    .corner_radii(Corners::default()),
                 );
             },
         )

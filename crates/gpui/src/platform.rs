@@ -7,7 +7,10 @@ mod keystroke;
 mod share;
 mod system_services;
 mod tray;
-pub use system_services::{AppSettings, MemoryTrimLevel, NetworkStatus};
+pub use system_services::{
+    AppSettings, AudioOutputDevice, AudioOutputKind, AudioOutputState, MemoryTrimLevel,
+    NetworkStatus,
+};
 
 #[cfg(all(target_os = "linux", feature = "wayland"))]
 #[expect(missing_docs)]
@@ -124,6 +127,32 @@ pub fn guess_compositor() -> &'static str {
 
 #[expect(missing_docs)]
 pub trait Platform: 'static {
+    /// Observes initial media outputs and route changes on the app thread, never inline.
+    /// Dropping the subscription unregisters native callbacks. Errors do not imply
+    /// that the last successful snapshot has changed. Unsupported platforms return an error.
+    fn observe_audio_outputs(
+        &self,
+        _callback: Box<dyn FnMut(Result<AudioOutputState>)>,
+    ) -> Result<crate::Subscription> {
+        Err(std::io::Error::from(std::io::ErrorKind::Unsupported).into())
+    }
+    /// Requests a transfer to an available media route. Completion is reported by
+    /// the output observer; returning Ok only means the request was accepted.
+    fn select_audio_output(&self, _id: &str) -> Result<()> {
+        Err(std::io::Error::from(std::io::ErrorKind::Unsupported).into())
+    }
+    /// Requests routing authorization following an explicit user action.
+    /// Returns false if access was declined. Does not pair Bluetooth devices.
+    fn authorize_audio_outputs(&self) -> futures::future::LocalBoxFuture<'static, Result<bool>> {
+        Box::pin(async { Err(std::io::Error::from(std::io::ErrorKind::Unsupported).into()) })
+    }
+    /// Opens the system's output switcher or device settings. Success reports launch only.
+    fn open_audio_output_settings(&self) -> Task<Result<()>> {
+        Task::ready(Err(
+            std::io::Error::from(std::io::ErrorKind::Unsupported).into()
+        ))
+    }
+
     /// Queries the app's default network. Unsupported platforms return an error.
     fn network_status(&self) -> Result<NetworkStatus> {
         Err(std::io::Error::from(std::io::ErrorKind::Unsupported).into())

@@ -733,6 +733,34 @@ No manifest permission or additional GPUiForge feature is required. Android
 application's decision; GPUI's existing thermal-aware animation scheduling also
 uses this state. See [Android thermal status](https://developer.android.com/reference/android/os/PowerManager#getCurrentThermalStatus()).
 
+### Audio output routing
+
+Enable `audio-routing` in the Android host features. It is independent of media
+playback and does not require Media3. Declare `android.permission.BLUETOOTH_CONNECT`
+and `android.permission.BLUETOOTH_SCAN` in the application manifest. On Android 12
+and later, call `App::authorize_audio_outputs` after a user action when an output
+snapshot reports `authorization_required`. A false result means access was declined.
+
+`App::observe_audio_outputs` supplies an initial `AudioOutputState` and subsequent
+system route changes on the GPUI thread. Retain its `Subscription`; dropping it
+unregisters that observer. The host removes native routing callbacks when its last
+observer is removed and closes all routing resources when the session ends.
+View and Surface recreation retain subscriptions.
+
+`App::select_audio_output` requests a transfer by the identifier from a current
+snapshot. Success means the request was accepted; an observer confirms selection
+or reports a transfer failure. Device disappearance invalidates its identifier.
+The API reports system audio routes, including built-in, wired, USB and permitted
+Bluetooth outputs. It does not scan or pair Bluetooth devices or supply remote
+playback protocols. Apps without nearby-device authorization receive the limited
+routing information provided by Android.
+
+`App::open_audio_output_settings` opens Android 14's system output switcher or
+Bluetooth settings on earlier versions. Success reports launch, not a transfer.
+Routing observation and selection require Android 11 or later; older Android
+versions report an error through the observer. Other platform backends return
+`Unsupported`.
+
 ### Network state
 
 Add `"android.permission.ACCESS_NETWORK_STATE"` to

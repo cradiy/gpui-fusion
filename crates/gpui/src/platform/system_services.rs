@@ -35,3 +35,43 @@ pub enum MemoryTrimLevel {
     /// The system reports severe memory pressure. Release nonessential resources promptly.
     Critical,
 }
+
+/// An output exposed by the operating system's media routing framework.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AudioOutputDevice {
+    /// Opaque identifier valid while this device remains available.
+    pub id: String,
+    /// User-visible device name supplied by the system.
+    pub name: String,
+    /// The system's classification of this output.
+    pub kind: AudioOutputKind,
+    /// Whether media is currently routed to this device.
+    pub selected: bool,
+}
+
+/// Physical media output categories; remote protocols require their own providers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AudioOutputKind {
+    /// Built-in speaker or earpiece.
+    BuiltIn,
+    /// Analog wired headphones or headset.
+    Headphones,
+    /// Bluetooth audio, including hearing aids and LE Audio.
+    Bluetooth,
+    /// USB audio device or headset.
+    Usb,
+    /// HDMI or digital display output.
+    Hdmi,
+    /// An output outside the known categories.
+    Other,
+}
+
+/// Authoritative media routes visible to the application.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct AudioOutputState {
+    /// Available outputs, including the selected output when the OS exposes it.
+    pub devices: Vec<AudioOutputDevice>,
+    /// Additional user authorization is needed for the complete device list.
+    /// Android requires nearby-device permissions for Bluetooth routing.
+    pub authorization_required: bool,
+}

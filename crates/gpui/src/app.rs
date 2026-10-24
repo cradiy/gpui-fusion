@@ -1501,6 +1501,36 @@ impl App {
         self.platform.open_url(url);
     }
 
+    /// Observes initial media outputs and subsequent changes. Retain the subscription
+    /// while updates are needed. Android requires the host's `audio-routing` feature;
+    /// call authorize_audio_outputs after a user action when authorization_required is set.
+    pub fn observe_audio_outputs(
+        &self,
+        mut callback: impl FnMut(Result<crate::AudioOutputState>, &mut App) + 'static,
+    ) -> Result<Subscription> {
+        let app = self.this.clone();
+        self.platform.observe_audio_outputs(Box::new(move |state| {
+            if let Some(app) = app.upgrade() {
+                app.borrow_mut().update(|cx| callback(state, cx));
+            }
+        }))
+    }
+    /// Requests a media route transfer; observe outputs for confirmation or failure.
+    pub fn select_audio_output(&self, id: &str) -> Result<()> {
+        self.platform.select_audio_output(id)
+    }
+    /// Requests permission to discover and select media outputs after a user action.
+    /// Returns false on denial. Android manifests must declare BLUETOOTH_CONNECT and BLUETOOTH_SCAN.
+    pub fn authorize_audio_outputs(
+        &self,
+    ) -> futures::future::LocalBoxFuture<'static, Result<bool>> {
+        self.platform.authorize_audio_outputs()
+    }
+    /// Opens system output management. Does not scan, pair, or confirm a device transfer.
+    pub fn open_audio_output_settings(&self) -> Task<Result<()>> {
+        self.platform.open_audio_output_settings()
+    }
+
     /// Queries the application's default network. Unsupported platforms return an error.
     /// Android requires the manifest permission `android.permission.ACCESS_NETWORK_STATE`.
     pub fn network_status(&self) -> Result<crate::NetworkStatus> {

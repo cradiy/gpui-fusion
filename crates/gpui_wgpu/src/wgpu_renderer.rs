@@ -4799,7 +4799,7 @@ impl WgpuRenderer {
             let horizontal = BackdropInstance::blur(
                 viewport_size,
                 blur_size,
-                backdrop.blur_radius.0.min(64.0),
+                backdrop.blur_radius.0.min(128.0),
                 [1.0, 0.0],
             );
             {
@@ -4838,7 +4838,7 @@ impl WgpuRenderer {
             let vertical = BackdropInstance::blur(
                 viewport_size,
                 blur_size,
-                backdrop.blur_radius.0.min(64.0),
+                backdrop.blur_radius.0.min(128.0),
                 [0.0, 1.0],
             );
             {

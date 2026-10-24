@@ -1,6 +1,6 @@
 # Packet inspector
 
-[Pipeline](#processing-pipeline) · [Field summary](#field-summary) · [Artwork](#artwork)
+[Pipeline](#processing-pipeline) · [Field summary](#field-summary) · [Artwork](#artwork) · [Decoder policy](#decoder-policy)
 
 Inspect **structured payloads**, compare *decoded fields*, and follow a [protocol reference](https://www.rfc-editor.org/ "RFC publications and technical references").[^capture]
 
@@ -56,6 +56,8 @@ Payload
 
 <details>
 <summary>Decode options</summary>
+
+### Decoder policy
 
 Keep the original frame when testing a different decoder configuration.
 

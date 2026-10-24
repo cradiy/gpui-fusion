@@ -36,6 +36,11 @@ type LinkTooltipBuilder =
 type ImageResolver = Rc<dyn Fn(&crate::Image) -> gpui::ImageSource>;
 type AnchorPositions = std::collections::HashMap<gpui::SharedString, gpui::Point<gpui::Pixels>>;
 
+#[derive(Default)]
+struct PendingNavigation {
+    target: Option<gpui::SharedString>,
+}
+
 struct DetailsState {
     open: bool,
     focus: gpui::FocusHandle,
@@ -69,6 +74,7 @@ pub struct RichText {
     alert_styles: [crate::AlertStyle; 5],
     navigation: Option<Rc<std::cell::RefCell<AnchorPositions>>>,
     scroll_handle: Option<gpui::ScrollHandle>,
+    pending_navigation: Option<gpui::Entity<PendingNavigation>>,
     footnote_style: crate::FootnoteStyle,
     details_style: crate::DetailsStyle,
 }
@@ -97,6 +103,7 @@ impl RichText {
             alert_styles: crate::RichTextTheme::light().alerts,
             navigation: None,
             scroll_handle: None,
+            pending_navigation: None,
             footnote_style: crate::FootnoteStyle::default(),
             details_style: crate::RichTextTheme::light().details,
         }
@@ -127,6 +134,7 @@ impl RichText {
     }
 
     /// Scroll this enclosing viewport when an internal document link is activated.
+    /// Collapsed ancestors of the destination expand before its position is measured.
     pub fn scroll_handle(mut self, handle: &gpui::ScrollHandle) -> Self {
         self.scroll_handle = Some(handle.clone());
         self
@@ -256,6 +264,22 @@ impl RenderOnce for RichText {
     fn render(mut self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
         if self.navigation.is_none() {
             self.navigation = Some(Rc::default());
+        }
+        if self.pending_navigation.is_none() {
+            self.navigation.as_ref().unwrap().borrow_mut().clear();
+            let pending = window.with_id(self.id.clone(), |window| {
+                window.use_keyed_state("anchor-navigation", cx, |_, _| PendingNavigation::default())
+            });
+            if pending.read(cx).target.as_ref().is_some_and(|target| {
+                !self
+                    .projection
+                    .anchors()
+                    .iter()
+                    .any(|anchor| &anchor.name == target)
+            }) {
+                pending.update(cx, |pending, _| pending.target = None);
+            }
+            self.pending_navigation = Some(pending);
         }
         if !self.projection.parts.is_empty() {
             return self.render_parts(window, cx);
@@ -445,12 +469,25 @@ impl RenderOnce for RichText {
         let anchor_layout = layout.clone();
         let anchors = self.projection.anchors().to_vec();
         let navigation = self.navigation.clone().unwrap();
+        let pending_navigation = self.pending_navigation.clone().unwrap();
+        let anchor_scroll = self.scroll_handle.clone();
         let navigation_overlay = gpui::canvas(
-            move |_, _, _| {
+            move |_, window, cx| {
                 let mut positions = navigation.borrow_mut();
                 for anchor in &anchors {
                     if let Some(position) = anchor_layout.position_for_index(anchor.offset) {
                         positions.insert(anchor.name.clone(), position);
+                        if pending_navigation.read(cx).target.as_ref() == Some(&anchor.name)
+                            && let Some(scroll) = anchor_scroll.clone()
+                        {
+                            pending_navigation.update(cx, |pending, _| pending.target = None);
+                            window.defer(cx, move |window, _| {
+                                let mut offset = scroll.offset();
+                                offset.y += scroll.bounds().top() - position.y;
+                                scroll.set_offset(offset);
+                                window.refresh();
+                            });
+                        }
                     }
                 }
             },
@@ -496,18 +533,14 @@ impl RenderOnce for RichText {
             let listener = self.on_link_click;
             let scroll = self.scroll_handle;
             let navigation = self.navigation.unwrap();
+            let pending = self.pending_navigation.unwrap();
             text = text.on_click(
                 links.iter().map(|link| link.range.clone()).collect(),
                 move |index, window, cx| {
                     let link = &links[index];
                     if link.kind == crate::LinkKind::Anchor {
-                        if let Some(position) = navigation.borrow().get(&link.target)
-                            && let Some(scroll) = &scroll
-                        {
-                            let mut offset = scroll.offset();
-                            offset.y += scroll.bounds().top() - position.y;
-                            scroll.set_offset(offset);
-                            window.refresh();
+                        if let Some(scroll) = &scroll {
+                            navigate_to(&link.target, &navigation, &pending, scroll, window, cx);
                         }
                     } else if let Some(listener) = &listener {
                         listener(link, window, cx);
@@ -893,6 +926,20 @@ impl RichText {
                                     },
                                 )
                             });
+                            let target = self
+                                .pending_navigation
+                                .as_ref()
+                                .unwrap()
+                                .read(cx)
+                                .target
+                                .as_ref();
+                            if !state.read(cx).open
+                                && target.is_some_and(|target| {
+                                    body.anchors().iter().any(|anchor| &anchor.name == target)
+                                })
+                            {
+                                state.update(cx, |state, _| state.open = true);
+                            }
                             let expanded = state.read(cx).open;
                             let focus = state.read(cx).focus.clone();
                             let key_state = state.clone();
@@ -1061,21 +1108,21 @@ impl RichText {
                                     });
                                     if link.kind == crate::LinkKind::Anchor {
                                         let navigation = self.navigation.clone().unwrap();
+                                        let pending = self.pending_navigation.clone().unwrap();
                                         return view.when_some(
                                             self.scroll_handle.clone(),
                                             |view, scroll| {
                                                 view.cursor_pointer().on_click(
                                                     move |_, window, cx| {
                                                         cx.stop_propagation();
-                                                        if let Some(position) =
-                                                            navigation.borrow().get(&link.target)
-                                                        {
-                                                            let mut offset = scroll.offset();
-                                                            offset.y +=
-                                                                scroll.bounds().top() - position.y;
-                                                            scroll.set_offset(offset);
-                                                            window.refresh();
-                                                        }
+                                                        navigate_to(
+                                                            &link.target,
+                                                            &navigation,
+                                                            &pending,
+                                                            &scroll,
+                                                            window,
+                                                            cx,
+                                                        );
                                                     },
                                                 )
                                             },
@@ -1250,6 +1297,26 @@ impl RichText {
     }
 }
 
+fn navigate_to(
+    target: &gpui::SharedString,
+    positions: &Rc<std::cell::RefCell<AnchorPositions>>,
+    pending: &gpui::Entity<PendingNavigation>,
+    scroll: &gpui::ScrollHandle,
+    window: &mut gpui::Window,
+    cx: &mut gpui::App,
+) {
+    let position = positions.borrow().get(target).copied();
+    pending.update(cx, |pending, _| {
+        pending.target = position.is_none().then(|| target.clone());
+    });
+    if let Some(position) = position {
+        let mut offset = scroll.offset();
+        offset.y += scroll.bounds().top() - position.y;
+        scroll.set_offset(offset);
+    }
+    window.refresh();
+}
+
 struct LinkTooltip(gpui::SharedString);
 
 impl LinkTooltip {
@@ -1341,7 +1408,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn internal_links_scroll_across_fragments_and_back_after_reflow(cx: &mut gpui::TestAppContext) {
+    fn internal_links_expand_nested_details_and_return_after_reflow(cx: &mut gpui::TestAppContext) {
         use crate::compose::*;
         struct Page {
             projection: Arc<Projection>,
@@ -1377,11 +1444,15 @@ mod tests {
             )))
         }));
         roots.push(rule());
-        roots.push(
-            alert(crate::AlertKind::Note)
-                .child(paragraph().child(
+        roots.push(details("Measurements").child(
+            details("Expanded record").child(
+                alert(crate::AlertKind::Note).child(paragraph().child(
                     anchor("destination").child(anchor_link("entry").child(text("Return"))),
                 )),
+            ),
+        ));
+        roots.push(
+            details("Unrelated").child(paragraph().child(anchor("hidden").child(text("Unopened")))),
         );
         let projection = Arc::new(
             crate::Registry::with_standard_nodes()
@@ -1403,6 +1474,8 @@ mod tests {
         visual.update(|window, cx| {
             window.draw(cx).clear();
         });
+        assert!(!observed_positions.borrow().contains_key("destination"));
+        assert!(!observed_positions.borrow().contains_key("hidden"));
         let entry = observed_positions.borrow()["entry"];
         visual.simulate_click(
             entry + gpui::point(gpui::px(2.), gpui::px(8.)),
@@ -1411,6 +1484,8 @@ mod tests {
         visual.update(|window, cx| {
             window.draw(cx).clear();
         });
+        assert!(observed_positions.borrow().contains_key("destination"));
+        assert!(!observed_positions.borrow().contains_key("hidden"));
         assert!(observed_scroll.offset().y < gpui::px(-240.));
         visual.simulate_resize(gpui::size(gpui::px(220.), gpui::px(240.)));
         // Return to the end after wrapping changes its vertical position.

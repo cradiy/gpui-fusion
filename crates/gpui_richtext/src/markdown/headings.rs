@@ -1,6 +1,48 @@
 use super::*;
 use std::collections::{HashMap, HashSet};
 
+pub(super) fn blocks(
+    item: &Item,
+    level: pulldown_cmark::HeadingLevel,
+    id: &str,
+) -> Result<Vec<NodeTree>> {
+    let level = match level {
+        pulldown_cmark::HeadingLevel::H1 => HeadingLevel::H1,
+        pulldown_cmark::HeadingLevel::H2 => HeadingLevel::H2,
+        pulldown_cmark::HeadingLevel::H3 => HeadingLevel::H3,
+        pulldown_cmark::HeadingLevel::H4 => HeadingLevel::H4,
+        pulldown_cmark::HeadingLevel::H5 => HeadingLevel::H5,
+        pulldown_cmark::HeadingLevel::H6 => HeadingLevel::H6,
+    };
+    let mut result = Vec::new();
+    let mut content = vec![anchor(format!("heading:{id}"))];
+    for child in &item.children {
+        for part in split_images(child, None)? {
+            match part {
+                ImagePart::Inline(inline) => content.push(source_node(inline, child.offset, 0)),
+                ImagePart::Image(image) => {
+                    if !content.is_empty() {
+                        result.push(source_node(
+                            heading(level).children(std::mem::take(&mut content)),
+                            item.offset,
+                            6,
+                        ));
+                    }
+                    result.push(source_node(node(image), child.offset, 6));
+                }
+            }
+        }
+    }
+    if !content.is_empty() {
+        result.push(source_node(
+            heading(level).children(content),
+            item.offset,
+            6,
+        ));
+    }
+    Ok(result)
+}
+
 pub(super) fn assign(items: &mut [Item]) -> Result<()> {
     let mut used = HashSet::new();
     reserve(items, &mut used)?;

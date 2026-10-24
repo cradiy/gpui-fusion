@@ -1309,6 +1309,15 @@ impl TextLayout {
 
     /// Position on the text baseline for a UTF-8 byte offset, after prepaint.
     pub fn baseline_for_index(&self, index: usize) -> Option<Point<Pixels>> {
+        self.aligned_baseline_for_index(index, crate::TextAlign::Left)
+    }
+
+    /// Position on the displayed baseline, including the wrapped row's alignment offset.
+    pub fn aligned_baseline_for_index(
+        &self,
+        index: usize,
+        align: crate::TextAlign,
+    ) -> Option<Point<Pixels>> {
         let mut position = self.position_for_index(index)?;
         let state = self.0.borrow();
         let state = state.as_ref()?;
@@ -1318,6 +1327,19 @@ impl TextLayout {
                 let height = state.height_for_line(line_index);
                 let local = line.position_for_index(index - start, height)?;
                 let row = line.row_for_y(local.y, height);
+                let extent = line.row_extent(row)?;
+                let indent = state
+                    .line_indents
+                    .get(line_index)
+                    .copied()
+                    .unwrap_or_default();
+                let available = (state.bounds?.size.width - indent).max(Pixels::ZERO);
+                let width = extent.end - extent.start;
+                position.x += match align {
+                    crate::TextAlign::Left => Pixels::ZERO,
+                    crate::TextAlign::Center => (available - width) / 2.,
+                    crate::TextAlign::Right => available - width,
+                };
                 let (ascent, descent) = line.row_metrics(row);
                 position.y += (line.row_height(row, height) - ascent - descent) / 2. + ascent;
                 return Some(position);

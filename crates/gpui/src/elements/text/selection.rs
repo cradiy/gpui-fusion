@@ -562,6 +562,57 @@ mod tests {
         assert_eq!(character_at(&rows, point(px(285.), px(55.))), Some(3));
     }
 
+    #[gpui::test]
+    fn inline_baselines_match_aligned_selection_after_wrapping(cx: &mut TestAppContext) {
+        let (_, mut visual) = setup(cx, TextAlign::Left);
+        for align in [TextAlign::Left, TextAlign::Center, TextAlign::Right] {
+            for width in [260., 120.] {
+                let text = StyledText::new("north object south east west")
+                    .with_inline_boxes(vec![crate::TextInlineBox {
+                        range: 6..12,
+                        size: size(px(65.), px(40.)),
+                        baseline: px(30.),
+                    }])
+                    .with_line_indents(vec![crate::TextLineIndent {
+                        line_start: 0,
+                        prefix_len: 0,
+                        width: px(14.),
+                    }])
+                    .with_line_top_spacing(vec![(0, px(7.))]);
+                let layout = text.layout().clone();
+                visual.draw(
+                    point(px(13.), px(19.)),
+                    size(
+                        crate::AvailableSpace::Definite(px(width)),
+                        crate::AvailableSpace::MinContent,
+                    ),
+                    move |_, _| {
+                        div()
+                            .w(px(width))
+                            .text_size(px(16.))
+                            .line_height(px(24.))
+                            .text_align(align)
+                            .child(text)
+                    },
+                );
+                let baseline = layout.aligned_baseline_for_index(6, align).unwrap();
+                let quads = selection_quads(&layout, 6..12, align, crate::black());
+                assert_eq!(quads.len(), 1);
+                assert_eq!(baseline.x, quads[0].bounds.left());
+                assert_eq!(quads[0].bounds.size.width, px(65.));
+                assert!(baseline.y - px(30.) >= quads[0].bounds.top());
+                assert!(baseline.y + px(10.) <= quads[0].bounds.bottom());
+                assert_eq!(
+                    index_at(
+                        &rows(&layout, align),
+                        quads[0].bounds.origin + point(px(1.), px(1.))
+                    ),
+                    6
+                );
+            }
+        }
+    }
+
     #[crate::test]
     fn line_typography_preserves_wrapped_hit_testing_and_selection(cx: &mut TestAppContext) {
         let (_, mut visual) = setup(cx, TextAlign::Left);

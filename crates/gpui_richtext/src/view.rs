@@ -630,11 +630,14 @@ impl RenderOnce for RichText {
             );
         let layout = styled_text.layout().clone();
         let inline_layout = layout.clone();
+        let inline_align = marker_text_style.text_align;
         let inline_overlay = gpui::canvas(
             move |_, window, cx| {
                 let mut images = Vec::new();
                 for (object, image) in inline_graphics {
-                    if let Some(position) = inline_layout.baseline_for_index(object.range.start) {
+                    if let Some(position) =
+                        inline_layout.aligned_baseline_for_index(object.range.start, inline_align)
+                    {
                         let mut element = gpui::img(image)
                             .w(object.size.width)
                             .h(object.size.height)

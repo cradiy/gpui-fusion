@@ -214,21 +214,15 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
                 result.extend(blocks(&item.children)?);
                 continue;
             }
-            Some(Tag::Heading { level, id, .. }) => Some(
-                heading(match level {
-                    pulldown_cmark::HeadingLevel::H1 => HeadingLevel::H1,
-                    pulldown_cmark::HeadingLevel::H2 => HeadingLevel::H2,
-                    pulldown_cmark::HeadingLevel::H3 => HeadingLevel::H3,
-                    pulldown_cmark::HeadingLevel::H4 => HeadingLevel::H4,
-                    pulldown_cmark::HeadingLevel::H5 => HeadingLevel::H5,
-                    pulldown_cmark::HeadingLevel::H6 => HeadingLevel::H6,
-                })
-                .child(anchor(format!(
-                    "heading:{}",
-                    id.as_deref().unwrap_or_default()
-                )))
-                .children(inlines(&item.children)?),
-            ),
+            Some(Tag::Heading { level, id, .. }) => {
+                flush(&mut result, &mut pending);
+                result.extend(headings::blocks(
+                    item,
+                    *level,
+                    id.as_deref().unwrap_or_default(),
+                )?);
+                continue;
+            }
             Some(Tag::BlockQuote(kind)) => Some(match kind {
                 Some(kind) => node(Alert::new(match kind {
                     pulldown_cmark::BlockQuoteKind::Note => AlertKind::Note,

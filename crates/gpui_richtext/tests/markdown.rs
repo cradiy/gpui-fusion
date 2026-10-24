@@ -140,52 +140,81 @@ fn table_images_compile_during_streaming_without_absorbing_adjacent_cells() {
 }
 
 #[test]
-fn linked_images_split_styled_paragraphs_without_losing_targets_or_text() {
+fn linked_images_split_paragraphs_and_headings_without_losing_targets_or_text() {
     let source = "**Before [![地图](map.png \"Overview\") *catalog*](app:atlas) after**.\n\n[![](empty.png)](app:empty)\n";
-    let projection = Registry::with_standard_nodes()
-        .compile(&markdown::parse(source).unwrap())
-        .unwrap();
-    let images: Vec<_> = projection
-        .blocks()
-        .iter()
-        .filter_map(|block| match &block.kind {
-            BlockKind::Image(image) => Some((block, image)),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(images.len(), 2);
-    let (block, image) = images[0];
-    assert_eq!(image.link.as_deref(), Some("app:atlas"));
-    assert_eq!(image.title.as_deref(), Some("Overview"));
-    assert_eq!(&projection.text()[block.range.clone()], "地图");
-    assert!(
-        projection
-            .links()
+    for level in 0..=8 {
+        let source = source
+            .split("\n\n")
+            .map(|part| match level {
+                0 => part.to_owned(),
+                1..=6 => format!("{} {}", "#".repeat(level), part),
+                7 => format!("{}\n===\n", part.trim_end()),
+                _ => format!("{}\n---\n", part.trim_end()),
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let projection = Registry::with_standard_nodes()
+            .compile(&markdown::parse(&source).unwrap())
+            .unwrap();
+        let images: Vec<_> = projection
+            .blocks()
             .iter()
-            .any(|link| link.node == images[1].0.node
-                && link.range.is_empty()
-                && link.target.as_ref() == "app:empty")
-    );
-    let catalog = projection
-        .spans()
-        .iter()
-        .find(|span| &projection.text()[span.range.clone()] == "catalog")
-        .unwrap();
-    assert_eq!(catalog.style.font_weight, Some(gpui::FontWeight::BOLD));
-    assert_eq!(catalog.style.font_style, Some(gpui::FontStyle::Italic));
-    assert!(
-        projection
-            .links()
+            .filter_map(|block| match &block.kind {
+                BlockKind::Image(image) => Some((block, image)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(images.len(), 2);
+        let (block, image) = images[0];
+        assert_eq!(image.link.as_deref(), Some("app:atlas"));
+        assert_eq!(image.title.as_deref(), Some("Overview"));
+        assert_eq!(&projection.text()[block.range.clone()], "地图");
+        assert!(
+            projection
+                .links()
+                .iter()
+                .any(|link| link.node == images[1].0.node
+                    && link.range.is_empty()
+                    && link.target.as_ref() == "app:empty")
+        );
+        let catalog = projection
+            .spans()
             .iter()
-            .any(|link| link.range == catalog.range && link.target.as_ref() == "app:atlas")
-    );
-    assert!(projection.text().contains(" after"));
-    let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
-    for character in source.chars() {
-        stream.push_str(&character.to_string()).unwrap();
-        stream.flush().unwrap();
+            .find(|span| &projection.text()[span.range.clone()] == "catalog")
+            .unwrap();
+        assert_eq!(catalog.style.font_weight, Some(gpui::FontWeight::BOLD));
+        assert_eq!(catalog.style.font_style, Some(gpui::FontStyle::Italic));
+        assert!(
+            projection
+                .links()
+                .iter()
+                .any(|link| link.range == catalog.range && link.target.as_ref() == "app:atlas")
+        );
+        assert!(projection.text().contains(" after"));
+        if level > 0 {
+            assert_eq!(projection.anchors().len(), 2);
+            let expected = match level {
+                1 | 7 => gpui_richtext::HeadingLevel::H1,
+                2 | 8 => gpui_richtext::HeadingLevel::H2,
+                3 => gpui_richtext::HeadingLevel::H3,
+                4 => gpui_richtext::HeadingLevel::H4,
+                5 => gpui_richtext::HeadingLevel::H5,
+                _ => gpui_richtext::HeadingLevel::H6,
+            };
+            for block in projection.blocks() {
+                assert!(
+                    matches!(&block.kind, BlockKind::Image(_))
+                        || matches!(&block.kind, BlockKind::Heading { level } if *level == expected)
+                );
+            }
+        }
+        let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
+        for character in source.chars() {
+            stream.push_str(&character.to_string()).unwrap();
+            stream.flush().unwrap();
+        }
+        assert_eq!(stream.finish().unwrap().text(), projection.text());
     }
-    assert_eq!(stream.finish().unwrap().text(), projection.text());
 }
 
 #[test]

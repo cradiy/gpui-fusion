@@ -1366,7 +1366,10 @@ impl Platform for MacPlatform {
                 let status = SecItemCopyMatching(attrs.as_concrete_TypeRef(), &mut result);
                 match status {
                     security::errSecSuccess => {}
-                    security::errSecItemNotFound | security::errSecUserCanceled => return Ok(None),
+                    security::errSecItemNotFound => return Ok(None),
+                    security::errSecUserCanceled => {
+                        anyhow::bail!("keychain authorization was canceled: {status}")
+                    }
                     _ => anyhow::bail!("reading password failed: {status}"),
                 }
 

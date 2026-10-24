@@ -1486,6 +1486,7 @@ impl App {
     }
 
     /// Reads credentials from the platform keychain.
+    /// On macOS, canceling keychain authorization returns an error, not `Ok(None)`.
     pub fn read_credentials(&self, url: &str) -> Task<Result<Option<(String, Vec<u8>)>>> {
         self.platform.read_credentials(url)
     }

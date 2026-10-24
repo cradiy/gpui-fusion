@@ -1,169 +1,61 @@
-# Welcome to GPUI!
+# GPUI
 
-GPUI is a hybrid immediate and retained mode, GPU accelerated, UI framework
-for Rust, designed to support a wide variety of applications.
+GPUI is a GPU-accelerated UI framework for Rust, combining retained application
+state with declarative views and custom rendering. It provides layout, text,
+images, input handling, window management, and asynchronous tasks.
 
-## Getting Started
+This crate is the core of [GPUI Fusion](../../README.md), an independently
+maintained repository derived from [Zed](https://github.com/zed-industries/zed).
+Platform backends and optional libraries provide desktop, Android, and web
+integration, reusable components, rich text, media, visual effects, and 3D scenes.
 
-GPUI is still in active development as we work on the Zed code editor, and is still pre-1.0. There will often be breaking changes between versions. You'll also need to use the latest version of stable Rust. Add `gpui`, and optionally `gpui_platform`, to your `Cargo.toml`:
+## Getting started
+
+Use the repository's Rust toolchain. GPUI is under active development and its
+APIs may change between revisions.
+
+For a desktop application using this repository, add both crates from the same
+source:
 
 ```toml
-gpui = { version = "*" }
-gpui_platform = { version = "*", features = ["font-kit", "wayland"] }
+[dependencies]
+gpui = { git = "https://github.com/cradiy/gpui-fusion" }
+gpui_platform = { git = "https://github.com/cradiy/gpui-fusion" }
 ```
 
-Everything in a standalone GPUI app starts with an `Application`. You can create one with `gpui_platform::application()`, which picks the windowing and text backends for the host OS, and kick off your application by passing a callback to `Application::run()`. Inside this callback, you can create a new window with `App::open_window()` and register your first root view.
+`gpui_platform::application()` selects the host platform. Call `Application::run`
+to initialize application state, then `App::open_window` to create a window with
+a root view implementing `Render`.
 
-```rust,no_run
-use gpui::*;
+The default features include Wayland for Linux and FreeBSD, and `font-kit` for
+macOS. Windows uses its native backend. No explicit feature selection is needed
+for the default desktop setup.
 
-fn main() {
-    gpui_platform::application().run(|cx: &mut App| {
-        // ..
-    });
-}
-```
-
-### `gpui_platform`
-
-The features on `gpui_platform` are platform-specific, so the list above is a safe cross-platform default. If you build for a single platform, you can trim it:
-
-- **macOS** — Rendering uses Metal. Text rendering uses `font-kit`, which is enabled by default. When disabling default features, enable `font-kit` explicitly for text rendering.
-
-    ```toml
-    gpui_platform = { version = "*", features = ["font-kit"] }
-    ```
-
-- **Linux / FreeBSD** — `wayland` is enabled by default for desktop windows. With default features disabled, enable it explicitly for desktop use or leave it disabled for headless use. It also compiles the renderer and text system.
-
-    ```toml
-    gpui_platform = { version = "*", features = ["wayland"] }
-    ```
-
-- **Windows** — no features are required. Windowing uses Win32 and text uses DirectWrite. `font-kit` has no effect here.
-
-### Additional Topics
-
-- [Ownership and data flow](_ownership_and_data_flow)
-- [Accessibility](_accessibility)
-
-### Image colors
-
-The built-in PNG and JPEG loaders convert embedded RGB and grayscale ICC profiles
-to SDR sRGB. WebP uses its RGB profile for both still images and animation frames.
-Transparency is preserved. Images without a profile keep their decoded sample
-values and are treated as sRGB. Invalid, unsupported, or incompatible profiles
-produce a warning and use the same fallback. CMYK/YCCK JPEGs retain the decoder's
-RGB conversion; their CMYK profiles are not applied to those RGB samples.
-Output is 8-bit; wide-gamut display output and HDR tone mapping are not supported
-by this conversion.
-
-### Animated images
-
-Give each animated `img` a stable element ID to preserve its playback state.
-Built-in GIF and WebP loading decodes frames in the background and retains a
-bounded cache configured with `ImageAnimationOptions`.
-
-Animations honor the file's loop metadata and stop on the last frame after its
-delay. A GIF without a loop extension plays once; a GIF repetition count adds
-repeats after the initial play, while a WebP loop count includes the initial
-play. `ImageLoopCount::Finite` always counts complete plays. Custom resident
-frames created with `RenderImage::new` repeat infinitely by default; use
-`with_loop_count` to set a finite limit before sharing the image.
-
-Playback wakes the owning view when the next frame is due and decoded, rather
-than requesting display-rate updates. Frame delays have a minimum of 10 ms.
-Inactive windows and images clipped out of their viewport pause playback;
-resuming starts the current frame's delay again. Replacing the image cancels its
-scheduled wakeup and starts the replacement at its first frame.
-
-### Color compositing
-
-Use `foreground.composite_over(background)` on `Rgba` or `Hsla` to combine
-straight-alpha colors with source-over semantics. This accounts for both
-colors' alpha and does not change the RGB color space. Text highlight layers
-use this compositing operation.
-
-`background.blend(tint)` instead interpolates RGB using the tint's alpha and
-preserves the background alpha, except for an opaque tint, which replaces it.
-Use it when preserving that tinting behavior is intentional.
-
-### File clipboard
-
-Linux applications can exchange local file lists and copy/cut intent with file
-managers through the Wayland clipboard:
-
-```rust,ignore
-let item = ClipboardItem::new_files(paths, ClipboardFileOperation::Cut)?;
-cx.write_to_clipboard(item);
-
-if let Some(files) = cx.read_from_clipboard().and_then(|item| item.files()) {
-    // Use files.paths() and files.operation() to implement the application's paste action.
-}
-```
-
-Provide at least one absolute path. GPUI preserves path spelling,
-including symlinks and non-UTF-8 Unix filenames, without reading or modifying the
-files. `Cut` requests a move when the receiving application pastes; it does not
-signal that a move has completed. A file list without a cut marker uses `Copy`.
-Native file clipboard export on other platforms is not supported.
-
-Run the interactive example with local paths:
+Run the introductory example from the repository root:
 
 ```sh
-cargo run -p gpui --example file_clipboard -- /absolute/path /another/path
+cargo run -p gpui --example hello_world
 ```
 
-Use **Copy files** or **Cut files**, then paste into a file manager. To inspect the
-opposite direction, copy or cut files in a file manager and click **Read clipboard**.
-The example's read action displays the paths and operation without modifying files.
+See the [example source](examples/hello_world.rs) for a complete application and
+the [examples index](examples/README.md) for layout, input, drawing, and window
+examples. Android and web setup are covered by the
+[Android hosting guide](../gpui_android/docs/hosting.md) and
+[web backend](../gpui_web/README.md).
 
-### Dependencies
+## Project entry points
 
-GPUI has various system dependencies that it needs in order to work.
+- [Repository overview](../../README.md)
+- [Context guide](docs/contexts.md)
+- [UI components](../../uic)
+- [Rich text and Markdown](../gpui_richtext/README.md)
+- [Icons](../gpui_icons/README.md)
+- [Visual effects](../gpui_effects/README.md)
+- [Media](../gpui_media/README.md)
+- [3D scenes](../gpui_3d/README.md)
 
-#### macOS
+## License
 
-On macOS, GPUI uses Metal for rendering. In order to use Metal, you need to do the following:
-
-- Install [Xcode](https://apps.apple.com/us/app/xcode/id497799835?mt=12) from the macOS App Store, or from the [Apple Developer](https://developer.apple.com/download/all/) website. Note this requires a developer account.
-
-> Ensure you launch Xcode after installing, and install the macOS components, which is the default option.
-
-- Install [Xcode command line tools](https://developer.apple.com/xcode/resources/)
-
-  ```sh
-  xcode-select --install
-  ```
-
-- Ensure that the Xcode command line tools are using your newly installed copy of Xcode:
-
-  ```sh
-  sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
-  ```
-
-## The Big Picture
-
-GPUI offers three different [registers](<https://en.wikipedia.org/wiki/Register_(sociolinguistics)>) depending on your needs:
-
-- State management and communication with `Entity`'s. Whenever you need to store application state that communicates between different parts of your application, you'll want to use GPUI's entities. Entities are owned by GPUI and are only accessible through an owned smart pointer similar to an `Rc`. See the `app::context` module for more information.
-
-- High level, declarative UI with views. All UI in GPUI starts with a view. A view is simply an `Entity` that can be rendered, by implementing the `Render` trait. At the start of each frame, GPUI will call this render method on the root view of a given window. Views build a tree of `elements`, lay them out and style them with a tailwind-style API, and then give them to GPUI to turn into pixels. See the `div` element for an all purpose swiss-army knife of rendering.
-
-- Low level, imperative UI with Elements. Elements are the building blocks of UI in GPUI, and they provide a nice wrapper around an imperative API that provides as much flexibility and control as you need. Elements have total control over how they and their child elements are rendered and can be used for making efficient views into large lists, implement custom layouting for a code editor, and anything else you can think of. See the `element` module for more information.
-
-Each of these registers has one or more corresponding contexts that can be accessed from all GPUI services. This context is your main interface to GPUI, and is used extensively throughout the framework.
-
-## Other Resources
-
-In addition to the systems above, GPUI provides a range of smaller services that are useful for building complex applications:
-
-- Actions are user-defined structs that are used for converting keystrokes into logical operations in your UI. Use this for implementing keyboard shortcuts, such as cmd-q. See the `action` module for more information.
-
-- Platform services, such as `quit the app` or `open a URL` are available as methods on the `app::App`.
-
-- An async executor that is integrated with the platform's event loop. See the `executor` module for more information.,
-
-- The `[gpui::test]` macro provides a convenient way to write tests for your GPUI applications. Tests also have their own kind of context, a `TestAppContext` which provides ways of simulating common platform input. See `app::test_context` and `test` modules for more details.
-
-Currently, the best way to learn about these APIs is to read the Zed source code or drop a question in the [Zed Discord](https://zed.dev/community-links). We're working on improving the documentation, creating more examples, and will be publishing more guides to GPUI on our [blog](https://zed.dev/blog).
+GPUI retains its upstream Zed attribution and is licensed under
+[Apache-2.0](../../LICENSE-APACHE). See the repository's
+[package license assignments](../../LICENSES.md) for companion crates and assets.

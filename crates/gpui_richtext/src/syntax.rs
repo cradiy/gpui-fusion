@@ -7,12 +7,30 @@ use std::{
 use syntect::{
     easy::HighlightLines,
     highlighting::{HighlightState, ThemeSet},
-    parsing::{ParseState, SyntaxSet},
+    parsing::{ParseState, SyntaxReference, SyntaxSet},
     util::LinesWithEndings,
 };
 
-static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+#[cfg(feature = "syntax-extra")]
+mod supplemental;
+
+static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(|| {
+    #[cfg(feature = "syntax-extra")]
+    {
+        let mut builder = two_face::syntax::extra_newlines().into_builder();
+        supplemental::register(&mut builder);
+        builder.build()
+    }
+    #[cfg(not(feature = "syntax-extra"))]
+    {
+        SyntaxSet::load_defaults_newlines()
+    }
+});
 static THEMES: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
+
+/// Notices for the embedded third-party syntax definitions.
+#[cfg(feature = "syntax-extra")]
+pub use two_face::acknowledgement as licenses;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub enum SyntaxTheme {
@@ -26,6 +44,12 @@ pub struct SyntaxHighlighter {
     pub theme: SyntaxTheme,
 }
 
+/// A bundled language available to code blocks and application language pickers.
+pub struct SyntaxLanguage {
+    pub name: &'static str,
+    pub extensions: &'static [String],
+}
+
 pub(crate) struct CachedHighlight {
     source: SharedString,
     language: SharedString,
@@ -37,6 +61,21 @@ pub(crate) struct CachedHighlight {
 }
 
 impl SyntaxHighlighter {
+    pub fn supported_languages(&self) -> impl Iterator<Item = SyntaxLanguage> {
+        SYNTAXES
+            .syntaxes()
+            .iter()
+            .filter(|syntax| !syntax.hidden && syntax.name != "Plain Text")
+            .map(|syntax| SyntaxLanguage {
+                name: &syntax.name,
+                extensions: &syntax.file_extensions,
+            })
+    }
+    /// Resolve a language identifier, common alias, extension or file name.
+    pub fn language_name(&self, language: &str) -> Option<&'static str> {
+        resolve_syntax(language).map(|syntax| syntax.name.as_str())
+    }
+
     /// Unknown language identifiers retain the surrounding code style.
     pub fn highlight(
         &self,
@@ -55,13 +94,14 @@ impl SyntaxHighlighter {
         language: &str,
         previous: Option<&Arc<CachedHighlight>>,
     ) -> anyhow::Result<Arc<CachedHighlight>> {
-        let token = language.split_whitespace().next().unwrap_or_default();
+        let syntax = resolve_syntax(language);
+        let token = syntax.map_or(language, |syntax| syntax.name.as_str());
         let previous = previous
             .filter(|previous| previous.language.as_ref() == token && previous.theme == self.theme);
         if let Some(previous) = previous.filter(|previous| previous.source == source) {
             return Ok(previous.clone());
         }
-        let Some(syntax) = SYNTAXES.find_syntax_by_token(token) else {
+        let Some(syntax) = syntax else {
             return Ok(Arc::new(CachedHighlight {
                 source,
                 language: token.to_owned().into(),
@@ -139,9 +179,125 @@ impl SyntaxHighlighter {
     }
 }
 
+fn resolve_syntax(language: &str) -> Option<&'static SyntaxReference> {
+    let language = language.trim();
+    if matches!(
+        language.to_ascii_lowercase().as_str(),
+        "plain text" | "text" | "txt" | "plaintext" | "plain"
+    ) {
+        return None;
+    }
+    if let Some(syntax) = SYNTAXES
+        .syntaxes()
+        .iter()
+        .find(|syntax| syntax.name.eq_ignore_ascii_case(language))
+    {
+        return Some(syntax);
+    }
+    let token = language.split_whitespace().next().unwrap_or_default();
+    let token = token
+        .strip_prefix("{.")
+        .and_then(|value| value.strip_suffix('}'))
+        .unwrap_or(token);
+    let token = token
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(token)
+        .to_ascii_lowercase();
+    if let Some(syntax) = SYNTAXES.find_syntax_by_extension(&token) {
+        if syntax.name == "Plain Text" {
+            return None;
+        }
+        // Explicit names disambiguate extensions shared by different languages.
+        if !matches!(token.as_str(), "fs" | "v" | "h") {
+            return Some(syntax);
+        }
+    }
+    let token = token.trim_start_matches('.');
+    let token = token.strip_prefix("language-").unwrap_or(&token);
+    let token = match token {
+        "text" | "txt" | "plaintext" | "plain" => return None,
+        "shell" | "sh" | "shellscript" | "zsh" => "bash",
+        "csharp" | "cs" => "c#",
+        "cxx" | "cc" => "c++",
+        "py" | "python3" => "python",
+        "js" | "node" | "nodejs" => "javascript",
+        "ts" => "typescript",
+        "jsx" | "javascriptreact" | "react" => "TypeScriptReact",
+        "tsreact" | "typescriptreact" => "TypeScriptReact",
+        "vuejs" => "vue",
+        "sveltejs" => "svelte",
+        "fsharp" | "fs" => "f#",
+        "vb" | "vbnet" | "visualbasic" => "Visual Basic",
+        "objc" | "objectivec" => "objective-c",
+        "objcpp" => "objective-c++",
+        "c++" | "cplusplus" => "c++",
+        "h" => "c",
+        "v" => "verilog",
+        "pwsh" => "powershell",
+        "bat" | "cmd" | "dos" | "batch" => "Batch File",
+        "jsonc" | "json5" => "JSON Extended",
+        "dotenv" => "DotENV",
+        "tf" | "hcl" => "Terraform",
+        "gql" => "GraphQL",
+        "proto" => "Protocol Buffer",
+        "html5" => "html",
+        "tex" => "LaTeX",
+        "asm" | "assembly" => "x86_64 Assembly",
+        "yml" => "yaml",
+        "golang" => "go",
+        "kt" | "kts" => "kotlin",
+        "ps1" | "ps" => "powershell",
+        "docker" => "dockerfile",
+        other => other,
+    };
+    SYNTAXES
+        .syntaxes()
+        .iter()
+        .find(|syntax| syntax.name.eq_ignore_ascii_case(token))
+        .or_else(|| SYNTAXES.find_syntax_by_token(token))
+        .or_else(|| {
+            token
+                .match_indices('.')
+                .find_map(|(index, _)| SYNTAXES.find_syntax_by_extension(&token[index + 1..]))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(feature = "syntax-extra")]
+    fn typescript_aliases_reuse_state_without_losing_template_interpolation() {
+        let highlighter = SyntaxHighlighter {
+            theme: SyntaxTheme::Dark,
+        };
+        let source =
+            "type Message = { id: number };\nconst message = `prefix\n${3 + 5}\nsuffix`;\n";
+        let first = highlighter
+            .highlight_cached(source.into(), "ts", None)
+            .unwrap();
+        let alias = highlighter
+            .highlight_cached(source.into(), "TypeScript", Some(&first))
+            .unwrap();
+        assert!(Arc::ptr_eq(&first, &alias));
+        let mut previous = None;
+        for end in source
+            .char_indices()
+            .map(|(index, _)| index)
+            .chain(std::iter::once(source.len()))
+        {
+            let current = highlighter
+                .highlight_cached(source[..end].to_owned().into(), "ts", previous.as_ref())
+                .unwrap();
+            assert_eq!(
+                current.ranges,
+                highlighter.highlight(&source[..end], "typescript").unwrap()
+            );
+            previous = Some(current);
+        }
+    }
 
     #[test]
     fn resumed_highlighting_matches_cold_parsing_after_tail_and_prefix_changes() {

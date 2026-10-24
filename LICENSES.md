@@ -47,3 +47,6 @@ outside the Apache-2.0 scope.
 Third-party dependencies, bundled assets, and source copied from inherited
 packages retain their licenses and attribution. In particular,
 `crates/gpui_icons/assets/lucide/LICENSE` contains the Lucide ISC and Feather MIT notices.
+
+The optional `gpui_richtext/syntax-extra` feature embeds syntax definitions from
+`two-face`; their notices are available through `gpui_richtext::syntax::licenses`.

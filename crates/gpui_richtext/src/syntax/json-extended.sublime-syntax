@@ -1,0 +1,35 @@
+name: JSON Extended
+file_extensions: [jsonc, json5]
+scope: source.json.extended
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.json
+    - match: '/\*'
+      push: comment
+    - match: '"'
+      push: double
+    - match: "'"
+      push: single
+    - match: '\b[A-Za-z_$][\w$]*(?=\s*:)'
+      scope: support.type.property-name.json
+    - match: '\b(true|false|null|Infinity|NaN)\b'
+      scope: constant.language.json
+    - match: '[+-]?(0[xX][\da-fA-F]+|(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?)'
+      scope: constant.numeric.json
+  comment:
+    - meta_scope: comment.block.json
+    - match: '\*/'
+      pop: true
+  double:
+    - meta_scope: string.quoted.double.json
+    - match: '\\.'
+      scope: constant.character.escape.json
+    - match: '"'
+      pop: true
+  single:
+    - meta_scope: string.quoted.single.json
+    - match: '\\.'
+      scope: constant.character.escape.json
+    - match: "'"
+      pop: true

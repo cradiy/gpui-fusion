@@ -6,6 +6,8 @@ use anyhow::{Result, bail};
 use pulldown_cmark::{Event, Options, Parser, Tag};
 mod details;
 mod footnotes;
+mod front_matter;
+pub use front_matter::{FrontMatter, FrontMatterFormat, ParsedMarkdown, parse_with_metadata};
 mod headings;
 mod inline_html;
 mod stream;
@@ -30,7 +32,13 @@ struct Item {
 /// `open` attribute on `<details>` sets the initial expanded state.
 /// Attribute-free inline `kbd`, `mark`, and `u` pairs stay within a Markdown
 /// container. Unmatched tags remain literal. Inline `br` inserts a newline.
+/// Leading YAML or TOML front matter is excluded from the rendered body.
+/// Use `parse_with_metadata` to retain its raw contents and completion state.
 pub fn parse(source: &str) -> Result<Document> {
+    Ok(parse_with_metadata(source)?.document)
+}
+
+fn parse_body(source: &str) -> Result<Document> {
     let mut items = inline_html::normalize(parse_items(source, 0)?, 0)?;
     headings::assign(&mut items)?;
     Document::from_roots(footnotes::convert(items)?)

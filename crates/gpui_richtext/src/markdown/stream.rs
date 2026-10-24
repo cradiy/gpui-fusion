@@ -13,6 +13,7 @@ pub struct MarkdownStream {
     registry: Registry,
     source: String,
     projection: Arc<Projection>,
+    front_matter: Option<super::FrontMatter>,
     dirty: bool,
     finished: bool,
     revision: u64,
@@ -24,6 +25,7 @@ impl MarkdownStream {
             registry,
             source: String::new(),
             projection: Arc::default(),
+            front_matter: None,
             dirty: false,
             finished: false,
             revision: 0,
@@ -44,9 +46,10 @@ impl MarkdownStream {
     /// Publish accumulated input. Calling this without new input reuses the snapshot.
     pub fn flush(&mut self) -> Result<Arc<Projection>> {
         if self.dirty {
-            let document = super::parse(&self.source)?;
-            let projection = Arc::new(self.registry.compile(&document)?);
+            let parsed = super::parse_with_metadata(&self.source)?;
+            let projection = Arc::new(self.registry.compile(&parsed.document)?);
             self.projection = projection;
+            self.front_matter = parsed.front_matter;
             self.dirty = false;
         }
         Ok(self.projection.clone())
@@ -57,6 +60,11 @@ impl MarkdownStream {
         let projection = self.flush()?;
         self.finished = true;
         Ok(projection)
+    }
+
+    /// Metadata from the latest successful flush, independent of the body snapshot.
+    pub fn front_matter(&self) -> Option<&super::FrontMatter> {
+        self.front_matter.as_ref()
     }
 
     pub fn source(&self) -> &str {
@@ -81,6 +89,7 @@ impl MarkdownStream {
         #[cfg(feature = "syntax-highlighting")]
         self.registry.clear_highlight_cache();
         self.source.clear();
+        self.front_matter = None;
         self.projection = Arc::default();
         self.dirty = false;
         self.finished = false;

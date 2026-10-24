@@ -429,3 +429,61 @@ fn link_titles_survive_reference_resolution_image_splitting_and_streaming() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn front_matter_is_separate_from_body_and_stream_publication() {
+    use markdown::FrontMatterFormat;
+    let source = "---\ncategory: reference\nsummary: |\n  ---\n  retain punctuation\n...\n# Catalog\n\nVisible description.\n\n---\n\nEnd.\n";
+    let parsed = markdown::parse_with_metadata(source).unwrap();
+    let metadata = parsed.front_matter.as_ref().unwrap();
+    assert_eq!(metadata.format, FrontMatterFormat::Yaml);
+    assert!(metadata.complete);
+    assert_eq!(
+        metadata.source.as_ref(),
+        "category: reference\nsummary: |\n  ---\n  retain punctuation\n"
+    );
+    let registry = Registry::with_standard_nodes();
+    let projection = registry.compile(&parsed.document).unwrap();
+    assert_eq!(
+        projection.text().as_ref(),
+        "Catalog\n\nVisible description.\n\n\n\nEnd."
+    );
+    assert!(
+        projection
+            .blocks()
+            .iter()
+            .any(|block| matches!(block.kind, BlockKind::Rule))
+    );
+    let mut stream = markdown::MarkdownStream::new(registry);
+    let opening_length = "---\n".len();
+    let closing_start = source.find("...\n").unwrap();
+    for (index, character) in source.char_indices() {
+        stream.push_str(&character.to_string()).unwrap();
+        let snapshot = stream.flush().unwrap();
+        if index >= opening_length && index < closing_start {
+            assert!(snapshot.text().is_empty());
+            assert!(!stream.front_matter().unwrap().complete);
+        }
+    }
+    assert_eq!(stream.finish().unwrap().text(), projection.text());
+    assert_eq!(stream.front_matter(), parsed.front_matter.as_ref());
+    stream.clear();
+    assert!(stream.front_matter().is_none());
+    stream
+        .push_str("+++\r\nrevision = 7\r\n+++\r\nBody")
+        .unwrap();
+    assert_eq!(stream.finish().unwrap().text().as_ref(), "Body");
+    let metadata = stream.front_matter().unwrap();
+    assert_eq!(metadata.format, FrontMatterFormat::Toml);
+    assert_eq!(metadata.source.as_ref(), "revision = 7\r\n");
+    assert!(metadata.complete);
+    let incomplete = markdown::parse_with_metadata("+++\nrevision = 7").unwrap();
+    assert!(!incomplete.front_matter.unwrap().complete);
+    assert!(
+        Registry::with_standard_nodes()
+            .compile(&incomplete.document)
+            .unwrap()
+            .text()
+            .is_empty()
+    );
+}

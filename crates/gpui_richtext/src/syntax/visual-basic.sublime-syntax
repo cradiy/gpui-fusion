@@ -1,0 +1,23 @@
+name: Visual Basic
+file_extensions: [vb, vbs, vbnet]
+scope: source.vb
+contexts:
+  main:
+    - match: "'.*$|(?i:\\bREM\\s.*$)"
+      scope: comment.line.vb
+    - match: '"'
+      push: string
+    - match: '(?i)\b(public|private|protected|friend|shared|class|module|namespace|imports|end|sub|function|return|dim|as|new|if|then|else|elseif|for|each|next|while|do|loop|try|catch|finally|throw|select|case|property|inherits|implements|async|await|byval|byref)\b'
+      scope: keyword.control.vb
+    - match: '(?i)\b(string|integer|boolean|double|decimal|long|object|byte|char|date|single)\b'
+      scope: storage.type.vb
+    - match: '(?i)\b(true|false|nothing)\b'
+      scope: constant.language.vb
+    - match: '(?i)&h[\da-f]+|\b\d+(\.\d+)?\b'
+      scope: constant.numeric.vb
+  string:
+    - meta_scope: string.quoted.double.vb
+    - match: '""'
+      scope: constant.character.escape.vb
+    - match: '"'
+      pop: true

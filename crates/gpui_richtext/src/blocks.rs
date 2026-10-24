@@ -49,6 +49,29 @@ pub struct Rule;
 pub struct Image {
     pub source: gpui::SharedString,
     pub alt: gpui::SharedString,
+    pub link: Option<gpui::SharedString>,
+    pub title: Option<gpui::SharedString>,
+}
+
+impl Image {
+    pub fn new(source: impl Into<gpui::SharedString>, alt: impl Into<gpui::SharedString>) -> Self {
+        Self {
+            source: source.into(),
+            alt: alt.into(),
+            link: None,
+            title: None,
+        }
+    }
+
+    pub fn link(mut self, target: impl Into<gpui::SharedString>) -> Self {
+        self.link = Some(target.into());
+        self
+    }
+
+    pub fn title(mut self, title: impl Into<gpui::SharedString>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
 }
 
 /// A read-only list marker included in projected and copied text.

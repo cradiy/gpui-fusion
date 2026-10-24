@@ -528,6 +528,17 @@ impl Registry {
                 let kind = match leaf {
                     Contribution::Image(image) => {
                         output.text.push_str(&image.alt);
+                        if let Some(target) = &image.link {
+                            if target.trim().is_empty() {
+                                bail!("empty image link target at node {id:?}");
+                            }
+                            output.links.push(LinkSpan {
+                                kind: crate::LinkKind::External,
+                                node: id,
+                                target: target.clone(),
+                                range: start..output.text.len(),
+                            });
+                        }
                         BlockKind::Image(image)
                     }
                     _ => BlockKind::Rule,

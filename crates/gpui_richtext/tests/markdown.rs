@@ -2,6 +2,55 @@
 use gpui_richtext::{BlockKind, ListMarker, Registry, markdown};
 
 #[test]
+fn linked_images_split_styled_paragraphs_without_losing_targets_or_text() {
+    let source = "**Before [![地图](map.png \"Overview\") *catalog*](app:atlas) after**.\n\n[![](empty.png)](app:empty)\n";
+    let projection = Registry::with_standard_nodes()
+        .compile(&markdown::parse(source).unwrap())
+        .unwrap();
+    let images: Vec<_> = projection
+        .blocks()
+        .iter()
+        .filter_map(|block| match &block.kind {
+            BlockKind::Image(image) => Some((block, image)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(images.len(), 2);
+    let (block, image) = images[0];
+    assert_eq!(image.link.as_deref(), Some("app:atlas"));
+    assert_eq!(image.title.as_deref(), Some("Overview"));
+    assert_eq!(&projection.text()[block.range.clone()], "地图");
+    assert!(
+        projection
+            .links()
+            .iter()
+            .any(|link| link.node == images[1].0.node
+                && link.range.is_empty()
+                && link.target.as_ref() == "app:empty")
+    );
+    let catalog = projection
+        .spans()
+        .iter()
+        .find(|span| &projection.text()[span.range.clone()] == "catalog")
+        .unwrap();
+    assert_eq!(catalog.style.font_weight, Some(gpui::FontWeight::BOLD));
+    assert_eq!(catalog.style.font_style, Some(gpui::FontStyle::Italic));
+    assert!(
+        projection
+            .links()
+            .iter()
+            .any(|link| link.range == catalog.range && link.target.as_ref() == "app:atlas")
+    );
+    assert!(projection.text().contains(" after"));
+    let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    assert_eq!(stream.finish().unwrap().text(), projection.text());
+}
+
+#[test]
 fn streamed_footnotes_number_by_reference_and_keep_all_return_destinations() {
     let source = "Read[^beta] again[^beta], then[^alpha].\n\n[^alpha]: Alpha **内容**.\n\n[^beta]: Beta [source](https://example.org/b).\n\n    A second paragraph.\n\n[^unused]: Omitted.\n";
     let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());

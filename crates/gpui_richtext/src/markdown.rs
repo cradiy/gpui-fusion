@@ -118,6 +118,22 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
     let mut result = Vec::new();
     let mut pending = Vec::new();
     for item in items {
+        if matches!(
+            item.tag,
+            Some(Tag::Link { .. } | Tag::Strong | Tag::Emphasis | Tag::Strikethrough)
+        ) && contains_image(item)
+        {
+            for part in split_images(item, None)? {
+                match part {
+                    ImagePart::Inline(inline) => pending.push(inline),
+                    ImagePart::Image(image) => {
+                        flush(&mut result, &mut pending);
+                        result.push(node(image));
+                    }
+                }
+            }
+            continue;
+        }
         let block = match &item.tag {
             Some(Tag::Paragraph) => {
                 flush(&mut result, &mut pending);
@@ -176,10 +192,15 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
                 }
                 Some(node(block))
             }
-            Some(Tag::Image { dest_url, .. }) => Some(node(Image {
-                source: dest_url.to_string().into(),
-                alt: plain(&item.children).into(),
-            })),
+            Some(Tag::Image {
+                dest_url, title, ..
+            }) => {
+                let mut image = Image::new(dest_url.to_string(), plain(&item.children));
+                if !title.is_empty() {
+                    image.title = Some(title.to_string().into());
+                }
+                Some(node(image))
+            }
             Some(Tag::Table(alignments)) => {
                 let columns = alignments.iter().map(|align| {
                     TableColumn::flex(1.).align(match align {
@@ -222,4 +243,54 @@ fn flush(result: &mut Vec<NodeTree>, pending: &mut Vec<NodeTree>) {
     if !pending.is_empty() {
         result.push(paragraph().children(std::mem::take(pending)));
     }
+}
+
+enum ImagePart {
+    Inline(NodeTree),
+    Image(Image),
+}
+
+fn contains_image(item: &Item) -> bool {
+    matches!(item.tag, Some(Tag::Image { .. })) || item.children.iter().any(contains_image)
+}
+
+fn split_images(item: &Item, target: Option<&str>) -> Result<Vec<ImagePart>> {
+    if let Some(Tag::Image {
+        dest_url, title, ..
+    }) = &item.tag
+    {
+        let mut image = Image::new(dest_url.to_string(), plain(&item.children));
+        image.link = target.map(|target| target.to_owned().into());
+        if !title.is_empty() {
+            image.title = Some(title.to_string().into());
+        }
+        return Ok(vec![ImagePart::Image(image)]);
+    }
+    if !contains_image(item) {
+        return Ok(inline(item)?.into_iter().map(ImagePart::Inline).collect());
+    }
+    let target = if let Some(Tag::Link { dest_url, .. }) = &item.tag {
+        Some(dest_url.as_ref())
+    } else {
+        target
+    };
+    let mut parts = Vec::new();
+    for child in &item.children {
+        for part in split_images(child, target)? {
+            parts.push(match part {
+                ImagePart::Inline(child) => {
+                    let wrapper = match &item.tag {
+                        Some(Tag::Link { dest_url, .. }) => link(dest_url.to_string()),
+                        Some(Tag::Strong) => strong(),
+                        Some(Tag::Emphasis) => emphasis(),
+                        Some(Tag::Strikethrough) => strikethrough(),
+                        _ => bail!("unsupported image container"),
+                    };
+                    ImagePart::Inline(wrapper.child(child))
+                }
+                image => image,
+            });
+        }
+    }
+    Ok(parts)
 }

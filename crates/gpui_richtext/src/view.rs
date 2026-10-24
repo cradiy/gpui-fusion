@@ -925,13 +925,52 @@ impl RichText {
                             .into_any_element(),
                         BlockKind::Image(image) => {
                             let alt = image.alt.clone();
+                            let link = self
+                                .projection
+                                .links()
+                                .iter()
+                                .find(|link| link.node == block.node)
+                                .cloned();
                             let source = self.image_source.as_ref().map_or_else(
                                 || image.source.clone().into(),
                                 |resolve| resolve(image),
                             );
                             gpui::img(source)
+                                .id(("richtext-image", block.node.0 as usize))
                                 .max_w_full()
                                 .with_fallback(move || div().child(alt.clone()).into_any_element())
+                                .when_some(link, |view, link| {
+                                    let tooltip = link.clone();
+                                    view.when(self.link_tooltips, |view| {
+                                        let builder = self.link_tooltip.clone();
+                                        view.optional_tooltip(move |window, cx| {
+                                            if let Some(builder) = &builder {
+                                                builder(&tooltip, window, cx)
+                                            } else {
+                                                Some(
+                                                    cx.new(|_| LinkTooltip(tooltip.target.clone()))
+                                                        .into(),
+                                                )
+                                            }
+                                        })
+                                    })
+                                    .when_some(
+                                        self.on_link_click.clone(),
+                                        |view, listener| {
+                                            view.cursor_pointer().on_click(move |_, window, cx| {
+                                                cx.stop_propagation();
+                                                listener(&link, window, cx);
+                                            })
+                                        },
+                                    )
+                                })
+                                .when(image.link.is_none(), |view| {
+                                    view.when_some(image.title.clone(), |view, title| {
+                                        view.tooltip(move |_, cx| {
+                                            cx.new(|_| LinkTooltip(title.clone())).into()
+                                        })
+                                    })
+                                })
                                 .into_any_element()
                         }
                         _ => unreachable!(),

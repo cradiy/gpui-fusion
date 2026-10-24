@@ -86,10 +86,7 @@ pub fn rule() -> NodeTree {
     node(crate::Rule)
 }
 pub fn image(source: impl Into<SharedString>, alt: impl Into<SharedString>) -> NodeTree {
-    node(crate::Image {
-        source: source.into(),
-        alt: alt.into(),
-    })
+    node(crate::Image::new(source, alt))
 }
 pub fn bullet_item() -> NodeTree {
     node(crate::ListItem(crate::ListMarker::Bullet))

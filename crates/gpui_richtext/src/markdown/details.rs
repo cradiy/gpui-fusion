@@ -2,9 +2,13 @@ use super::*;
 
 enum Piece {
     Item(Item),
-    Open(bool),
-    Summary { label: String, raw: String },
-    Close,
+    Open(bool, usize),
+    Summary {
+        label: String,
+        raw: String,
+        offset: usize,
+    },
+    Close(usize),
 }
 
 /// Recognize block-level disclosure tags without enabling general HTML rendering.
@@ -24,9 +28,16 @@ pub(super) fn normalize(items: Vec<Item>, depth: usize) -> Result<Vec<Item>> {
                 })
                 .collect();
             let mut buffer = String::new();
+            let mut offset = item.offset;
+            let mut buffer_offset = offset;
             let mut fence: Option<(u8, usize)> = None;
             let mut parts = Vec::new();
             for line in raw.split_inclusive('\n') {
+                let line_offset = offset;
+                offset += line.len();
+                if buffer.is_empty() {
+                    buffer_offset = line_offset;
+                }
                 let trimmed = line.trim();
                 let bytes = trimmed.as_bytes();
                 let marker = bytes.first().copied().filter(|b| matches!(b, b'`' | b'~'));
@@ -46,9 +57,9 @@ pub(super) fn normalize(items: Vec<Item>, depth: usize) -> Result<Vec<Item>> {
                     None
                 } else {
                     match trimmed {
-                        "<details>" => Some(Piece::Open(false)),
-                        "<details open>" => Some(Piece::Open(true)),
-                        "</details>" => Some(Piece::Close),
+                        "<details>" => Some(Piece::Open(false, line_offset)),
+                        "<details open>" => Some(Piece::Open(true, line_offset)),
+                        "</details>" => Some(Piece::Close(line_offset)),
                         _ => trimmed
                             .strip_prefix("<summary>")
                             .and_then(|value| value.strip_suffix("</summary>"))
@@ -63,6 +74,7 @@ pub(super) fn normalize(items: Vec<Item>, depth: usize) -> Result<Vec<Item>> {
                                     })
                                     .collect();
                                 Piece::Summary {
+                                    offset: line_offset,
                                     label,
                                     raw: line.to_owned(),
                                 }
@@ -71,7 +83,10 @@ pub(super) fn normalize(items: Vec<Item>, depth: usize) -> Result<Vec<Item>> {
                 };
                 if let Some(token) = token {
                     if !buffer.trim().is_empty() {
-                        parts.push(Piece::Item(raw_item(std::mem::take(&mut buffer))));
+                        parts.push(Piece::Item(raw_item(
+                            std::mem::take(&mut buffer),
+                            buffer_offset,
+                        )));
                     }
                     buffer.clear();
                     parts.push(token);
@@ -83,14 +98,18 @@ pub(super) fn normalize(items: Vec<Item>, depth: usize) -> Result<Vec<Item>> {
                 pieces.push(Piece::Item(item));
             } else {
                 if !buffer.trim().is_empty() {
-                    parts.push(Piece::Item(raw_item(buffer)));
+                    parts.push(Piece::Item(raw_item(buffer, buffer_offset)));
                 }
                 for part in parts {
                     if let Piece::Item(raw) = part {
                         let Some(Event::Html(text)) = raw.event else {
                             unreachable!()
                         };
-                        pieces.extend(parse_items(&text, depth + 1)?.into_iter().map(Piece::Item));
+                        pieces.extend(
+                            parse_items(&text, depth + 1, raw.offset)?
+                                .into_iter()
+                                .map(Piece::Item),
+                        );
                     } else {
                         pieces.push(part);
                     }
@@ -105,11 +124,12 @@ pub(super) fn normalize(items: Vec<Item>, depth: usize) -> Result<Vec<Item>> {
     let mut stack: Vec<Item> = Vec::new();
     for piece in pieces {
         match piece {
-            Piece::Open(open) => {
+            Piece::Open(open, offset) => {
                 if stack.len() + depth >= 256 {
                     anyhow::bail!("Markdown exceeds nesting limits");
                 }
                 stack.push(Item {
+                    offset,
                     inline_kind: None,
                     details: Some(Details::new("").open(open)),
                     reference: None,
@@ -121,13 +141,19 @@ pub(super) fn normalize(items: Vec<Item>, depth: usize) -> Result<Vec<Item>> {
             Piece::Summary { label: summary, .. } if !stack.is_empty() => {
                 stack.last_mut().unwrap().details.as_mut().unwrap().summary = summary.into();
             }
-            Piece::Close if !stack.is_empty() => {
+            Piece::Close(_) if !stack.is_empty() => {
                 let item = stack.pop().unwrap();
                 push(&mut result, &mut stack, item);
             }
             Piece::Item(item) => push(&mut result, &mut stack, item),
-            Piece::Close => push(&mut result, &mut stack, raw_item("</details>".into())),
-            Piece::Summary { raw, .. } => push(&mut result, &mut stack, raw_item(raw)),
+            Piece::Close(offset) => push(
+                &mut result,
+                &mut stack,
+                raw_item("</details>".into(), offset),
+            ),
+            Piece::Summary { raw, offset, .. } => {
+                push(&mut result, &mut stack, raw_item(raw, offset))
+            }
         }
     }
     while let Some(item) = stack.pop() {
@@ -144,8 +170,9 @@ fn push(result: &mut Vec<Item>, stack: &mut [Item], item: Item) {
     }
 }
 
-fn raw_item(text: String) -> Item {
+fn raw_item(text: String, offset: usize) -> Item {
     Item {
+        offset,
         inline_kind: None,
         details: None,
         reference: None,

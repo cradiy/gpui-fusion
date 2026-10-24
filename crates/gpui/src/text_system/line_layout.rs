@@ -339,6 +339,10 @@ impl LineLayout {
 /// A line of text that has been wrapped to fit a given width
 #[derive(Default, Debug)]
 pub struct WrappedLineLayout {
+    /// Inline objects whose vertical metrics apply only to their displayed row.
+    pub inline_boxes: Vec<crate::TextInlineBox>,
+    /// Resolved (row, ascent, descent) for rows containing inline objects.
+    pub inline_box_rows: Vec<(usize, Pixels, Pixels)>,
     /// The line layout, pre-wrapping.
     pub unwrapped_layout: Arc<LineLayout>,
 
@@ -363,8 +367,7 @@ impl WrappedLineLayout {
         let source = &self.unwrapped_layout;
         let mut runs = source.runs.clone();
         let mut width = source.width;
-        let mut ascent = source.ascent;
-        let mut descent = source.descent;
+        let mut accepted = Vec::new();
         for object in boxes {
             let glyphs: Vec<_> = runs
                 .iter()
@@ -411,14 +414,13 @@ impl WrappedLineLayout {
                 run.glyphs = result;
             }
             width += delta;
-            ascent = ascent.max(object.baseline);
-            descent = descent.max(object.size.height - object.baseline);
+            accepted.push(object.clone());
         }
         let layout = Arc::new(LineLayout {
             font_size: source.font_size,
             width,
-            ascent,
-            descent,
+            ascent: source.ascent,
+            descent: source.descent,
             runs,
             len: source.len,
         });
@@ -426,11 +428,15 @@ impl WrappedLineLayout {
             .wrap_width
             .map(|width| layout.compute_wrap_boundaries(text, width, None))
             .unwrap_or_default();
-        Self {
+        let mut result = Self {
+            inline_boxes: accepted,
+            inline_box_rows: Vec::new(),
             unwrapped_layout: layout,
             wrap_boundaries,
             wrap_width: self.wrap_width,
-        }
+        };
+        result.resolve_inline_rows();
+        result
     }
 
     pub(super) fn with_tab_stops(&self, text: &str, stop: Pixels) -> Self {
@@ -536,7 +542,9 @@ impl WrappedLineLayout {
                 boundaries.push(glyphs[clusters[row_start]].0);
             }
         }
-        Self {
+        let mut result = Self {
+            inline_boxes: self.inline_boxes.clone(),
+            inline_box_rows: Vec::new(),
             unwrapped_layout: Arc::new(LineLayout {
                 font_size: source.font_size,
                 width: origin,
@@ -547,7 +555,9 @@ impl WrappedLineLayout {
             }),
             wrap_boundaries: boundaries,
             wrap_width,
-        }
+        };
+        result.resolve_inline_rows();
+        result
     }
 
     /// The length of the underlying text, in utf8 bytes.
@@ -568,8 +578,83 @@ impl WrappedLineLayout {
     pub fn size(&self, line_height: Pixels) -> Size<Pixels> {
         Size {
             width: self.width(),
-            height: line_height * (self.wrap_boundaries.len() + 1),
+            height: self.row_top(self.wrap_boundaries.len() + 1, line_height),
         }
+    }
+
+    pub(crate) fn resolve_inline_rows(&mut self) {
+        let mut rows = std::collections::BTreeMap::new();
+        for object in &self.inline_boxes {
+            let Some(glyph) = self
+                .runs()
+                .iter()
+                .flat_map(|run| &run.glyphs)
+                .find(|glyph| {
+                    glyph.index == object.range.start && glyph.cluster_end == object.range.end
+                })
+            else {
+                continue;
+            };
+            let x = glyph.position.x;
+            let row = self.wrap_boundaries.partition_point(|boundary| {
+                self.runs()[boundary.run_ix].glyphs[boundary.glyph_ix]
+                    .position
+                    .x
+                    <= x
+            });
+            let (ascent, descent) = rows.entry(row).or_insert((self.ascent(), self.descent()));
+            *ascent = (*ascent).max(object.baseline);
+            *descent = (*descent).max(object.size.height - object.baseline);
+        }
+        self.inline_box_rows = rows
+            .into_iter()
+            .map(|(row, (ascent, descent))| (row, ascent, descent))
+            .collect();
+    }
+
+    pub(crate) fn row_metrics(&self, row: usize) -> (Pixels, Pixels) {
+        self.inline_box_rows
+            .iter()
+            .find(|(index, _, _)| *index == row)
+            .map_or((self.ascent(), self.descent()), |(_, ascent, descent)| {
+                (*ascent, *descent)
+            })
+    }
+
+    pub(crate) fn row_height(&self, row: usize, line_height: Pixels) -> Pixels {
+        self.inline_box_rows
+            .iter()
+            .find(|(index, _, _)| *index == row)
+            .map_or(line_height, |(_, ascent, descent)| {
+                line_height.max(*ascent + *descent)
+            })
+    }
+
+    pub(crate) fn row_top(&self, row: usize, line_height: Pixels) -> Pixels {
+        if self.inline_boxes.is_empty() {
+            return line_height * row;
+        }
+        line_height * row
+            + self
+                .inline_box_rows
+                .iter()
+                .filter(|(index, _, _)| *index < row)
+                .map(|(_, ascent, descent)| (*ascent + *descent - line_height).max(px(0.)))
+                .sum::<Pixels>()
+    }
+
+    pub(crate) fn row_for_y(&self, y: Pixels, line_height: Pixels) -> usize {
+        if self.inline_boxes.is_empty() {
+            return (y.max(px(0.)) / line_height) as usize;
+        }
+        let mut bottom = px(0.);
+        for row in 0..=self.wrap_boundaries.len() {
+            bottom += self.row_height(row, line_height);
+            if y < bottom {
+                return row;
+            }
+        }
+        self.wrap_boundaries.len() + 1
     }
 
     /// The ascent of a line in this layout
@@ -693,7 +778,7 @@ impl WrappedLineLayout {
         line_height: Pixels,
         closest: bool,
     ) -> Result<usize, usize> {
-        let row = (position.y / line_height) as usize;
+        let row = self.row_for_y(position.y, line_height);
         let Some(extent) = self.row_extent(row) else {
             return Err(self.len());
         };
@@ -723,7 +808,9 @@ impl WrappedLineLayout {
         position: Point<Pixels>,
         line_height: Pixels,
     ) -> TextCaret {
-        let row = ((position.y / line_height).max(0.) as usize).min(self.wrap_boundaries.len());
+        let row = self
+            .row_for_y(position.y, line_height)
+            .min(self.wrap_boundaries.len());
         let extent = self.row_extent(row).unwrap();
         let x = position.x + extent.start;
         self.unwrapped_layout
@@ -757,7 +844,7 @@ impl WrappedLineLayout {
                 <= probe
         });
         let extent = self.row_extent(row)?;
-        Some(point(x - extent.start, line_height * row))
+        Some(point(x - extent.start, self.row_top(row, line_height)))
     }
 
     /// Shaping-cluster caret edges in displayed coordinates. Directional and
@@ -777,14 +864,14 @@ impl WrappedLineLayout {
             let start = self.row_extent(row).unwrap().start;
             carets.push((
                 cluster.range.start.into(),
-                point(cluster.leading() - start, line_height * row),
+                point(cluster.leading() - start, self.row_top(row, line_height)),
             ));
             carets.push((
                 TextCaret {
                     index: cluster.range.end,
                     affinity: CaretAffinity::Upstream,
                 },
-                point(cluster.trailing() - start, line_height * row),
+                point(cluster.trailing() - start, self.row_top(row, line_height)),
             ));
         }
         if carets.is_empty() {
@@ -809,8 +896,8 @@ impl WrappedLineLayout {
                 let right = range.end.min(extent.end);
                 if right > left {
                     bounds.push(crate::Bounds::new(
-                        point(left - extent.start, line_height * row),
-                        crate::size(right - left, line_height),
+                        point(left - extent.start, self.row_top(row, line_height)),
+                        crate::size(right - left, self.row_height(row, line_height)),
                     ));
                 }
             }
@@ -982,6 +1069,8 @@ impl LineLayoutCache {
                 SmallVec::new()
             };
             let layout = Arc::new(WrappedLineLayout {
+                inline_boxes: Vec::new(),
+                inline_box_rows: Vec::new(),
                 unwrapped_layout,
                 wrap_boundaries,
                 wrap_width,
@@ -1420,6 +1509,8 @@ mod tests {
             layout.len = text.len();
             layout.width = x;
             let original = WrappedLineLayout {
+                inline_boxes: Vec::new(),
+                inline_box_rows: Vec::new(),
                 unwrapped_layout: Arc::new(layout),
                 wrap_boundaries: SmallVec::new(),
                 wrap_width: None,
@@ -1520,6 +1611,8 @@ mod tests {
     #[test]
     fn bidi_wrapped_geometry_matches_displayed_rows() {
         let wrapped = WrappedLineLayout {
+            inline_boxes: Vec::new(),
+            inline_box_rows: Vec::new(),
             unwrapped_layout: Arc::new(bidi_layout()),
             wrap_boundaries: smallvec::smallvec![WrapBoundary {
                 run_ix: 0,

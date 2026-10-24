@@ -14,6 +14,7 @@ mod stream;
 pub use stream::MarkdownStream;
 
 struct Item {
+    offset: usize,
     inline_kind: Option<inline_html::Kind>,
     details: Option<Details>,
     reference: Option<(usize, usize)>,
@@ -39,12 +40,12 @@ pub fn parse(source: &str) -> Result<Document> {
 }
 
 fn parse_body(source: &str) -> Result<Document> {
-    let mut items = inline_html::normalize(parse_items(source, 0)?, 0)?;
+    let mut items = inline_html::normalize(parse_items(source, 0, 0)?, 0)?;
     headings::assign(&mut items)?;
     Document::from_roots(footnotes::convert(items)?)
 }
 
-fn parse_items(source: &str, depth: usize) -> Result<Vec<Item>> {
+fn parse_items(source: &str, depth: usize, base: usize) -> Result<Vec<Item>> {
     if depth > 256 {
         bail!("Markdown exceeds nesting limits");
     }
@@ -58,6 +59,7 @@ fn parse_items(source: &str, depth: usize) -> Result<Vec<Item>> {
     #[cfg(feature = "math")]
     let options = options | Options::ENABLE_MATH;
     let mut stack = vec![Item {
+        offset: base,
         inline_kind: None,
         details: None,
         reference: None,
@@ -65,12 +67,16 @@ fn parse_items(source: &str, depth: usize) -> Result<Vec<Item>> {
         event: None,
         children: Vec::new(),
     }];
-    for (count, event) in Parser::new_ext(source, options).enumerate() {
+    for (count, (event, range)) in Parser::new_ext(source, options)
+        .into_offset_iter()
+        .enumerate()
+    {
         if count >= 100_000 || stack.len() > 256 {
             bail!("Markdown exceeds document limits");
         }
         match event {
             Event::Start(tag) => stack.push(Item {
+                offset: base + range.start,
                 inline_kind: None,
                 details: None,
                 reference: None,
@@ -83,6 +89,7 @@ fn parse_items(source: &str, depth: usize) -> Result<Vec<Item>> {
                 stack.last_mut().unwrap().children.push(item);
             }
             event => stack.last_mut().unwrap().children.push(Item {
+                offset: base + range.start,
                 inline_kind: None,
                 details: None,
                 reference: None,
@@ -142,9 +149,11 @@ fn inline(item: &Item) -> Result<Option<NodeTree>> {
                 }
                 Some(Event::Code(value)) => Some(code().child(text(value.to_string()))),
                 #[cfg(feature = "math")]
-                Some(Event::InlineMath(value)) => {
-                    Some(node(crate::MathInline(value.to_string().into())))
-                }
+                Some(Event::InlineMath(value)) => Some(source_node(
+                    node(crate::MathInline(value.to_string().into())),
+                    item.offset,
+                    1,
+                )),
                 Some(Event::DisplayMath(value)) => Some(text(format!("$${value}$$"))),
                 Some(Event::SoftBreak) => Some(text(" ")),
                 Some(Event::HardBreak) => Some(hard_break()),
@@ -160,7 +169,11 @@ fn inline(item: &Item) -> Result<Option<NodeTree>> {
 fn inlines(items: &[Item]) -> Result<Vec<NodeTree>> {
     items
         .iter()
-        .filter_map(|item| inline(item).transpose())
+        .filter_map(|item| {
+            inline(item)
+                .map(|node| node.map(|node| source_node(node, item.offset, 0)))
+                .transpose()
+        })
         .collect()
 }
 
@@ -170,7 +183,11 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
     for item in items {
         if let Some(details) = &item.details {
             flush(&mut result, &mut pending);
-            result.push(node(details.clone()).children(blocks(&item.children)?));
+            result.push(source_node(
+                node(details.clone()).children(blocks(&item.children)?),
+                item.offset,
+                2,
+            ));
             continue;
         }
         if (item.inline_kind.is_some()
@@ -240,7 +257,11 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
                     } else {
                         ListMarker::Bullet
                     };
-                    entries.push(node(ListEntry(marker)).children(blocks(&entry.children)?));
+                    entries.push(source_node(
+                        node(ListEntry(marker)).children(blocks(&entry.children)?),
+                        entry.offset,
+                        10,
+                    ));
                 }
                 Some(group().children(entries))
             }
@@ -249,7 +270,11 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
                 if let pulldown_cmark::CodeBlockKind::Fenced(language) = kind {
                     if language.split_whitespace().next() == Some("mermaid") {
                         flush(&mut result, &mut pending);
-                        result.push(node(crate::MermaidCodeBlock(plain(&item.children).into())));
+                        result.push(source_node(
+                            node(crate::MermaidCodeBlock(plain(&item.children).into())),
+                            item.offset,
+                            3,
+                        ));
                         continue;
                     }
                 }
@@ -259,7 +284,7 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
                         block = block.language(language.to_owned());
                     }
                 }
-                Some(node(block))
+                Some(source_node(node(block), item.offset, 4))
             }
             Some(Tag::Image {
                 dest_url, title, ..
@@ -287,14 +312,16 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
                         } else {
                             inlines(&cell.children)?
                         };
-                        cells.push(table_cell().children(content));
+                        cells.push(source_node(table_cell().children(content), cell.offset, 8));
                     }
-                    rows.push(
+                    rows.push(source_node(
                         node(TableRow {
                             header: matches!(row.tag, Some(Tag::TableHead)),
                         })
                         .children(cells),
-                    );
+                        row.offset,
+                        7,
+                    ));
                 }
                 Some(node(Table::new().columns(columns)).children(rows))
             }
@@ -305,24 +332,40 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
                 let Some(Event::DisplayMath(source)) = &item.event else {
                     unreachable!()
                 };
-                Some(node(crate::MathBlock(source.to_string().into())))
+                Some(source_node(
+                    node(crate::MathBlock(source.to_string().into())),
+                    item.offset,
+                    5,
+                ))
             }
             _ => None,
         };
         if let Some(block) = block {
             flush(&mut result, &mut pending);
-            result.push(block);
+            result.push(source_node(block, item.offset, 6));
         } else if let Some(inline) = inline(item)? {
-            pending.push(inline);
+            pending.push(source_node(inline, item.offset, 0));
         }
     }
     flush(&mut result, &mut pending);
     Ok(result)
 }
 
+fn source_node(mut node: NodeTree, offset: usize, kind: u64) -> NodeTree {
+    // Reserve the low bits for containers sharing a parser source position.
+    node.id
+        .get_or_insert(NodeId((1 << 63) | ((offset as u64) << 20) | (kind << 12)));
+    node
+}
+
 fn flush(result: &mut Vec<NodeTree>, pending: &mut Vec<NodeTree>) {
     if !pending.is_empty() {
-        result.push(paragraph().children(std::mem::take(pending)));
+        let id = pending[0]
+            .id
+            .map(|id| NodeId((id.0 & !0xfffff) | (9 << 12)));
+        let mut node = paragraph().children(std::mem::take(pending));
+        node.id = id;
+        result.push(node);
     }
 }
 

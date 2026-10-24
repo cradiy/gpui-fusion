@@ -57,6 +57,25 @@ fn inline_object_reserves_width_baseline_and_atomic_wrap_boundaries(cx: &mut Tes
         assert!(matches!(hit, Ok(5) | Ok(13)));
         if width < 200. {
             assert!(!line.wrap_boundaries.is_empty());
+            let selected = line.selection_bounds(0..line.len(), px(24.));
+            assert!(selected.iter().any(|bounds| bounds.size.height == px(24.)));
+            assert_eq!(
+                selected
+                    .iter()
+                    .filter(|bounds| bounds.size.height >= px(46.))
+                    .count(),
+                1
+            );
+            for bounds in selected {
+                let hit = layout.index_for_position(
+                    layout.bounds().origin + bounds.origin + point(px(1.), px(1.)),
+                );
+                let index = hit.unwrap_or_else(|index| index);
+                assert_eq!(
+                    layout.position_for_index(index).unwrap().y,
+                    layout.bounds().top() + bounds.top()
+                );
+            }
         }
     }
 }

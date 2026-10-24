@@ -540,7 +540,7 @@ impl RenderOnce for RichText {
                 }
             }
             let state = window.with_id(self.id.clone(), |window| {
-                window.use_keyed_state(("inline-math", span.node.0 as usize), cx, |_, _| {
+                window.use_keyed_state(("inline-math", span.node.0), cx, |_, _| {
                     crate::graphics::GraphicView::default()
                 })
             });
@@ -784,7 +784,9 @@ impl RenderOnce for RichText {
                                     gpui::size(
                                         (bounds.right() - start.x + padding).max(gpui::px(0.)),
                                         end.y - start.y
-                                            + layout.line_height()
+                                            + layout
+                                                .line_height_for_index(range.end)
+                                                .unwrap_or(layout.line_height())
                                             + header_spacing
                                             + vertical_padding * 2.,
                                     ),
@@ -835,7 +837,9 @@ impl RenderOnce for RichText {
                                         gpui::px(0.)
                                     };
                                 let bottom = end.y
-                                    + layout.line_height()
+                                    + layout
+                                        .line_height_for_index(range.end)
+                                        .unwrap_or(layout.line_height())
                                     + if ends_code {
                                         vertical_padding
                                     } else {
@@ -869,9 +873,17 @@ impl RenderOnce for RichText {
                         move |_, _, window, cx| {
                             let side = gpui::px(16.).min(task_layout.line_height());
                             for (offset, marker, shaped) in markers {
-                                let Some(start) = task_layout.position_for_index(offset) else {
+                                let Some(mut start) = task_layout.position_for_index(offset) else {
                                     continue;
                                 };
+                                if let Some(baseline) = task_layout.baseline_for_index(offset) {
+                                    start.y = baseline.y
+                                        - (task_layout.line_height()
+                                            - shaped.ascent
+                                            - shaped.descent)
+                                            / 2.
+                                        - shaped.ascent;
+                                }
                                 let crate::ListMarker::Task { checked } = marker else {
                                     let marker_x = if matches!(marker, crate::ListMarker::Bullet) {
                                         start.x - bullet_indent + bullet_inset
@@ -944,7 +956,7 @@ impl RenderOnce for RichText {
                                 let source =
                                     header_projection.text()[block.range.clone()].to_owned();
                                 let feedback = window.use_keyed_state(
-                                    ("code-copy-feedback", block.node.0 as usize),
+                                    ("code-copy-feedback", block.node.0),
                                     cx,
                                     |_, _| CopyFeedback::default(),
                                 );
@@ -1019,7 +1031,7 @@ impl RenderOnce for RichText {
 impl RichText {
     fn fragment(&self, cell: &crate::projection::CellProjection) -> Self {
         let mut child = self.clone();
-        child.id = ("richtext-fragment", cell.node.0 as usize).into();
+        child.id = ("richtext-fragment", cell.node.0).into();
         child.projection = cell.projection.clone();
         child.style = StyleRefinement::default();
         let offset = cell.offset;
@@ -1063,11 +1075,9 @@ impl RichText {
                             code_language,
                         } => {
                             let state = window.with_id(self.id.clone(), |window| {
-                                window.use_keyed_state(
-                                    ("graphic", block.node.0 as usize),
-                                    cx,
-                                    |_, _| crate::graphics::GraphicView::default(),
-                                )
+                                window.use_keyed_state(("graphic", block.node.0), cx, |_, _| {
+                                    crate::graphics::GraphicView::default()
+                                })
                             });
                             let options = self.graphic_options(window);
                             state.update(cx, |state, cx| {
@@ -1077,7 +1087,7 @@ impl RichText {
                                 let style = &self.code_block_style;
                                 let feedback = window.with_id(self.id.clone(), |window| {
                                     window.use_keyed_state(
-                                        ("diagram-copy-feedback", block.node.0 as usize),
+                                        ("diagram-copy-feedback", block.node.0),
                                         cx,
                                         |_, _| CopyFeedback::default(),
                                     )
@@ -1109,7 +1119,7 @@ impl RichText {
                                                     .child(language.clone()),
                                             )
                                             .child(code_copy_button(
-                                                ("copy-diagram", block.node.0 as usize).into(),
+                                                ("copy-diagram", block.node.0).into(),
                                                 graphic.source().to_string(),
                                                 style.clone(),
                                                 self.code_block_labels.clone(),
@@ -1126,7 +1136,7 @@ impl RichText {
                         BlockKind::Details { details, body } => {
                             let state = window.with_id(self.id.clone(), |window| {
                                 window.use_keyed_state(
-                                    ("details-state", block.node.0 as usize),
+                                    ("details-state", block.node.0),
                                     cx,
                                     |_, cx| DetailsState {
                                         open: details.open,
@@ -1163,7 +1173,7 @@ impl RichText {
                                 .bg(style.background)
                                 .child(
                                     div()
-                                        .id(("details-summary", block.node.0 as usize))
+                                        .id(("details-summary", block.node.0))
                                         .track_focus(&focus)
                                         .aria_label(details.summary.clone())
                                         .aria_expanded(expanded)
@@ -1298,7 +1308,7 @@ impl RichText {
                                 |resolve| resolve(image),
                             );
                             gpui::img(source)
-                                .id(("richtext-image", block.node.0 as usize))
+                                .id(("richtext-image", block.node.0))
                                 .max_w_full()
                                 .with_fallback(move || div().child(alt.clone()).into_any_element())
                                 .when_some(link, |view, link| {
@@ -1399,7 +1409,7 @@ impl RichText {
                     let mut body_index = 0;
                     for (row_index, row) in rows.iter().enumerate() {
                         let mut row_view = div()
-                            .id(("table-row", row.node.0 as usize))
+                            .id(("table-row", row.node.0))
                             .w_full()
                             .flex()
                             .items_stretch();
@@ -1419,7 +1429,7 @@ impl RichText {
                         }
                         for (index, (cell, column)) in row.cells.iter().zip(columns).enumerate() {
                             let mut cell_view = div()
-                                .id(("table-cell", cell.node.0 as usize))
+                                .id(("table-cell", cell.node.0))
                                 .flex()
                                 .flex_col()
                                 .px(padding.width)
@@ -1468,7 +1478,7 @@ impl RichText {
                     surface = surface.child(
                         self.block_surface(
                             div()
-                                .id(("table-scroll", node.0 as usize))
+                                .id(("table-scroll", node.0))
                                 .w_full()
                                 .min_w_0()
                                 .overflow_x_scroll()
@@ -1543,6 +1553,87 @@ impl LinkTooltip {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "markdown")]
+    #[gpui::test]
+    fn streaming_disclosure_state_survives_resolution_and_resets_on_clear(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        struct Page {
+            stream: Rc<std::cell::RefCell<crate::markdown::MarkdownStream>>,
+            scroll: gpui::ScrollHandle,
+        }
+        impl gpui::Render for Page {
+            fn render(
+                &mut self,
+                _: &mut gpui::Window,
+                _: &mut gpui::Context<Self>,
+            ) -> impl IntoElement {
+                div()
+                    .id("viewport")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .child(
+                        self.stream
+                            .borrow()
+                            .view("stream")
+                            .w_full()
+                            .text_size(gpui::px(16.))
+                            .line_height(gpui::px(24.)),
+                    )
+            }
+        }
+        let source = format!(
+            "[Manual][guide]\n\n<details>\n<summary>Measurements</summary>\n\n{}\n</details>\n",
+            (0..24)
+                .map(|index| format!("Reading {index}\n\n"))
+                .collect::<String>()
+        );
+        let stream = Rc::new(std::cell::RefCell::new(
+            crate::markdown::MarkdownStream::new(crate::Registry::with_standard_nodes()),
+        ));
+        stream.borrow_mut().push_str(&source).unwrap();
+        stream.borrow_mut().flush().unwrap();
+        let shared = stream.clone();
+        let scroll = gpui::ScrollHandle::new();
+        let observed = scroll.clone();
+        let window = cx.open_window(gpui::size(gpui::px(400.), gpui::px(200.)), move |_, _| {
+            Page {
+                stream: shared,
+                scroll,
+            }
+        });
+        let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.update(|window, cx| {
+            window.draw(cx).clear();
+        });
+        assert_eq!(observed.max_offset().y, gpui::px(0.));
+        visual.simulate_click(
+            gpui::point(gpui::px(24.), gpui::px(52.)),
+            Default::default(),
+        );
+        visual.update(|window, cx| {
+            window.draw(cx).clear();
+        });
+        assert!(observed.max_offset().y > gpui::px(200.));
+        stream
+            .borrow_mut()
+            .push_str("\n[guide]: app:manual\n")
+            .unwrap();
+        stream.borrow_mut().flush().unwrap();
+        visual.update(|window, cx| {
+            window.draw(cx).clear();
+        });
+        assert!(observed.max_offset().y > gpui::px(200.));
+        stream.borrow_mut().clear();
+        stream.borrow_mut().push_str(&source).unwrap();
+        stream.borrow_mut().flush().unwrap();
+        visual.update(|window, cx| {
+            window.draw(cx).clear();
+        });
+        assert_eq!(observed.max_offset().y, gpui::px(0.));
+    }
 
     #[gpui::test]
     fn details_toggle_by_pointer_and_keyboard_and_retain_state_after_resize(

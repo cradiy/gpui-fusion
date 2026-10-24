@@ -1032,7 +1032,7 @@ impl TextLayout {
                         resolved_spacing.push(top);
                     }
                     size.height += top;
-                    let mut row_height = heights
+                    let row_height = heights
                         .get(&line_start)
                         .copied()
                         .filter(|height| {
@@ -1045,9 +1045,6 @@ impl TextLayout {
                                 .get(&line_start)
                                 .map_or(line_height, |metrics| metrics.line_height)
                         });
-                    if !objects.is_empty() {
-                        row_height = row_height.max(line.ascent() + line.descent());
-                    }
                     if !heights.is_empty() || !typography.is_empty() || !inline_boxes.is_empty() {
                         resolved_heights.push(row_height);
                     }
@@ -1319,8 +1316,27 @@ impl TextLayout {
         for (line_index, line) in state.lines.iter().enumerate() {
             if index <= start + line.len() {
                 let height = state.height_for_line(line_index);
-                position.y += (height - line.ascent() - line.descent()) / 2. + line.ascent();
+                let local = line.position_for_index(index - start, height)?;
+                let row = line.row_for_y(local.y, height);
+                let (ascent, descent) = line.row_metrics(row);
+                position.y += (line.row_height(row, height) - ascent - descent) / 2. + ascent;
                 return Some(position);
+            }
+            start += line.len() + 1;
+        }
+        None
+    }
+
+    /// Height of the displayed row containing a UTF-8 byte offset.
+    pub fn line_height_for_index(&self, index: usize) -> Option<Pixels> {
+        let state = self.0.borrow();
+        let state = state.as_ref()?;
+        let mut start = 0;
+        for (line_index, line) in state.lines.iter().enumerate() {
+            if index <= start + line.len() {
+                let height = state.height_for_line(line_index);
+                let local = line.position_for_index(index - start, height)?;
+                return Some(line.row_height(line.row_for_y(local.y, height), height));
             }
             start += line.len() + 1;
         }

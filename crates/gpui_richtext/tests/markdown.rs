@@ -2,6 +2,38 @@
 use gpui_richtext::{BlockKind, ListMarker, Registry, markdown};
 
 #[test]
+fn late_reference_resolution_preserves_distinct_disclosure_and_code_identities() {
+    let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
+    stream.push_str("[Release][index]\n\n<details>\n<summary>Build output</summary>\n\n```text\nfirst\n```\n\n</details>\n\n<details>\n<summary>Build output</summary>\n\n```text\nsecond\n```\n\n</details>\n").unwrap();
+    let before = stream.flush().unwrap();
+    let identities = |projection: &gpui_richtext::Projection| {
+        projection
+            .blocks()
+            .iter()
+            .filter_map(|block| {
+                if let BlockKind::Details { body, .. } = &block.kind {
+                    Some((
+                        block.node,
+                        body.blocks()
+                            .iter()
+                            .map(|block| block.node)
+                            .collect::<Vec<_>>(),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    let original = identities(&before);
+    assert_ne!(original[0].0, original[1].0);
+    stream.push_str("\n[index]: app:builds\n").unwrap();
+    let after = stream.flush().unwrap();
+    assert_ne!(before.text(), after.text());
+    assert_eq!(identities(&after), original);
+}
+
+#[test]
 fn disclosures_parse_nested_markdown_without_consuming_fenced_tags() {
     let source = "<details open>\n<summary>Diagnostics &amp; logs</summary>\n\nRead [report](app:report).\n\n```html\n</details>\n```\n\n<details>\n<summary>Trace</summary>\n\n| Key | Value |\n| --- | --- |\n| Mode | Debug |\n\n</details>\n\n</details>\n\nAfter.\n";
     let registry = Registry::with_standard_nodes();

@@ -57,12 +57,14 @@ pub(super) fn convert(mut items: Vec<Item>) -> Result<Vec<NodeTree>> {
         for back in returns {
             body.last_mut().unwrap().children.extend([text(" "), back]);
         }
-        result.push(
+        result.push(source_node(
             node(Footnote {
                 number: number as u32,
             })
             .children(body),
-        );
+            definition.offset,
+            11,
+        ));
     }
     Ok(result)
 }

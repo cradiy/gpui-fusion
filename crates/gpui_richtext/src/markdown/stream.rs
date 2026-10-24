@@ -79,6 +79,10 @@ impl MarkdownStream {
 
     /// Build a view retaining selections whose text prefix survives an update.
     pub fn view(&self, id: impl Into<gpui::ElementId>) -> RichText {
+        let id = gpui::ElementId::NamedChild(
+            std::sync::Arc::new(id.into()),
+            format!("stream-{}", self.revision).into(),
+        );
         RichText::new(id, self.projection.clone())
             .preserve_selection_on_update(true)
             .selection_revision(self.revision)

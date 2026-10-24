@@ -111,11 +111,11 @@ fn rows(layout: &TextLayout, align: TextAlign) -> Vec<Row> {
                 origin: point(bounds.left() + indent + offset, y),
                 base_x,
                 width,
-                height: line_height,
+                height: line.row_height(index, line_height),
                 newline: index == line.wrap_boundaries().len()
                     && line_start + line.len() < inner.len,
             });
-            y += line_height;
+            y += line.row_height(index, line_height);
         }
         line_start += line.len() + 1;
     }
@@ -514,6 +514,8 @@ mod tests {
         .collect();
         let line = WrappedLine {
             layout: Arc::new(WrappedLineLayout {
+                inline_boxes: Vec::new(),
+                inline_box_rows: Vec::new(),
                 unwrapped_layout: Arc::new(LineLayout {
                     font_size: px(16.),
                     width: px(50.),

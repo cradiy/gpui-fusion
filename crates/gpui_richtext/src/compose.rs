@@ -12,6 +12,7 @@ pub fn code_block(text: impl Into<SharedString>) -> NodeTree {
 
 /// A composable node subtree. Components describe content, not independent views.
 pub struct NodeTree {
+    pub(crate) id: Option<NodeId>,
     pub(crate) payload: Arc<dyn Any + Send + Sync>,
     pub(crate) children: Vec<NodeTree>,
 }
@@ -31,6 +32,7 @@ impl NodeTree {
 /// Compose any registered payload type, including application-defined types.
 pub fn node(payload: impl Any + Send + Sync) -> NodeTree {
     NodeTree {
+        id: None,
         payload: Arc::new(payload),
         children: Vec::new(),
     }
@@ -151,13 +153,24 @@ impl Document {
         let mut pending: Vec<_> = roots.into_iter().map(|root| (root, None, 0)).collect();
         pending.reverse();
         let mut nodes: Vec<Node> = Vec::new();
+        let mut source_occurrences = std::collections::HashMap::<NodeId, u64>::new();
         let mut roots = Vec::new();
         while let Some((tree, parent, depth)) = pending.pop() {
             if nodes.len() >= 100_000 || depth > 256 {
                 bail!("document exceeds node count or nesting limit");
             }
             let index = nodes.len();
-            let id = NodeId(index as u64 + 1);
+            let id = if let Some(base) = tree.id {
+                let occurrence = source_occurrences.entry(base).or_default();
+                if *occurrence >= 4096 {
+                    bail!("too many nodes at one source position");
+                }
+                let id = NodeId(base.0 + *occurrence);
+                *occurrence += 1;
+                id
+            } else {
+                NodeId(index as u64 + 1)
+            };
             if let Some(parent) = parent {
                 let parent: &mut Node = &mut nodes[parent];
                 parent.children.push(id);

@@ -3,7 +3,9 @@
 //! Headings support distinct typography metrics; table cells wrap independently.
 //! Images render as blocks; arbitrary inline objects and virtualization are not provided.
 
+mod anchor;
 mod blocks;
+pub use anchor::{Anchor, AnchorLink, AnchorSpan, Footnote, FootnoteBacklink, LinkKind};
 mod code_block;
 pub mod compose;
 mod containers;

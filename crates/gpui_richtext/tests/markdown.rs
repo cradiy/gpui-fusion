@@ -2,6 +2,41 @@
 use gpui_richtext::{BlockKind, ListMarker, Registry, markdown};
 
 #[test]
+fn streamed_footnotes_number_by_reference_and_keep_all_return_destinations() {
+    let source = "Read[^beta] again[^beta], then[^alpha].\n\n[^alpha]: Alpha **内容**.\n\n[^beta]: Beta [source](https://example.org/b).\n\n    A second paragraph.\n\n[^unused]: Omitted.\n";
+    let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    let projection = stream.finish().unwrap();
+    assert!(projection.text().starts_with("Read[1] again[1], then[2]."));
+    assert!(projection.text().find("Beta").unwrap() < projection.text().find("Alpha").unwrap());
+    assert!(!projection.text().contains("Omitted"));
+    for link in projection
+        .links()
+        .iter()
+        .filter(|link| link.kind == gpui_richtext::LinkKind::Anchor)
+    {
+        let anchor = projection
+            .anchors()
+            .iter()
+            .find(|anchor| anchor.name == link.target)
+            .unwrap();
+        assert!(projection.text().is_char_boundary(anchor.offset));
+    }
+    assert_eq!(projection.anchors().len(), 5);
+    assert_eq!(
+        projection
+            .links()
+            .iter()
+            .filter(|link| link.kind == gpui_richtext::LinkKind::External)
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn nested_markdown_preserves_structure_targets_and_code_source() {
     let source = "# Data catalog\n\n> Overview\n>\n> 3. Primary **record**\n>    - [x] Validate [schema](app:schema)\n>\n>    ```rust\n>    let label = \"温度\";\n>    ```\n\n---\n\n![Diagram](assets/catalog.png)\n\n| Field | Count |\n| :--- | ---: |\n| Nodes | 12 |\n";
     let document = markdown::parse(source).unwrap();

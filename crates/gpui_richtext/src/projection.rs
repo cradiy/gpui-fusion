@@ -20,6 +20,7 @@ pub struct Paragraph;
 
 /// The semantic contribution of a registered payload type.
 pub enum Contribution {
+    Anchor(SharedString),
     Alert(crate::Alert),
     DefinitionList,
     DefinitionTerm(InlineStyle),
@@ -56,6 +57,7 @@ pub enum Contribution {
         style: InlineStyle,
     },
     Link {
+        kind: crate::LinkKind,
         target: SharedString,
         text: Option<SharedString>,
         style: InlineStyle,
@@ -64,6 +66,7 @@ pub enum Contribution {
 
 #[derive(Default)]
 struct Compilation {
+    anchors: Vec<crate::AnchorSpan>,
     #[cfg(feature = "syntax-highlighting")]
     highlights: HashMap<NodeId, Arc<crate::syntax::CachedHighlight>>,
     indent: usize,
@@ -221,6 +224,31 @@ impl Registry {
             registry.highlighter = Some(Arc::new(crate::syntax::SyntaxHighlighter::default()));
         }
         registry.register::<crate::Rule>(|_| Ok(Contribution::Rule));
+        registry.register::<crate::Anchor>(|anchor| Ok(Contribution::Anchor(anchor.0.clone())));
+        registry.register::<crate::Footnote>(|note| {
+            Ok(Contribution::ListEntry {
+                marker: ListMarker::Number(note.number),
+                style: InlineStyle::default(),
+            })
+        });
+        let anchor_style = theme.link.clone();
+        let backlink_style = theme.footnote_backlink.clone();
+        registry.register::<crate::FootnoteBacklink>(move |link| {
+            Ok(Contribution::Link {
+                kind: crate::LinkKind::Anchor,
+                target: link.target.clone(),
+                text: None,
+                style: backlink_style.clone(),
+            })
+        });
+        registry.register::<crate::AnchorLink>(move |link| {
+            Ok(Contribution::Link {
+                kind: crate::LinkKind::Anchor,
+                target: link.target.clone(),
+                text: None,
+                style: anchor_style.clone(),
+            })
+        });
         registry.register::<crate::Alert>(|alert| Ok(Contribution::Alert(alert.clone())));
         registry.register::<crate::DefinitionList>(|_| Ok(Contribution::DefinitionList));
         let term_style = theme.definition_term.clone();
@@ -279,6 +307,7 @@ impl Registry {
         registry.register::<Group>(|_| Ok(Contribution::Blocks(InlineStyle::default())));
         registry.register::<Link>(move |link| {
             Ok(Contribution::Link {
+                kind: crate::LinkKind::External,
                 target: link.link.clone(),
                 text: link.text.clone(),
                 style: theme.link.clone(),
@@ -330,11 +359,20 @@ impl Registry {
         for root in document.roots.iter() {
             self.append(document, *root, true, InlineStyle::default(), &mut output)?;
         }
+        let mut names = std::collections::HashSet::new();
+        if output
+            .anchors
+            .iter()
+            .any(|anchor| !names.insert(anchor.name.clone()))
+        {
+            bail!("duplicate document anchor");
+        }
         #[cfg(feature = "syntax-highlighting")]
         {
             *self.highlights.borrow_mut() = output.highlights;
         }
         let mut projection = Projection {
+            anchors: output.anchors,
             text: output.text.into(),
             spans: output.spans,
             links: output.links,
@@ -381,6 +419,18 @@ impl Registry {
             );
         }
         match contribution {
+            Contribution::Anchor(name) => {
+                if name.is_empty() {
+                    bail!("empty anchor at node {id:?}");
+                }
+                output.anchors.push(crate::AnchorSpan {
+                    name,
+                    offset: output.text.len(),
+                });
+                for child in &node.children {
+                    self.append(document, *child, false, inherited.clone(), output)?;
+                }
+            }
             Contribution::Alert(alert) => {
                 let mut body = Compilation::default();
                 for child in &node.children {
@@ -388,6 +438,12 @@ impl Registry {
                 }
                 let start = output.start_block();
                 output.text.push_str(&body.text);
+                output
+                    .anchors
+                    .extend(body.anchors.iter().cloned().map(|mut anchor| {
+                        anchor.offset += start;
+                        anchor
+                    }));
                 output
                     .spans
                     .extend(body.spans.iter().cloned().map(|mut span| {
@@ -403,6 +459,7 @@ impl Registry {
                 #[cfg(feature = "syntax-highlighting")]
                 output.highlights.extend(body.highlights);
                 let mut projection = Projection {
+                    anchors: body.anchors,
                     text: body.text.into(),
                     spans: body.spans,
                     links: body.links,
@@ -642,6 +699,7 @@ impl Registry {
                 }
             }
             Contribution::Link {
+                kind,
                 target,
                 text,
                 style,
@@ -675,6 +733,7 @@ impl Registry {
                 output.inside_link = false;
                 if start < output.text.len() {
                     output.links.push(LinkSpan {
+                        kind,
                         node: id,
                         target,
                         range: start..output.text.len(),
@@ -799,6 +858,7 @@ pub struct TextSpan {
 /// Immutable text and source mapping, compiled outside the paint path.
 #[derive(Default, Debug)]
 pub struct Projection {
+    anchors: Vec<crate::AnchorSpan>,
     text: SharedString,
     spans: Vec<TextSpan>,
     links: Vec<LinkSpan>,
@@ -870,6 +930,7 @@ pub enum BlockKind {
 /// An actionable range in the projected text; the destination is opaque to GPUI.
 #[derive(Clone, Debug)]
 pub struct LinkSpan {
+    pub kind: crate::LinkKind,
     pub node: NodeId,
     pub target: SharedString,
     pub range: Range<usize>,
@@ -893,6 +954,16 @@ impl Projection {
                     && candidate.start <= range.end
         };
         Arc::new(Self {
+            anchors: self
+                .anchors
+                .iter()
+                .filter(|anchor| anchor.offset >= range.start && anchor.offset < range.end)
+                .cloned()
+                .map(|mut anchor| {
+                    anchor.offset -= range.start;
+                    anchor
+                })
+                .collect(),
             text: self.text[range.clone()].to_owned().into(),
             spans: self.spans[first_span..]
                 .iter()
@@ -1013,6 +1084,10 @@ impl Projection {
 
     pub fn text(&self) -> &SharedString {
         &self.text
+    }
+
+    pub fn anchors(&self) -> &[crate::AnchorSpan] {
+        &self.anchors
     }
     pub fn spans(&self) -> &[TextSpan] {
         &self.spans

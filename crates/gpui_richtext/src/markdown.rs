@@ -3,25 +3,29 @@
 use crate::{compose::*, *};
 use anyhow::{Result, bail};
 use pulldown_cmark::{Event, Options, Parser, Tag};
+mod footnotes;
 mod stream;
 pub use stream::MarkdownStream;
 
 struct Item {
+    reference: Option<(usize, usize)>,
     tag: Option<Tag<'static>>,
     event: Option<Event<'static>>,
     children: Vec<Item>,
 }
 
 /// Parse paragraphs, headings, lists, quotations, alerts, definition lists,
-/// tables, images and fenced code.
+/// tables, images, fenced code and numbered footnotes with return links.
 /// Parsing performs no asset loading or URL navigation.
 pub fn parse(source: &str) -> Result<Document> {
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_GFM
-        | Options::ENABLE_DEFINITION_LIST;
+        | Options::ENABLE_DEFINITION_LIST
+        | Options::ENABLE_FOOTNOTES;
     let mut stack = vec![Item {
+        reference: None,
         tag: None,
         event: None,
         children: Vec::new(),
@@ -32,6 +36,7 @@ pub fn parse(source: &str) -> Result<Document> {
         }
         match event {
             Event::Start(tag) => stack.push(Item {
+                reference: None,
                 tag: Some(tag.into_static()),
                 event: None,
                 children: Vec::new(),
@@ -41,13 +46,14 @@ pub fn parse(source: &str) -> Result<Document> {
                 stack.last_mut().unwrap().children.push(item);
             }
             event => stack.last_mut().unwrap().children.push(Item {
+                reference: None,
                 tag: None,
                 event: Some(event.into_static()),
                 children: Vec::new(),
             }),
         }
     }
-    Document::from_roots(blocks(&stack.pop().unwrap().children)?)
+    Document::from_roots(footnotes::convert(stack.pop().unwrap().children)?)
 }
 
 fn plain(items: &[Item]) -> String {
@@ -71,6 +77,13 @@ fn task(items: &[Item]) -> Option<bool> {
 }
 
 fn inline(item: &Item) -> Result<Option<NodeTree>> {
+    if let Some((number, occurrence)) = item.reference {
+        return Ok(Some(
+            anchor(format!("footnote-ref-{number}-{occurrence}")).child(
+                anchor_link(format!("footnote-{number}")).child(text(format!("[{number}]"))),
+            ),
+        ));
+    }
     let container = match &item.tag {
         Some(Tag::Emphasis) => emphasis(),
         Some(Tag::Strong) => strong(),
@@ -86,6 +99,7 @@ fn inline(item: &Item) -> Result<Option<NodeTree>> {
                 Some(Event::SoftBreak) => Some(text(" ")),
                 Some(Event::HardBreak) => Some(hard_break()),
                 Some(Event::TaskListMarker(_)) => None,
+                Some(Event::FootnoteReference(label)) => Some(text(format!("[^{label}]"))),
                 _ => bail!("unsupported Markdown event"),
             });
         }

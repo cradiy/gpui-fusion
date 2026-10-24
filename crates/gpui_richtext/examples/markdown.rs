@@ -176,6 +176,7 @@ impl Render for Preview {
                     .child(
                         self.stream
                             .view("markdown")
+                            .scroll_handle(&self.scroll)
                             .on_link_click(|link, _, cx| cx.open_url(&link.target))
                             .image_source(|image| {
                                 std::path::PathBuf::from(image.source.as_ref()).into()

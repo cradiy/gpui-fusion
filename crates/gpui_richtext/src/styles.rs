@@ -85,11 +85,17 @@ pub struct TextTheme {
     pub code: InlineStyle,
     pub code_block: InlineStyle,
     pub link: InlineStyle,
+    pub footnote_backlink: InlineStyle,
 }
 
 impl Default for TextTheme {
     fn default() -> Self {
         Self {
+            footnote_backlink: HighlightStyle {
+                color: Some(gpui::rgb(0x64748b).into()),
+                ..Default::default()
+            }
+            .into(),
             definition_term: HighlightStyle::from(FontWeight::SEMIBOLD).into(),
             table_header: HighlightStyle::from(FontWeight::SEMIBOLD).into(),
             table_cell: InlineStyle::default(),

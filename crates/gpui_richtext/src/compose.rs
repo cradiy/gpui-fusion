@@ -12,8 +12,8 @@ pub fn code_block(text: impl Into<SharedString>) -> NodeTree {
 
 /// A composable node subtree. Components describe content, not independent views.
 pub struct NodeTree {
-    payload: Arc<dyn Any + Send + Sync>,
-    children: Vec<NodeTree>,
+    pub(crate) payload: Arc<dyn Any + Send + Sync>,
+    pub(crate) children: Vec<NodeTree>,
 }
 
 impl NodeTree {
@@ -105,6 +105,16 @@ pub fn group() -> NodeTree {
 }
 pub fn link(target: impl Into<SharedString>) -> NodeTree {
     node(Link::new(target))
+}
+
+pub fn anchor(name: impl Into<SharedString>) -> NodeTree {
+    node(crate::Anchor(name.into()))
+}
+
+pub fn anchor_link(target: impl Into<SharedString>) -> NodeTree {
+    node(crate::AnchorLink {
+        target: target.into(),
+    })
 }
 pub fn link_with_text(target: impl Into<SharedString>, text: impl Into<SharedString>) -> NodeTree {
     node(Link::new(target).text(text))

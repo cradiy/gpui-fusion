@@ -1,6 +1,6 @@
 # Packet inspector
 
-Inspect **structured payloads**, compare *decoded fields*, and follow a [protocol reference](https://www.rfc-editor.org/).
+Inspect **structured payloads**, compare *decoded fields*, and follow a [protocol reference](https://www.rfc-editor.org/).[^capture]
 
 ## Processing pipeline
 
@@ -62,4 +62,6 @@ Payload
 
 ![Application icon](IMAGE_SOURCE)
 
-The artwork is loaded from a local file. Text following an image remains selectable.
+The artwork is loaded from a local file. Text following an image remains selectable.[^capture]
+
+[^capture]: Capture files retain the transport representation. Decoding produces a separate interpretation without changing those bytes.

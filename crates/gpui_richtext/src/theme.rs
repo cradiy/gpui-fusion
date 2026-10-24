@@ -50,6 +50,7 @@ impl RichTextTheme {
     pub fn dark() -> Self {
         let mut text = TextTheme::default();
         text.link.highlight.color = Some(rgb(0x79b8ff).into());
+        text.footnote_backlink.highlight.color = Some(rgb(0x9daec2).into());
         text.code.highlight.background_color = Some(rgb(0x283343).into());
         text.mark.highlight.background_color = Some(rgba(0xe5b70038).into());
         Self {

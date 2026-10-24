@@ -89,7 +89,7 @@ and `Err` is failure.
   is repainted during pointer movement; no video stream or extra GPU renderer is
   created. Screenshots stay in temporary, unlinked buffers and are released when
   sampling ends. Output removal or reconfiguration cancels the session.
-- Other Wayland compositors and X11 use the XDG Screenshot portal's
+- Other Wayland compositors use the XDG Screenshot portal's
   [`PickColor`](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Screenshot.html#org-freedesktop-portal-screenshot-pickcolor)
   interface. Its interface and magnification are controlled by the desktop
   backend. Capture failures on supported Wayland compositors are reported as

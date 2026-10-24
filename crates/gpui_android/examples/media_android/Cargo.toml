@@ -9,7 +9,7 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 gpui.workspace = true
-gpui_platform = { workspace = true, features = ["wayland", "x11"] }
+gpui_platform = { workspace = true, features = ["wayland"] }
 gpui_media = { path = "../../../gpui_media", default-features = false, features = ["video"] }
 gpui_media_backend.workspace = true
 

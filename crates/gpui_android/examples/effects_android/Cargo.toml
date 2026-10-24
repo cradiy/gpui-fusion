@@ -9,7 +9,7 @@ publish = false
 [dependencies]
 gpui.workspace = true
 gpui_effects.workspace = true
-gpui_platform = { workspace = true, features = ["wayland", "x11"] }
+gpui_platform = { workspace = true, features = ["wayland"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 gpui_android.workspace = true

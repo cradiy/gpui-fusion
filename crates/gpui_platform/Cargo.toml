@@ -12,7 +12,7 @@ workspace = true
 path = "src/gpui_platform.rs"
 
 [features]
-default = ["multithreaded"]
+default = ["multithreaded", "wayland", "font-kit"]
 multithreaded = ["gpui_web/multithreaded"]
 network = ["gpui_android/network"]
 font-kit = ["gpui_macos/font-kit"]
@@ -20,7 +20,6 @@ test-support = ["gpui/test-support", "gpui_macos/test-support"]
 screen-capture = ["gpui/screen-capture", "gpui_macos/screen-capture", "gpui_windows/screen-capture", "gpui_linux/screen-capture"]
 runtime_shaders = ["gpui_macos/runtime_shaders"]
 wayland = ["gpui_linux/wayland"]
-x11 = ["gpui_linux/x11"]
 
 [dependencies]
 gpui.workspace = true

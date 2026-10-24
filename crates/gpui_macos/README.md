@@ -31,5 +31,5 @@ cargo run -p gpui --example native_windows
 The example opens two windows for dragging and dropping, plus a menu button.
 F2 opens a passive anchored popup; Command-Q exits.
 
-Wayland layer-shell, X11 selections, and compositor decoration protocols remain
+Wayland layer-shell, primary selection, and compositor decoration protocols remain
 Linux-specific. macOS uses AppKit decorations and CoreText grayscale text.

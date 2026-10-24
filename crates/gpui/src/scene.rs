@@ -443,7 +443,7 @@ impl Scene {
     #[cfg_attr(
         all(
             any(target_os = "linux", target_os = "freebsd"),
-            not(any(feature = "x11", feature = "wayland"))
+            not(feature = "wayland")
         ),
         allow(dead_code)
     )]
@@ -483,7 +483,7 @@ impl Scene {
 #[cfg_attr(
     all(
         any(target_os = "linux", target_os = "freebsd"),
-        not(any(feature = "x11", feature = "wayland"))
+        not(feature = "wayland")
     ),
     allow(dead_code)
 )]
@@ -576,7 +576,7 @@ impl Primitive {
 #[cfg_attr(
     all(
         any(target_os = "linux", target_os = "freebsd"),
-        not(any(feature = "x11", feature = "wayland"))
+        not(feature = "wayland")
     ),
     allow(dead_code)
 )]
@@ -863,7 +863,7 @@ impl<'a> Iterator for BatchIterator<'a> {
 #[cfg_attr(
     all(
         any(target_os = "linux", target_os = "freebsd"),
-        not(any(feature = "x11", feature = "wayland"))
+        not(feature = "wayland")
     ),
     allow(dead_code)
 )]

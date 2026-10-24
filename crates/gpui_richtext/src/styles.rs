@@ -7,7 +7,7 @@ use gpui::{
 #[derive(Clone, Debug, Default)]
 pub struct InlineStyle {
     pub highlight: HighlightStyle,
-    pub font_family: Option<SharedString>,
+    pub font_family: Option<gpui::FontFamily>,
 }
 
 impl InlineStyle {
@@ -160,7 +160,7 @@ impl Default for TextTheme {
                     font_weight: Some(FontWeight::MEDIUM),
                     ..Default::default()
                 },
-                font_family: Some("monospace".into()),
+                font_family: Some(gpui::GenericFontFamily::Monospace.into()),
             },
             code: InlineStyle {
                 highlight: HighlightStyle {
@@ -185,7 +185,7 @@ impl Default for TextTheme {
                     font_weight: Some(FontWeight::NORMAL),
                     ..Default::default()
                 },
-                font_family: Some("monospace".into()),
+                font_family: Some(gpui::GenericFontFamily::Monospace.into()),
             },
         }
     }

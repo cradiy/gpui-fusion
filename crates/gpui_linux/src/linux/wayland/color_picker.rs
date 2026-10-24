@@ -723,7 +723,7 @@ mod tests {
     #[ignore = "opens a desktop sampler on the live Wayland session for up to 8 seconds"]
     fn desktop_loupe_smoke() {
         let start = Instant::now();
-        let text = Arc::new(gpui_wgpu::CosmicTextSystem::new("sans-serif"));
+        let text = Arc::new(gpui_wgpu::CosmicTextSystem::new("IBM Plex Sans"));
         let result = run(text, || start.elapsed() > Duration::from_secs(8)).unwrap();
         assert!(
             matches!(result, Outcome::Complete(_)),

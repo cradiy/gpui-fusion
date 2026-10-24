@@ -463,7 +463,7 @@ pub struct TextStyle {
     pub color: Hsla,
 
     /// The font family to use
-    pub font_family: SharedString,
+    pub font_family: crate::FontFamily,
 
     /// The font features to use
     pub font_features: FontFeatures,
@@ -510,7 +510,7 @@ impl Default for TextStyle {
         TextStyle {
             color: black(),
             // todo(linux) make this configurable or choose better default
-            font_family: ".SystemUIFont".into(),
+            font_family: crate::GenericFontFamily::SystemUi.into(),
             font_features: FontFeatures::default(),
             font_fallbacks: None,
             font_size: rems(1.).into(),

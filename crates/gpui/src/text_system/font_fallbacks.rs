@@ -3,19 +3,18 @@ use std::sync::Arc;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// The fallback fonts that can be configured for a given font.
-/// Fallback fonts family names are stored here.
+/// Ordered fallback families, including literal names and generic categories.
 #[derive(Default, Clone, Eq, PartialEq, Hash, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct FontFallbacks(pub Arc<Vec<String>>);
+pub struct FontFallbacks(pub Arc<Vec<super::FontFamily>>);
 
 impl FontFallbacks {
-    /// Get the fallback fonts family names
-    pub fn fallback_list(&self) -> &[String] {
+    /// Get the ordered fallback families.
+    pub fn fallback_list(&self) -> &[super::FontFamily] {
         self.0.as_slice()
     }
 
-    /// Create a font fallback from a list of strings
-    pub fn from_fonts(fonts: Vec<String>) -> Self {
+    /// Create a fallback chain from explicit families.
+    pub fn from_fonts(fonts: Vec<super::FontFamily>) -> Self {
         FontFallbacks(Arc::new(fonts))
     }
 }

@@ -60,7 +60,7 @@ impl Render for Example {
             .size_full()
             .bg(rgb(0xf2f5f8))
             .text_color(rgb(0x1c2c42))
-            .font_family("sans-serif")
+            .font_family(gpui::GenericFontFamily::SansSerif)
             .p_6()
             .flex()
             .flex_col()

@@ -50,7 +50,7 @@ fn bench_layout_line(c: &mut Criterion) {
 
     let font_id_with_fallback = {
         let mut f = font("Lilex");
-        f.fallbacks = Some(FontFallbacks::from_fonts(vec!["IBM Plex Sans".to_string()]));
+        f.fallbacks = Some(FontFallbacks::from_fonts(vec!["IBM Plex Sans".into()]));
         system.font_id(&f).unwrap()
     };
 

@@ -26,15 +26,18 @@ impl Loupe {
     pub fn new(text: &dyn PlatformTextSystem, scale: usize) -> Result<Self> {
         let mut loupe = Self::chrome(scale);
         let font_id = [
-            ".SystemUIFont",
-            "Inter",
-            "Noto Sans",
-            "DejaVu Sans",
-            "Liberation Sans",
+            gpui::FontFamily::Generic(gpui::GenericFontFamily::SystemUi),
+            "Inter".into(),
+            "Noto Sans".into(),
+            "DejaVu Sans".into(),
+            "Liberation Sans".into(),
         ]
         .into_iter()
-        .map(str::to_owned)
-        .chain(text.all_font_names())
+        .chain(
+            text.all_font_names()
+                .into_iter()
+                .map(gpui::FontFamily::from),
+        )
         .find_map(|family| {
             let mut descriptor = font(family);
             descriptor.weight = gpui::FontWeight::MEDIUM;

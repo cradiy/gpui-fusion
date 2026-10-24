@@ -40,7 +40,7 @@ pub fn menu(material: MenuMaterial) -> ContextMenu {
         .border(px(0.0))
         .bg(transparent_black())
         .text_color(rgb(0xf8fafc))
-        .font_family(".SystemUIFont")
+        .font_family(gpui::GenericFontFamily::SystemUi)
         .root_surface(move |state, content, _, _| match material {
             MenuMaterial::DarkFrosted => {
                 FrostedGlass::with_appearance(FrostedGlassAppearance::dark())

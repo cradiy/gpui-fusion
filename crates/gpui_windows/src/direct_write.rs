@@ -386,10 +386,26 @@ impl DirectWriteState {
         Ok(())
     }
 
+    fn family_name<'a>(family: &'a gpui::FontFamily, system: &'a SharedString) -> &'a str {
+        use gpui::{FontFamily, GenericFontFamily as Generic};
+        match family {
+            FontFamily::Named(name) => name.as_str(),
+            FontFamily::Generic(generic) => match generic {
+                Generic::SystemUi => system.as_str(),
+                Generic::Serif => "Times New Roman",
+                Generic::SansSerif => "Arial",
+                Generic::Monospace => "Consolas",
+                Generic::Cursive => "Comic Sans MS",
+                Generic::Fantasy => "Impact",
+            },
+        }
+    }
+
     fn generate_font_fallbacks(
         fallbacks: &FontFallbacks,
         factory: &IDWriteFactory5,
         system_font_collection: &IDWriteFontCollection1,
+        system_ui_font_name: &SharedString,
     ) -> Result<Option<IDWriteFontFallback>> {
         let fallback_list = fallbacks.fallback_list();
         if fallback_list.is_empty() {
@@ -400,7 +416,8 @@ impl DirectWriteState {
             let font_set = &system_font_collection.GetFontSet()?;
             let mut unicode_ranges = Vec::new();
             for family_name in fallback_list {
-                let family_name = HSTRING::from(family_name);
+                let family_name =
+                    HSTRING::from(Self::family_name(family_name, system_ui_font_name));
                 let Some(fonts) = font_set
                     .GetMatchingFonts(
                         &family_name,
@@ -466,14 +483,9 @@ impl DirectWriteState {
         system_font_collection: &IDWriteFontCollection1,
         system_ui_font_name: &SharedString,
     ) -> Option<FontInfo> {
-        const SYSTEM_UI_FONT_NAME: &str = ".SystemUIFont";
-        let family = if family == SYSTEM_UI_FONT_NAME {
-            system_ui_font_name
-        } else {
-            gpui::font_name_with_fallbacks_shared(&family, &system_ui_font_name)
-        };
+        let family = Self::family_name(family, system_ui_font_name);
         let fontset = unsafe { collection.GetFontSet().log_err()? };
-        let font_family_h = HSTRING::from(family.as_str());
+        let font_family_h = HSTRING::from(family);
         let font = unsafe {
             fontset
                 .GetMatchingFonts(
@@ -492,9 +504,14 @@ impl DirectWriteState {
                 let direct_write_features =
                     unsafe { Self::generate_font_features(factory, features).log_err()? };
                 let fallbacks = fallbacks.as_ref().and_then(|fallbacks| {
-                    Self::generate_font_fallbacks(fallbacks, factory, system_font_collection)
-                        .log_err()
-                        .flatten()
+                    Self::generate_font_fallbacks(
+                        fallbacks,
+                        factory,
+                        system_font_collection,
+                        system_ui_font_name,
+                    )
+                    .log_err()
+                    .flatten()
                 });
                 let font_info = FontInfo {
                     font_family_h: font_family_h.clone(),

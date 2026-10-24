@@ -1,4 +1,5 @@
 mod font_fallbacks;
+mod font_family;
 mod font_features;
 mod line;
 mod line_breaks;
@@ -6,6 +7,7 @@ mod line_layout;
 mod line_wrapper;
 
 pub use font_fallbacks::*;
+pub use font_family::*;
 pub use font_features::*;
 pub use line::*;
 pub use line_layout::*;
@@ -61,6 +63,7 @@ pub struct TextSystem {
 
 #[derive(Default)]
 struct FontCache {
+    generic_families: FxHashMap<GenericFontFamily, SharedString>,
     ids_by_font: FxHashMap<Font, Option<FontId>>,
     fonts_by_id: FxHashMap<FontId, Font>,
 }
@@ -76,9 +79,9 @@ impl TextSystem {
             wrapper_pool: Mutex::default(),
             font_runs_pool: Mutex::default(),
             fallback_font_stack: smallvec![
-                // TODO: Remove this when Linux have implemented setting fallbacks.
-                font(".ZedMono"),
-                font(".ZedSans"),
+                font(GenericFontFamily::SystemUi),
+                font(GenericFontFamily::SansSerif),
+                font("IBM Plex Sans"),
                 font("Helvetica"),
                 font("Segoe UI"),     // Windows
                 font("Ubuntu"),       // Gnome (Ubuntu)
@@ -94,12 +97,6 @@ impl TextSystem {
     /// Get a list of all available font names from the operating system.
     pub fn all_font_names(&self) -> Vec<String> {
         let mut names = self.platform_text_system.all_font_names();
-        names.extend(
-            self.fallback_font_stack
-                .iter()
-                .map(|font| font.family.to_string()),
-        );
-        names.push(".SystemUIFont".to_string());
         names.sort_unstable();
         names.dedup();
         names
@@ -113,6 +110,21 @@ impl TextSystem {
         result
     }
 
+    /// Override a generic family with a literal font name, or restore the platform
+    /// default with `None`. Existing font IDs remain valid; request a redraw after changes.
+    pub fn set_generic_font_family(&self, family: GenericFontFamily, name: Option<SharedString>) {
+        let mut cache = self.font_cache.write();
+        if cache.generic_families.get(&family) == name.as_ref() {
+            return;
+        }
+        if let Some(name) = name {
+            cache.generic_families.insert(family, name);
+        } else {
+            cache.generic_families.remove(&family);
+        }
+        cache.ids_by_font.clear();
+    }
+
     /// Get the FontId for the configure font family and style.
     fn font_id(&self, font: &Font) -> Option<FontId> {
         if let Some(font_id) = self.font_cache.read().ids_by_font.get(font) {
@@ -123,7 +135,40 @@ impl TextSystem {
         if let Some(font_id) = cache.ids_by_font.get(font) {
             return *font_id;
         }
-        let font_id = match self.platform_text_system.font_id(font) {
+        let resolve_family = |family: &FontFamily| match family {
+            FontFamily::Generic(generic) => cache
+                .generic_families
+                .get(generic)
+                .map_or_else(|| family.clone(), |name| FontFamily::Named(name.clone())),
+            FontFamily::Named(_) => family.clone(),
+        };
+        let resolved = Font {
+            family: resolve_family(&font.family),
+            fallbacks: font.fallbacks.as_ref().map(|fallbacks| {
+                FontFallbacks::from_fonts(
+                    fallbacks
+                        .fallback_list()
+                        .iter()
+                        .map(resolve_family)
+                        .collect(),
+                )
+            }),
+            ..font.clone()
+        };
+        let result = self
+            .platform_text_system
+            .font_id(&resolved)
+            .or_else(|error| {
+                if resolved.family != font.family {
+                    self.platform_text_system.font_id(&Font {
+                        family: font.family.clone(),
+                        ..resolved
+                    })
+                } else {
+                    Err(error)
+                }
+            });
+        let font_id = match result {
             Ok(id) => Some(id),
             Err(error) => {
                 log::debug!("failed to load font '{}': {error:#}", font.family);
@@ -143,16 +188,31 @@ impl TextSystem {
         self.font_cache.read().fonts_by_id.get(&id).cloned()
     }
 
-    /// Resolves the specified font, falling back to the default font stack if
-    /// the font fails to load.
+    /// Resolve a font using its explicit fallbacks, then the default font stack.
+    /// Generic monospace requests do not use the default proportional stack.
     ///
     /// # Panics
     ///
-    /// Panics if the font and none of the fallbacks can be resolved.
+    /// Panics if no permitted family can be resolved.
     pub fn resolve_font(&self, font: &Font) -> FontId {
         if let Some(font_id) = self.font_id(font) {
             return font_id;
         }
+        if let Some(fallbacks) = &font.fallbacks {
+            for family in fallbacks.fallback_list() {
+                if let Some(id) = self.font_id(&Font {
+                    family: family.clone(),
+                    ..font.clone()
+                }) {
+                    return id;
+                }
+            }
+        }
+        assert_ne!(
+            font.family,
+            FontFamily::Generic(GenericFontFamily::Monospace),
+            "no monospace font is available; load one or configure its generic family"
+        );
         for fallback in &self.fallback_font_stack {
             let fallback = Font {
                 family: fallback.family.clone(),
@@ -1181,10 +1241,8 @@ fn gaussian_blur_alpha(
 /// The configuration details for identifying a specific font.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Font {
-    /// The font family name.
-    ///
-    /// The special name ".SystemUIFont" is used to identify the system UI font, which varies based on platform.
-    pub family: SharedString,
+    /// A literal family name or a platform-resolved category.
+    pub family: FontFamily,
 
     /// The font features to use.
     pub features: FontFeatures,
@@ -1201,12 +1259,12 @@ pub struct Font {
 
 impl Default for Font {
     fn default() -> Self {
-        font(".SystemUIFont")
+        font(GenericFontFamily::SystemUi)
     }
 }
 
-/// Get a [`Font`] for a given name.
-pub fn font(family: impl Into<SharedString>) -> Font {
+/// Get a [`Font`] for a literal family name or a generic category.
+pub fn font(family: impl Into<FontFamily>) -> Font {
     Font {
         family: family.into(),
         features: FontFeatures::default(),
@@ -1306,37 +1364,6 @@ impl FontMetrics {
     }
 }
 
-/// Maps well-known virtual font names to their concrete equivalents.
-#[allow(unused)]
-pub fn font_name_with_fallbacks<'a>(name: &'a str, system: &'a str) -> &'a str {
-    // Note: the "Zed Plex" fonts were deprecated as we are not allowed to use "Plex"
-    // in a derived font name. They are essentially indistinguishable from IBM Plex/Lilex,
-    // and so retained here for backward compatibility.
-    match name {
-        ".SystemUIFont" => system,
-        ".ZedSans" | "Zed Plex Sans" => "IBM Plex Sans",
-        ".ZedMono" | "Zed Plex Mono" => "Lilex",
-        _ => name,
-    }
-}
-
-/// Like [`font_name_with_fallbacks`] but accepts and returns [`SharedString`] references.
-#[allow(unused)]
-pub fn font_name_with_fallbacks_shared<'a>(
-    name: &'a SharedString,
-    system: &'a SharedString,
-) -> &'a SharedString {
-    // Note: the "Zed Plex" fonts were deprecated as we are not allowed to use "Plex"
-    // in a derived font name. They are essentially indistinguishable from IBM Plex/Lilex,
-    // and so retained here for backward compatibility.
-    match name.as_str() {
-        ".SystemUIFont" => system,
-        ".ZedSans" | "Zed Plex Sans" => const { &SharedString::new_static("IBM Plex Sans") },
-        ".ZedMono" | "Zed Plex Mono" => const { &SharedString::new_static("Lilex") },
-        _ => name,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1365,7 +1392,7 @@ mod tests {
 
         fn font_id(&self, descriptor: &Font) -> Result<FontId> {
             self.font_lookups.fetch_add(1, Ordering::Relaxed);
-            if descriptor.family == "Deferred Test Face" {
+            if descriptor.family == FontFamily::from("Deferred Test Face") {
                 anyhow::ensure!(
                     self.deferred_font_loaded.load(Ordering::Relaxed),
                     "font has not been registered"

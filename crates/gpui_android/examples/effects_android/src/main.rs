@@ -300,7 +300,7 @@ impl Render for Effects {
             .size_full()
             .bg(rgb(0x101a2b))
             .text_color(rgb(0xebf1ff))
-            .font_family("sans-serif")
+            .font_family(gpui::GenericFontFamily::SansSerif)
             .pt(insets.top)
             .pb(insets.bottom)
             .pl(insets.left)

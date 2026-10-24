@@ -58,9 +58,24 @@ const kCGImageAlphaOnly: u32 = 7;
 /// macOS text system using CoreText for font shaping.
 pub struct MacTextSystem(RwLock<MacTextSystemState>);
 
+pub(crate) fn family_name(family: &gpui::FontFamily) -> &str {
+    use gpui::{FontFamily, GenericFontFamily as Generic};
+    match family {
+        FontFamily::Named(name) => name.as_str(),
+        FontFamily::Generic(generic) => match generic {
+            Generic::SystemUi => ".AppleSystemUIFont",
+            Generic::Serif => "Times",
+            Generic::SansSerif => "Helvetica",
+            Generic::Monospace => "Menlo",
+            Generic::Cursive => "Apple Chancery",
+            Generic::Fantasy => "Papyrus",
+        },
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct FontKey {
-    font_family: SharedString,
+    font_family: gpui::FontFamily,
     font_features: FontFeatures,
     font_fallbacks: Option<FontFallbacks>,
 }
@@ -279,11 +294,11 @@ impl MacTextSystemState {
 
     fn load_family(
         &mut self,
-        name: &str,
+        family: &gpui::FontFamily,
         features: &FontFeatures,
         fallbacks: Option<&FontFallbacks>,
     ) -> Result<SmallVec<[FontId; 4]>> {
-        let name = gpui::font_name_with_fallbacks(name, ".AppleSystemUIFont");
+        let name = family_name(family);
 
         let mut font_ids = SmallVec::new();
         let mut postscript_names_seen = HashSet::default();

@@ -25,13 +25,17 @@ pub struct CosmicTextSystem(RwLock<CosmicTextSystemState>);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct FontKey {
-    family: SharedString,
+    family: gpui::FontFamily,
     features: FontFeatures,
     fallbacks: Option<FontFallbacks>,
 }
 
 impl FontKey {
-    fn new(family: SharedString, features: FontFeatures, fallbacks: Option<FontFallbacks>) -> Self {
+    fn new(
+        family: gpui::FontFamily,
+        features: FontFeatures,
+        fallbacks: Option<FontFallbacks>,
+    ) -> Self {
         Self {
             family,
             features,
@@ -255,6 +259,63 @@ impl PlatformTextSystem for CosmicTextSystem {
 }
 
 impl CosmicTextSystemState {
+    fn family_name(&self, family: &gpui::FontFamily) -> Option<String> {
+        use gpui::{FontFamily, GenericFontFamily as Generic};
+        let generic = match family {
+            FontFamily::Named(name) => return Some(name.to_string()),
+            FontFamily::Generic(generic) => *generic,
+        };
+        let db = self.font_system.db();
+        let exists = |name: &str| {
+            db.faces().any(|face| {
+                (generic != Generic::Monospace || face.monospaced)
+                    && face.families.iter().any(|family| family.0 == name)
+            })
+        };
+        if generic == Generic::SystemUi && exists(&self.system_font_fallback) {
+            return Some(self.system_font_fallback.clone());
+        }
+        let category = match generic {
+            Generic::SystemUi | Generic::SansSerif => Family::SansSerif,
+            Generic::Serif => Family::Serif,
+            Generic::Monospace => Family::Monospace,
+            Generic::Cursive => Family::Cursive,
+            Generic::Fantasy => Family::Fantasy,
+        };
+        let configured = db.family_name(&category);
+        if exists(configured) {
+            return Some(configured.to_owned());
+        }
+        if generic == Generic::Monospace {
+            return db
+                .faces()
+                .filter(|face| face.monospaced)
+                .flat_map(|face| face.families.iter().map(|family| family.0.clone()))
+                .min();
+        }
+        let candidates: &[&str] = match generic {
+            Generic::SystemUi | Generic::SansSerif => &[
+                "IBM Plex Sans",
+                "Noto Sans",
+                "DejaVu Sans",
+                "Liberation Sans",
+            ],
+            Generic::Serif => &[
+                "Noto Serif",
+                "DejaVu Serif",
+                "Liberation Serif",
+                "Times New Roman",
+            ],
+            Generic::Cursive => &["Comic Sans MS", "URW Chancery L"],
+            Generic::Fantasy => &["Impact", "Papyrus"],
+            Generic::Monospace => unreachable!(),
+        };
+        candidates
+            .iter()
+            .find(|name| exists(name))
+            .map(|name| (*name).to_owned())
+    }
+
     fn loaded_font(&self, font_id: FontId) -> &LoadedFont {
         &self.loaded_fonts[font_id.0]
     }
@@ -280,7 +341,7 @@ impl CosmicTextSystemState {
     #[profiling::function]
     fn load_family(
         &mut self,
-        name: &str,
+        family: &gpui::FontFamily,
         features: &FontFeatures,
         fallbacks: Option<&FontFallbacks>,
     ) -> Result<SmallVec<[FontId; 4]>> {
@@ -291,11 +352,7 @@ impl CosmicTextSystemState {
             Some(fallbacks) if !fallbacks.fallback_list().is_empty() => {
                 let mut chain: Vec<(FontId, SharedString)> = Vec::new();
                 for fallback_name in fallbacks.fallback_list() {
-                    let fb_key = FontKey::new(
-                        SharedString::from(fallback_name.clone()),
-                        features.clone(),
-                        None,
-                    );
+                    let fb_key = FontKey::new(fallback_name.clone(), features.clone(), None);
                     let fb_ids = if let Some(cached) = self.font_ids_by_family_cache.get(&fb_key) {
                         cached.clone()
                     } else {
@@ -319,30 +376,16 @@ impl CosmicTextSystemState {
             _ => Arc::from(Vec::new()),
         };
 
-        let name = gpui::font_name_with_fallbacks(name, &self.system_font_fallback);
-        let name = if name == "monospace" {
-            let db = self.font_system.db();
-            let configured = db.family_name(&Family::Monospace);
-            if db
-                .faces()
-                .any(|face| face.families.iter().any(|family| family.0 == configured))
-            {
-                configured
-            } else {
-                db.faces()
-                    .find(|face| face.monospaced)
-                    .and_then(|face| face.families.first())
-                    .map_or(configured, |family| family.0.as_str())
-            }
-        } else {
-            name
+        let name = self.family_name(family);
+        let Some(name) = name else {
+            return Ok(SmallVec::new());
         };
 
         let families = self
             .font_system
             .db()
             .faces()
-            .filter(|face| face.families.iter().any(|family| *name == family.0))
+            .filter(|face| face.families.iter().any(|family| name == family.0))
             .map(|face| (face.id, face.post_script_name.clone()))
             .collect::<SmallVec<[_; 4]>>();
 
@@ -984,7 +1027,7 @@ mod tests {
                         px(20.),
                         &[gpui::TextRun {
                             len: text.len(),
-                            font: gpui::font("monospace"),
+                            font: gpui::font(gpui::GenericFontFamily::Monospace),
                             color: gpui::white(),
                             background_color: None,
                             underline: None,
@@ -1126,6 +1169,96 @@ mod tests {
 
         assert_eq!(first_id, second_id);
         assert_eq!(system.0.read().loaded_fonts.len(), loaded_font_count);
+    }
+
+    #[test]
+    fn generic_configuration_re_resolves_primary_and_fallback_fonts() {
+        use gpui::GenericFontFamily;
+        let platform = Arc::new(CosmicTextSystem::new_without_system_fonts("IBM Plex Sans"));
+        let system = gpui::TextSystem::new(platform.clone());
+        system
+            .add_fonts(vec![
+                Cow::Borrowed(LILEX_REGULAR),
+                Cow::Borrowed(include_bytes!(
+                    "../../../assets/fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf"
+                )),
+            ])
+            .unwrap();
+        let named = system.resolve_font(&gpui::font("IBM Plex Sans"));
+        let generic = gpui::font(GenericFontFamily::SansSerif);
+        let initial = system.resolve_font(&generic);
+        let mut with_fallback = gpui::font("Lilex");
+        with_fallback.fallbacks = Some(FontFallbacks::from_fonts(vec![
+            GenericFontFamily::SansSerif.into(),
+        ]));
+        let first_chain = system.resolve_font(&with_fallback);
+        assert_eq!(
+            platform
+                .0
+                .read()
+                .loaded_font(first_chain)
+                .user_fallback_chain[0]
+                .1
+                .as_str(),
+            "IBM Plex Sans"
+        );
+
+        system.set_generic_font_family(GenericFontFamily::SansSerif, Some("Lilex".into()));
+        let changed = system.resolve_font(&generic);
+        assert_ne!(changed, initial);
+        assert_eq!(system.resolve_font(&generic), changed);
+        assert_eq!(system.resolve_font(&gpui::font("IBM Plex Sans")), named);
+        let changed_chain = system.resolve_font(&with_fallback);
+        assert_ne!(changed_chain, first_chain);
+        assert_eq!(
+            platform
+                .0
+                .read()
+                .loaded_font(changed_chain)
+                .user_fallback_chain[0]
+                .1
+                .as_str(),
+            "Lilex"
+        );
+        assert_eq!(
+            platform
+                .0
+                .read()
+                .loaded_font(first_chain)
+                .user_fallback_chain[0]
+                .1
+                .as_str(),
+            "IBM Plex Sans"
+        );
+
+        system.set_generic_font_family(GenericFontFamily::SansSerif, None);
+        assert_eq!(system.resolve_font(&generic), initial);
+        assert_eq!(system.resolve_font(&with_fallback), first_chain);
+    }
+
+    #[test]
+    fn loading_a_fixed_pitch_font_makes_generic_monospace_available() {
+        let system = CosmicTextSystem::new_without_system_fonts("IBM Plex Sans");
+        system
+            .add_fonts(vec![Cow::Borrowed(include_bytes!(
+                "../../../assets/fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf"
+            ))])
+            .unwrap();
+        let request = gpui::font(gpui::GenericFontFamily::Monospace);
+        assert!(system.font_id(&request).is_err());
+        system
+            .add_fonts(vec![Cow::Borrowed(LILEX_REGULAR)])
+            .unwrap();
+        let id = system.font_id(&request).unwrap();
+        let state = system.0.read();
+        assert!(
+            state
+                .font_system
+                .db()
+                .face(state.loaded_font(id).font.id())
+                .unwrap()
+                .monospaced
+        );
     }
 
     #[test]

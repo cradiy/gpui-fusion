@@ -367,7 +367,10 @@ fn inline_html_preserves_styles_links_images_and_literal_boundaries() {
             .find(|span| span.range.contains(&start))
             .unwrap()
     };
-    assert_eq!(styled("F8").font_family.as_deref(), Some("monospace"));
+    assert_eq!(
+        styled("F8").font_family,
+        Some(gpui::GenericFontFamily::Monospace.into())
+    );
     assert_eq!(
         styled("urgent").style.font_weight,
         Some(gpui::FontWeight::BOLD)

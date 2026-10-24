@@ -39,9 +39,9 @@ fn composed_styles_inherit_without_leaking_into_siblings_or_changing_text() {
         assert_eq!(span.style.font_weight, Some(FontWeight::BOLD));
         assert_eq!(span.style.font_style, Some(FontStyle::Italic));
     }
-    assert_eq!(spans[0].font_family.as_deref(), Some("code-family"));
-    assert_eq!(spans[1].font_family.as_deref(), Some("alternate"));
-    assert_eq!(spans[2].font_family.as_deref(), Some("code-family"));
+    assert_eq!(spans[0].font_family, Some("code-family".into()));
+    assert_eq!(spans[1].font_family, Some("alternate".into()));
+    assert_eq!(spans[2].font_family, Some("code-family".into()));
     assert_eq!(
         spans[4].style.background_color,
         theme.mark.highlight.background_color

@@ -1088,7 +1088,7 @@ pub struct TextSpan {
     pub node: NodeId,
     pub range: Range<usize>,
     pub style: HighlightStyle,
-    pub font_family: Option<SharedString>,
+    pub font_family: Option<gpui::FontFamily>,
 }
 
 /// Immutable text and source mapping, compiled outside the paint path.

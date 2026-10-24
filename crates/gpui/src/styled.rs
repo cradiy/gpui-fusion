@@ -714,7 +714,7 @@ pub trait Styled: Sized {
     }
 
     /// Sets the font family of this element and its children.
-    fn font_family(mut self, family_name: impl Into<SharedString>) -> Self {
+    fn font_family(mut self, family_name: impl Into<crate::FontFamily>) -> Self {
         self.text_style().font_family = Some(family_name.into());
         self
     }

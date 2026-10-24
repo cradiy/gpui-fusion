@@ -239,7 +239,7 @@ impl RenderOnce for CharacterGrid {
 
 struct TextExample {
     next_id: usize,
-    font_family: SharedString,
+    font_family: gpui::FontFamily,
 }
 
 impl TextExample {
@@ -266,12 +266,12 @@ impl TextExample {
     }
 }
 
-const FONT_FAMILIES: [&str; 5] = [
-    ".ZedMono",
-    ".SystemUIFont",
-    "Menlo",
-    "Monaco",
-    "Courier New",
+const FONT_FAMILIES: [gpui::FontFamily; 5] = [
+    gpui::FontFamily::Generic(gpui::GenericFontFamily::Monospace),
+    gpui::FontFamily::Generic(gpui::GenericFontFamily::SystemUi),
+    gpui::FontFamily::Named(SharedString::new_static("Menlo")),
+    gpui::FontFamily::Named(SharedString::new_static("Monaco")),
+    gpui::FontFamily::Named(SharedString::new_static("Courier New")),
 ];
 
 impl Render for TextExample {
@@ -301,16 +301,20 @@ impl Render for TextExample {
                     .border_color(gpui::black())
                     .p_3()
                     .flex()
-                    .child(Self::button(&self.font_family, cx, |this, cx| {
-                        let new_family = FONT_FAMILIES
-                            .iter()
-                            .position(|f| *f == this.font_family.as_str())
-                            .map(|idx| FONT_FAMILIES[(idx + 1) % FONT_FAMILIES.len()])
-                            .unwrap_or(FONT_FAMILIES[0]);
+                    .child(Self::button(
+                        &self.font_family.to_string(),
+                        cx,
+                        |this, cx| {
+                            let new_family = FONT_FAMILIES
+                                .iter()
+                                .position(|f| *f == this.font_family)
+                                .map(|idx| FONT_FAMILIES[(idx + 1) % FONT_FAMILIES.len()].clone())
+                                .unwrap_or_else(|| FONT_FAMILIES[0].clone());
 
-                        this.font_family = SharedString::new(new_family);
-                        cx.notify();
-                    })),
+                            this.font_family = new_family;
+                            cx.notify();
+                        },
+                    )),
             )
             .child(
                 div()
@@ -382,7 +386,7 @@ fn run_example() {
                 |_window, cx| {
                     cx.new(|_cx| TextExample {
                         next_id: 0,
-                        font_family: ".ZedMono".into(),
+                        font_family: gpui::GenericFontFamily::Monospace.into(),
                     })
                 },
             )

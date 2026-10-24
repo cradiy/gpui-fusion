@@ -402,7 +402,7 @@ pub struct StyledText {
     text: SharedString,
     runs: Option<Vec<TextRun>>,
     delayed_highlights: Option<Vec<(Range<usize>, HighlightStyle)>>,
-    delayed_font_family_overrides: Option<Vec<(Range<usize>, SharedString)>>,
+    delayed_font_family_overrides: Option<Vec<(Range<usize>, crate::FontFamily)>>,
     layout: TextLayout,
     line_top_spacing: Vec<(usize, Pixels)>,
     line_indents: Vec<TextLineIndent>,
@@ -596,7 +596,7 @@ impl StyledText {
     /// Each override range must fall on character boundaries.
     pub fn with_font_family_overrides(
         mut self,
-        overrides: impl IntoIterator<Item = (Range<usize>, SharedString)>,
+        overrides: impl IntoIterator<Item = (Range<usize>, crate::FontFamily)>,
     ) -> Self {
         self.delayed_font_family_overrides = Some(
             overrides
@@ -612,7 +612,7 @@ impl StyledText {
 
     fn apply_font_family_overrides(
         runs: &mut [TextRun],
-        overrides: &[(Range<usize>, SharedString)],
+        overrides: &[(Range<usize>, crate::FontFamily)],
     ) {
         let mut byte_offset = 0;
         let mut override_idx = 0;

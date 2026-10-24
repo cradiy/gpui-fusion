@@ -106,7 +106,7 @@ fn generate_fallback_array(fallbacks: &FontFallbacks, font: &mut FontKitFont) ->
 
         let fallback_array = CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
         for user_fallback in fallbacks.fallback_list() {
-            let name = CFString::from(user_fallback.as_str());
+            let name = CFString::from(crate::text_system::family_name(user_fallback));
 
             let traits_keys = [kCTFontWeightTrait, kCTFontSlantTrait];
             let weight_value = CFNumber::from(all_traits.normalized_weight());

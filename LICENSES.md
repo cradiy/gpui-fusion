@@ -50,3 +50,9 @@ packages retain their licenses and attribution. In particular,
 
 The optional `gpui_richtext/syntax-extra` feature embeds syntax definitions from
 `two-face`; their notices are available through `gpui_richtext::syntax::licenses`.
+
+The optional `gpui_richtext/math` feature uses `latex-rust` (MIT OR Apache-2.0),
+including its STIX Two Math font (SIL OFL 1.1) and modified dvips color table
+(LPPL-1.3c-or-later). Preserve the dependency's `NOTICE`, font license, and color
+table attribution when distributing these assets. The optional Mermaid renderer,
+`mermaid-svg`, uses MIT.

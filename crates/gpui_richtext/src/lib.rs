@@ -13,6 +13,8 @@ pub mod compose;
 mod containers;
 pub use containers::{Details, DetailsStyle};
 mod document;
+mod graphics;
+pub use graphics::{Graphic, MathBlock, Mermaid};
 #[cfg(feature = "markdown")]
 pub mod markdown;
 mod projection;

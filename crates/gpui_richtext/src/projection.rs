@@ -20,6 +20,7 @@ pub struct Paragraph;
 
 /// The semantic contribution of a registered payload type.
 pub enum Contribution {
+    Graphic(crate::Graphic),
     Details(crate::Details),
     Footnote {
         marker: ListMarker,
@@ -75,6 +76,7 @@ impl Contribution {
         matches!(
             self,
             Contribution::Paragraph(_)
+                | Contribution::Graphic(_)
                 | Contribution::Details(_)
                 | Contribution::Alert(_)
                 | Contribution::DefinitionList
@@ -358,6 +360,16 @@ impl Registry {
         registry
             .register::<crate::DefinitionDescription>(|_| Ok(Contribution::DefinitionDescription));
         registry.register::<crate::Image>(|image| Ok(Contribution::Image(image.clone())));
+        #[cfg(feature = "mermaid")]
+        registry.register::<crate::Mermaid>(|value| {
+            Ok(Contribution::Graphic(crate::Graphic::Mermaid(
+                value.clone(),
+            )))
+        });
+        #[cfg(feature = "math")]
+        registry.register::<crate::MathBlock>(|value| {
+            Ok(Contribution::Graphic(crate::Graphic::Math(value.clone())))
+        });
         let quote_style = theme.quote.clone();
         registry.register::<crate::BlockQuote>(move |_| {
             Ok(Contribution::BlockQuote(quote_style.clone()))
@@ -602,12 +614,16 @@ impl Registry {
                 }
                 output.indent -= 1;
             }
-            leaf @ (Contribution::Rule | Contribution::Image(_)) => {
+            leaf @ (Contribution::Rule | Contribution::Image(_) | Contribution::Graphic(_)) => {
                 if !node.children.is_empty() {
                     bail!("leaf block {id:?} cannot have children");
                 }
                 let start = output.start_block();
                 let kind = match leaf {
+                    Contribution::Graphic(graphic) => {
+                        output.text.push_str(graphic.source());
+                        BlockKind::Graphic(graphic)
+                    }
                     Contribution::Image(image) => {
                         output.text.push_str(&image.alt);
                         if let Some(target) = &image.link {
@@ -1071,6 +1087,7 @@ pub struct BlockSpan {
 
 #[derive(Clone, Debug)]
 pub enum BlockKind {
+    Graphic(crate::Graphic),
     Details {
         details: crate::Details,
         body: Arc<Projection>,
@@ -1166,6 +1183,7 @@ impl Projection {
                     !matches!(
                         block.kind,
                         BlockKind::Table(_)
+                            | BlockKind::Graphic(_)
                             | BlockKind::Rule
                             | BlockKind::Image(_)
                             | BlockKind::Alert { .. }
@@ -1188,6 +1206,7 @@ impl Projection {
             matches!(
                 block.kind,
                 BlockKind::Table(_)
+                    | BlockKind::Graphic(_)
                     | BlockKind::Rule
                     | BlockKind::Image(_)
                     | BlockKind::Alert { .. }
@@ -1202,6 +1221,7 @@ impl Projection {
             if !matches!(
                 block.kind,
                 BlockKind::Table(_)
+                    | BlockKind::Graphic(_)
                     | BlockKind::Rule
                     | BlockKind::Image(_)
                     | BlockKind::Alert { .. }

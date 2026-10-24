@@ -30,6 +30,74 @@ impl CopyFeedback {
     }
 }
 
+fn code_copy_button(
+    id: ElementId,
+    source: String,
+    style: CodeBlockStyle,
+    labels: Option<CodeBlockLabels>,
+    feedback: gpui::Entity<CopyFeedback>,
+    cx: &gpui::App,
+) -> impl IntoElement {
+    let copied = feedback.read(cx).copied;
+    let generation = feedback.read(cx).generation;
+    let icon = if copied {
+        gpui::svg()
+            .path(gpui_icons::GpuiIcons::LucideCheck)
+            .text_color(style.copy_success_color)
+            .size(gpui::px(16.))
+            .with_animation(
+                ("copy-success", generation),
+                gpui::Animation::new(Duration::from_secs(2)),
+                |icon, progress| {
+                    let enter = (progress / 0.08).min(1.);
+                    let opacity = enter.min(((1. - progress) / 0.1).min(1.));
+                    icon.opacity(opacity)
+                        .with_transformation(gpui::Transformation::scale(gpui::size(
+                            0.75 + 0.25 * enter,
+                            0.75 + 0.25 * enter,
+                        )))
+                },
+            )
+            .into_any_element()
+    } else {
+        gpui::svg()
+            .path(gpui_icons::GpuiIcons::LucideCopy)
+            .text_color(style.copy_icon_color)
+            .size(gpui::px(16.))
+            .into_any_element()
+    };
+    div()
+        .id(id)
+        .flex_shrink_0()
+        .size(gpui::px(28.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_md()
+        .cursor_pointer()
+        .when_some(labels, |button, labels| {
+            button
+                .aria_label(labels.copy.clone())
+                .tooltip(move |_, cx| {
+                    let label = if copied {
+                        labels.copied.clone()
+                    } else {
+                        labels.copy.clone()
+                    };
+                    cx.new(|_| LinkTooltip(label)).into()
+                })
+        })
+        .hover(move |button| button.bg(style.button_hover_background))
+        .active(move |button| button.bg(style.button_active_background))
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(source.clone()));
+            feedback.update(cx, |state, cx| state.copied(cx));
+        })
+        .child(icon)
+}
+
 type LinkListener = Rc<dyn Fn(&LinkSpan, &mut gpui::Window, &mut gpui::App)>;
 type LinkTooltipBuilder =
     Rc<dyn Fn(&LinkSpan, &mut gpui::Window, &mut gpui::App) -> Option<gpui::AnyView>>;
@@ -746,36 +814,6 @@ impl RenderOnce for RichText {
                                     cx,
                                     |_, _| CopyFeedback::default(),
                                 );
-                                let copied = feedback.read(cx).copied;
-                                let generation = feedback.read(cx).generation;
-                                let icon = if copied {
-                                    gpui::svg()
-                                        .path(gpui_icons::GpuiIcons::LucideCheck)
-                                        .text_color(style.copy_success_color)
-                                        .size(gpui::px(16.))
-                                        .with_animation(
-                                            ("copy-success", generation),
-                                            gpui::Animation::new(Duration::from_secs(2)),
-                                            |icon, progress| {
-                                                let enter = (progress / 0.08).min(1.);
-                                                let opacity =
-                                                    enter.min(((1. - progress) / 0.1).min(1.));
-                                                icon.opacity(opacity).with_transformation(
-                                                    gpui::Transformation::scale(gpui::size(
-                                                        0.75 + 0.25 * enter,
-                                                        0.75 + 0.25 * enter,
-                                                    )),
-                                                )
-                                            },
-                                        )
-                                        .into_any_element()
-                                } else {
-                                    gpui::svg()
-                                        .path(gpui_icons::GpuiIcons::LucideCopy)
-                                        .text_color(style.copy_icon_color)
-                                        .size(gpui::px(16.))
-                                        .into_any_element()
-                                };
                                 let mut header = div()
                                     .w((bounds.right() - start.x + padding).max(gpui::px(0.)))
                                     .flex()
@@ -797,46 +835,14 @@ impl RenderOnce for RichText {
                                             .font_weight(gpui::FontWeight::MEDIUM)
                                             .child(language.clone().unwrap_or_default()),
                                     )
-                                    .child(
-                                        div()
-                                            .id(("copy-code", block.range.start))
-                                            .flex_shrink_0()
-                                            .size(gpui::px(28.))
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .rounded_md()
-                                            .cursor_pointer()
-                                            .when_some(labels.clone(), |button, labels| {
-                                                button.aria_label(labels.copy.clone()).tooltip(
-                                                    move |_, cx| {
-                                                        let label = if copied {
-                                                            labels.copied.clone()
-                                                        } else {
-                                                            labels.copy.clone()
-                                                        };
-                                                        cx.new(|_| LinkTooltip(label)).into()
-                                                    },
-                                                )
-                                            })
-                                            .hover(move |button| {
-                                                button.bg(style.button_hover_background)
-                                            })
-                                            .active(move |button| {
-                                                button.bg(style.button_active_background)
-                                            })
-                                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
-                                                cx.stop_propagation()
-                                            })
-                                            .on_click(move |_, _, cx| {
-                                                cx.stop_propagation();
-                                                cx.write_to_clipboard(
-                                                    gpui::ClipboardItem::new_string(source.clone()),
-                                                );
-                                                feedback.update(cx, |state, cx| state.copied(cx));
-                                            })
-                                            .child(icon),
-                                    )
+                                    .child(code_copy_button(
+                                        ("copy-code", block.range.start).into(),
+                                        source,
+                                        style.clone(),
+                                        labels.clone(),
+                                        feedback,
+                                        cx,
+                                    ))
                                     .into_any_element();
                                 header.layout_as_root(
                                     gpui::size(
@@ -915,6 +921,66 @@ impl RichText {
                 }
                 crate::projection::RenderPart::Embed(block) => {
                     let content = match &block.kind {
+                        BlockKind::Graphic(graphic) => {
+                            let state = window.with_id(self.id.clone(), |window| {
+                                window.use_keyed_state(
+                                    ("graphic", block.node.0 as usize),
+                                    cx,
+                                    |_, _| crate::graphics::GraphicView::default(),
+                                )
+                            });
+                            let dark = self.code_block_style.background.l < 0.5;
+                            state.update(cx, |state, cx| state.request(graphic.clone(), dark, cx));
+                            if matches!(graphic, crate::Graphic::Mermaid(_)) {
+                                let style = &self.code_block_style;
+                                let feedback = window.with_id(self.id.clone(), |window| {
+                                    window.use_keyed_state(
+                                        ("diagram-copy-feedback", block.node.0 as usize),
+                                        cx,
+                                        |_, _| CopyFeedback::default(),
+                                    )
+                                });
+                                div()
+                                    .w_full()
+                                    .min_w_0()
+                                    .bg(style.background)
+                                    .border_1()
+                                    .border_color(style.border_color)
+                                    .rounded(style.corner_radius)
+                                    .overflow_hidden()
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .justify_between()
+                                            .h(gpui::px(36.))
+                                            .px(style.padding)
+                                            .bg(style.header_background)
+                                            .border_b_1()
+                                            .border_color(style.border_color)
+                                            .text_color(style.header_color)
+                                            .text_size(gpui::px(12.))
+                                            .line_height(gpui::px(20.))
+                                            .child(
+                                                div()
+                                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                                    .child("mermaid"),
+                                            )
+                                            .child(code_copy_button(
+                                                ("copy-diagram", block.node.0 as usize).into(),
+                                                graphic.source().to_string(),
+                                                style.clone(),
+                                                self.code_block_labels.clone(),
+                                                feedback,
+                                                cx,
+                                            )),
+                                    )
+                                    .child(div().p(style.padding).child(state))
+                                    .into_any_element()
+                            } else {
+                                state.into_any_element()
+                            }
+                        }
                         BlockKind::Details { details, body } => {
                             let state = window.with_id(self.id.clone(), |window| {
                                 window.use_keyed_state(

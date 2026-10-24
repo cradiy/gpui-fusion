@@ -55,6 +55,8 @@ fn parse_items(source: &str, depth: usize) -> Result<Vec<Item>> {
         | Options::ENABLE_DEFINITION_LIST
         | Options::ENABLE_FOOTNOTES
         | Options::ENABLE_HEADING_ATTRIBUTES;
+    #[cfg(feature = "math")]
+    let options = options | Options::ENABLE_MATH;
     let mut stack = vec![Item {
         inline_kind: None,
         details: None,
@@ -98,6 +100,7 @@ fn plain(items: &[Item]) -> String {
     for item in items {
         match &item.event {
             Some(Event::Text(value) | Event::Code(value)) => result.push_str(value),
+            Some(Event::InlineMath(value) | Event::DisplayMath(value)) => result.push_str(value),
             Some(Event::SoftBreak | Event::HardBreak) => result.push('\n'),
             _ => result.push_str(&plain(&item.children)),
         }
@@ -138,6 +141,8 @@ fn inline(item: &Item) -> Result<Option<NodeTree>> {
                     Some(text(value.to_string()))
                 }
                 Some(Event::Code(value)) => Some(code().child(text(value.to_string()))),
+                Some(Event::InlineMath(value)) => Some(text(format!("${value}$"))),
+                Some(Event::DisplayMath(value)) => Some(text(format!("$${value}$$"))),
                 Some(Event::SoftBreak) => Some(text(" ")),
                 Some(Event::HardBreak) => Some(hard_break()),
                 Some(Event::TaskListMarker(_)) => None,
@@ -237,6 +242,14 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
                 Some(group().children(entries))
             }
             Some(Tag::CodeBlock(kind)) => {
+                #[cfg(feature = "mermaid")]
+                if let pulldown_cmark::CodeBlockKind::Fenced(language) = kind {
+                    if language.split_whitespace().next() == Some("mermaid") {
+                        flush(&mut result, &mut pending);
+                        result.push(node(crate::Mermaid(plain(&item.children).into())));
+                        continue;
+                    }
+                }
                 let mut block = CodeBlock::new(plain(&item.children));
                 if let pulldown_cmark::CodeBlockKind::Fenced(language) = kind {
                     if let Some(language) = language.split_whitespace().next() {
@@ -284,6 +297,13 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
             }
             Some(Tag::HtmlBlock) => Some(paragraph().children(inlines(&item.children)?)),
             _ if matches!(item.event, Some(Event::Rule)) => Some(node(Rule)),
+            #[cfg(feature = "math")]
+            _ if matches!(item.event, Some(Event::DisplayMath(_))) => {
+                let Some(Event::DisplayMath(source)) = &item.event else {
+                    unreachable!()
+                };
+                Some(node(crate::MathBlock(source.to_string().into())))
+            }
             _ => None,
         };
         if let Some(block) = block {

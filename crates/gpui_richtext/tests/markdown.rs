@@ -2,6 +2,54 @@
 use gpui_richtext::{BlockKind, ListMarker, Registry, markdown};
 
 #[test]
+fn heading_fragments_resolve_unicode_duplicates_explicit_ids_and_image_links() {
+    let source = "[First](#温度) [Second](#温度-1) [Named](#sensor) [Encoded](#%E6%B8%A9%E5%BA%A6)\n\n# **温度**\n\n## 温度\n\n## Display `mode` {#sensor}\n\n[![Jump](jump.svg)](#sensor)\n\n# footnote-1\n\nText[^detail].\n\n[^detail]: Additional data.\n";
+    let registry = Registry::with_standard_nodes();
+    let projection = registry.compile(&markdown::parse(source).unwrap()).unwrap();
+    for link in projection
+        .links()
+        .iter()
+        .filter(|link| link.kind == gpui_richtext::LinkKind::Anchor)
+    {
+        assert!(
+            projection
+                .anchors()
+                .iter()
+                .any(|anchor| anchor.name == link.target)
+        );
+    }
+    let first = projection
+        .anchors()
+        .iter()
+        .find(|anchor| anchor.name.as_ref() == "heading:温度")
+        .unwrap();
+    assert!(projection.text()[first.offset..].starts_with("温度"));
+    assert_eq!(projection.links()[0].target, projection.links()[3].target);
+    let image = projection
+        .blocks()
+        .iter()
+        .find_map(|block| match &block.kind {
+            BlockKind::Image(image) => Some(image),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(image.link_kind, gpui_richtext::LinkKind::Anchor);
+    assert_eq!(image.link.as_deref(), Some("heading:sensor"));
+    assert!(!projection.text().contains("{#sensor}"));
+    assert!(markdown::parse("# One {#same}\n\n# Two {#same}").is_err());
+    let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    let streamed = stream.finish().unwrap();
+    assert_eq!(
+        format!("{:?}", streamed.anchors()),
+        format!("{:?}", projection.anchors())
+    );
+}
+
+#[test]
 fn table_images_compile_during_streaming_without_absorbing_adjacent_cells() {
     let source = "| Asset | Label |\n| --- | --- |\n| Before [![图](plot.svg)](app:plot) after | **Legend** |\n";
     let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());

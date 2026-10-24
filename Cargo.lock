@@ -2937,6 +2937,7 @@ dependencies = [
  "gpui",
  "gpui_icons",
  "gpui_platform",
+ "percent-encoding",
  "pulldown-cmark",
  "syntect",
 ]

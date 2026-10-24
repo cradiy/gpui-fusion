@@ -50,6 +50,7 @@ pub struct Image {
     pub source: gpui::SharedString,
     pub alt: gpui::SharedString,
     pub link: Option<gpui::SharedString>,
+    pub link_kind: crate::LinkKind,
     pub title: Option<gpui::SharedString>,
 }
 
@@ -59,12 +60,20 @@ impl Image {
             source: source.into(),
             alt: alt.into(),
             link: None,
+            link_kind: crate::LinkKind::External,
             title: None,
         }
     }
 
     pub fn link(mut self, target: impl Into<gpui::SharedString>) -> Self {
         self.link = Some(target.into());
+        self.link_kind = crate::LinkKind::External;
+        self
+    }
+
+    pub fn anchor_link(mut self, target: impl Into<gpui::SharedString>) -> Self {
+        self.link = Some(target.into());
+        self.link_kind = crate::LinkKind::Anchor;
         self
     }
 

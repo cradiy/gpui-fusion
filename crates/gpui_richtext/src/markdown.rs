@@ -4,6 +4,7 @@ use crate::{compose::*, *};
 use anyhow::{Result, bail};
 use pulldown_cmark::{Event, Options, Parser, Tag};
 mod footnotes;
+mod headings;
 mod stream;
 pub use stream::MarkdownStream;
 
@@ -17,13 +18,17 @@ struct Item {
 /// Parse paragraphs, headings, lists, quotations, alerts, definition lists,
 /// tables, images, fenced code and numbered footnotes with return links.
 /// Parsing performs no asset loading or URL navigation.
+/// Headings accept `{#id}`; otherwise IDs use lowercase letters and digits with
+/// whitespace replaced by hyphens. Duplicate generated IDs receive numeric suffixes.
+/// Fragment links resolve to heading IDs within this document.
 pub fn parse(source: &str) -> Result<Document> {
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_GFM
         | Options::ENABLE_DEFINITION_LIST
-        | Options::ENABLE_FOOTNOTES;
+        | Options::ENABLE_FOOTNOTES
+        | Options::ENABLE_HEADING_ATTRIBUTES;
     let mut stack = vec![Item {
         reference: None,
         tag: None,
@@ -53,7 +58,9 @@ pub fn parse(source: &str) -> Result<Document> {
             }),
         }
     }
-    Document::from_roots(footnotes::convert(stack.pop().unwrap().children)?)
+    let mut items = stack.pop().unwrap().children;
+    headings::assign(&mut items)?;
+    Document::from_roots(footnotes::convert(items)?)
 }
 
 fn plain(items: &[Item]) -> String {
@@ -88,7 +95,7 @@ fn inline(item: &Item) -> Result<Option<NodeTree>> {
         Some(Tag::Emphasis) => emphasis(),
         Some(Tag::Strong) => strong(),
         Some(Tag::Strikethrough) => strikethrough(),
-        Some(Tag::Link { dest_url, .. }) => link(dest_url.to_string()),
+        Some(Tag::Link { dest_url, .. }) => markdown_link(dest_url),
         Some(_) => bail!("unsupported block inside inline Markdown content"),
         None => {
             return Ok(match &item.event {
@@ -140,7 +147,7 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
                 result.extend(blocks(&item.children)?);
                 continue;
             }
-            Some(Tag::Heading { level, .. }) => Some(
+            Some(Tag::Heading { level, id, .. }) => Some(
                 heading(match level {
                     pulldown_cmark::HeadingLevel::H1 => HeadingLevel::H1,
                     pulldown_cmark::HeadingLevel::H2 => HeadingLevel::H2,
@@ -149,6 +156,10 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
                     pulldown_cmark::HeadingLevel::H5 => HeadingLevel::H5,
                     pulldown_cmark::HeadingLevel::H6 => HeadingLevel::H6,
                 })
+                .child(anchor(format!(
+                    "heading:{}",
+                    id.as_deref().unwrap_or_default()
+                )))
                 .children(inlines(&item.children)?),
             ),
             Some(Tag::BlockQuote(kind)) => Some(match kind {
@@ -266,6 +277,10 @@ fn split_images(item: &Item, target: Option<&str>) -> Result<Vec<ImagePart>> {
     {
         let mut image = Image::new(dest_url.to_string(), plain(&item.children));
         image.link = target.map(|target| target.to_owned().into());
+        if let Some(fragment) = target.and_then(|target| target.strip_prefix('#')) {
+            image.link = Some(headings::target(fragment).into());
+            image.link_kind = LinkKind::Anchor;
+        }
         if !title.is_empty() {
             image.title = Some(title.to_string().into());
         }
@@ -285,7 +300,7 @@ fn split_images(item: &Item, target: Option<&str>) -> Result<Vec<ImagePart>> {
             parts.push(match part {
                 ImagePart::Inline(child) => {
                     let wrapper = match &item.tag {
-                        Some(Tag::Link { dest_url, .. }) => link(dest_url.to_string()),
+                        Some(Tag::Link { dest_url, .. }) => markdown_link(dest_url),
                         Some(Tag::Strong) => strong(),
                         Some(Tag::Emphasis) => emphasis(),
                         Some(Tag::Strikethrough) => strikethrough(),
@@ -298,4 +313,12 @@ fn split_images(item: &Item, target: Option<&str>) -> Result<Vec<ImagePart>> {
         }
     }
     Ok(parts)
+}
+
+fn markdown_link(target: &str) -> NodeTree {
+    if let Some(fragment) = target.strip_prefix('#') {
+        anchor_link(headings::target(fragment))
+    } else {
+        link(target.to_owned())
+    }
 }

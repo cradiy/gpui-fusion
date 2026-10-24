@@ -940,6 +940,28 @@ impl RichText {
                                 .max_w_full()
                                 .with_fallback(move || div().child(alt.clone()).into_any_element())
                                 .when_some(link, |view, link| {
+                                    if link.kind == crate::LinkKind::Anchor {
+                                        let navigation = self.navigation.clone().unwrap();
+                                        return view.when_some(
+                                            self.scroll_handle.clone(),
+                                            |view, scroll| {
+                                                view.cursor_pointer().on_click(
+                                                    move |_, window, cx| {
+                                                        cx.stop_propagation();
+                                                        if let Some(position) =
+                                                            navigation.borrow().get(&link.target)
+                                                        {
+                                                            let mut offset = scroll.offset();
+                                                            offset.y +=
+                                                                scroll.bounds().top() - position.y;
+                                                            scroll.set_offset(offset);
+                                                            window.refresh();
+                                                        }
+                                                    },
+                                                )
+                                            },
+                                        );
+                                    }
                                     let tooltip = link.clone();
                                     view.when(self.link_tooltips, |view| {
                                         let builder = self.link_tooltip.clone();

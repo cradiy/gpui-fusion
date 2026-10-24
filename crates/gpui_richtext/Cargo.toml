@@ -9,7 +9,7 @@ readme = "README.md"
 
 [features]
 default = []
-markdown = ["dep:pulldown-cmark"]
+markdown = ["dep:pulldown-cmark", "dep:percent-encoding"]
 syntax-highlighting = ["dep:syntect"]
 
 [dependencies]
@@ -17,6 +17,7 @@ gpui.workspace = true
 gpui_icons = { workspace = true, features = ["lucide-core"] }
 anyhow.workspace = true
 pulldown-cmark = { version = "0.13", default-features = false, optional = true }
+percent-encoding = { version = "2.3", optional = true }
 syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"], optional = true }
 
 [dev-dependencies]

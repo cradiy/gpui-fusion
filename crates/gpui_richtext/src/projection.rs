@@ -602,7 +602,7 @@ impl Registry {
                                 bail!("empty image link target at node {id:?}");
                             }
                             output.links.push(LinkSpan {
-                                kind: crate::LinkKind::External,
+                                kind: image.link_kind,
                                 node: id,
                                 target: target.clone(),
                                 range: start..output.text.len(),

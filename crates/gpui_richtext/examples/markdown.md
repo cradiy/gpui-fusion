@@ -1,5 +1,7 @@
 # Packet inspector
 
+[Pipeline](#processing-pipeline) · [Field summary](#field-summary) · [Artwork](#artwork)
+
 Inspect **structured payloads**, compare *decoded fields*, and follow a [protocol reference](https://www.rfc-editor.org/).[^capture]
 
 ## Processing pipeline
@@ -58,7 +60,7 @@ Payload
 | Revision | Unsigned integer | 2 |
 | Payload | Binary | variable |
 
-## Application artwork
+## Application artwork {#artwork}
 
 | Preview | Details |
 | :---: | :--- |

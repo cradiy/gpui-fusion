@@ -12,7 +12,7 @@ workspace = true
 path = "src/gpui_linux.rs"
 
 [features]
-default = ["wayland", "x11"]
+default = ["wayland"]
 test-support = ["gpui/test-support"]
 wayland = [
     "bitflags",
@@ -31,19 +31,6 @@ wayland = [
     "open",
     "gpui/wayland",
     "scap?/wayland",
-]
-x11 = [
-    "gpui_wgpu",
-    "ashpd",
-
-    "as-raw-xcb-connection",
-    "x11rb",
-    "xkbcommon/x11",
-    "xim",
-    "x11-clipboard",
-    "filedescriptor",
-    "open",
-    "scap?/x11",
 ]
 screen-capture = [
     "gpui/screen-capture",
@@ -85,7 +72,7 @@ oo7 = { version = "0.6", default-features = false, features = [
 calloop = "0.14.3"
 raw-window-handle = "0.6"
 
-# Used in both windowing options
+# Desktop integration
 ashpd = { workspace = true, optional = true, features = ["screenshot"] }
 swash = { version = "0.2.6" }
 bitflags = { workspace = true, optional = true }
@@ -115,23 +102,3 @@ wayland-protocols-plasma = { version = "0.3.9", features = [
 wayland-protocols-wlr = { version = "0.3.9", features = [
     "client",
 ], optional = true }
-
-# X11
-as-raw-xcb-connection = { version = "1", optional = true }
-x11rb = { version = "0.13.1", features = [
-    "allow-unsafe-code",
-    "xkb",
-    "randr",
-    "xinput",
-    "cursor",
-    "resource_manager",
-    "sync",
-    "dri3",
-    "shape",
-], optional = true }
-# WARNING: If you change this, you must also publish a new version of zed-xim to crates.io
-xim = { git = "https://github.com/zed-industries/xim-rs.git", rev = "16f35a2c881b815a2b6cdfd6687988e84f8447d8", features = [
-    "x11rb-xcb",
-    "x11rb-client",
-], package = "zed-xim", version = "0.4.0-zed", optional = true }
-x11-clipboard = { version = "0.9.3", optional = true }

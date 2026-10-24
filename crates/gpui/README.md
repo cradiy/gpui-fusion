@@ -9,7 +9,7 @@ GPUI is still in active development as we work on the Zed code editor, and is st
 
 ```toml
 gpui = { version = "*" }
-gpui_platform = { version = "*", features = ["font-kit", "wayland", "x11"] }
+gpui_platform = { version = "*", features = ["font-kit", "wayland"] }
 ```
 
 Everything in a standalone GPUI app starts with an `Application`. You can create one with `gpui_platform::application()`, which picks the windowing and text backends for the host OS, and kick off your application by passing a callback to `Application::run()`. Inside this callback, you can create a new window with `App::open_window()` and register your first root view.
@@ -28,16 +28,16 @@ fn main() {
 
 The features on `gpui_platform` are platform-specific, so the list above is a safe cross-platform default. If you build for a single platform, you can trim it:
 
-- **macOS** — Rendering uses Metal and is always available, but glyph rasterization needs `font-kit`. Without it, GPUI falls back to a placeholder text system that lays text out but renders no glyphs.
+- **macOS** — Rendering uses Metal. Text rendering uses `font-kit`, which is enabled by default. When disabling default features, enable `font-kit` explicitly for text rendering.
 
     ```toml
     gpui_platform = { version = "*", features = ["font-kit"] }
     ```
 
-- **Linux / FreeBSD** — enable at least one windowing backend for desktop windows: `wayland`, `x11`, or both. These features also compile the renderer and text system, so no separate text feature is needed.
+- **Linux / FreeBSD** — `wayland` is enabled by default for desktop windows. With default features disabled, enable it explicitly for desktop use or leave it disabled for headless use. It also compiles the renderer and text system.
 
     ```toml
-    gpui_platform = { version = "*", features = ["wayland", "x11"] }
+    gpui_platform = { version = "*", features = ["wayland"] }
     ```
 
 - **Windows** — no features are required. Windowing uses Win32 and text uses DirectWrite. `font-kit` has no effect here.
@@ -91,7 +91,7 @@ Use it when preserving that tinting behavior is intentional.
 ### File clipboard
 
 Linux applications can exchange local file lists and copy/cut intent with file
-managers through the Wayland or X11 clipboard:
+managers through the Wayland clipboard:
 
 ```rust,ignore
 let item = ClipboardItem::new_files(paths, ClipboardFileOperation::Cut)?;

@@ -104,7 +104,7 @@ Run the interactive example on Linux with Wayland:
 cargo run -p gpui_automation --example interaction --features gpui_platform/wayland
 ```
 
-For X11, use `--features gpui_platform/x11`. Click **Run automation**. The example
+Click **Run automation**. The example
 sets the semantic value to `Ready to automate`, focuses the field, activates
 Increment, and checks Count is 1. The status reports Passed or the concrete
 failure. Run it again to reset and repeat. The value panel demonstrates a

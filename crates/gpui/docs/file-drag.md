@@ -16,10 +16,10 @@ preview, and `on_drop::<T>` / `on_drag_end::<T>` handlers. Windows in the same
 GPUI application receive the typed payload; other applications receive file URIs.
 Paths are not canonicalized and no file contents or metadata are read.
 
-The default options allow Copy and Move and prefer Move. X11 uses Ctrl for Copy
-and Shift for Move. On Wayland, the compositor and destination determine the
+The default options allow Copy and Move and prefer Move.
+On Wayland, the compositor and destination determine the
 preferred action and modifier behavior; the source cannot force a preference.
-Link is available on X11 and rejected on Wayland.
+Wayland rejects Link.
 
 Handle completion through `on_drag_end::<T>`:
 

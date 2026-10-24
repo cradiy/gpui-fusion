@@ -212,7 +212,7 @@ surface.
 
 ## Renderer support
 
-Linux Wayland/X11 and macOS Metal windows support subtree effects. Use
+Linux Wayland and macOS Metal windows support subtree effects. Use
 `window.supports_subtree_effects()` to query availability. Unsupported window
 backends paint the original content with the configured effect opacity.
 

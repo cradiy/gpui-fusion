@@ -38,7 +38,7 @@ web-sys = { version = "0.3", features = ["HtmlAudioElement", "HtmlMediaElement",
 [dev-dependencies]
 gpui_media_backend.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
-gpui_platform = { workspace = true, features = ["wayland", "x11", "font-kit"] }
+gpui_platform = { workspace = true, features = ["wayland", "font-kit"] }
 
 [[example]]
 name = "audio"

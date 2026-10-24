@@ -1,18 +1,16 @@
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 mod clipboard;
 mod dispatcher;
 mod headless;
 mod keyboard;
 mod platform;
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 mod text_system;
 mod tray;
 #[cfg(feature = "wayland")]
 mod wayland;
-#[cfg(feature = "x11")]
-mod x11;
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 mod xdg_desktop_portal;
 
 pub use dispatcher::*;
@@ -20,13 +18,11 @@ pub use headless::HeadlessWindowFactory;
 pub(crate) use headless::*;
 pub(crate) use keyboard::*;
 pub(crate) use platform::*;
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(crate) use text_system::*;
 pub(crate) use tray::*;
 #[cfg(feature = "wayland")]
 pub(crate) use wayland::*;
-#[cfg(feature = "x11")]
-pub(crate) use x11::*;
 
 use std::rc::Rc;
 
@@ -35,9 +31,6 @@ pub type WaylandSurfaceRoleFactory = wayland::ExternalWaylandSurfaceRoleFactory;
 
 /// Returns the default platform implementation for the current OS.
 pub fn current_platform(headless: bool) -> Rc<dyn gpui::Platform> {
-    #[cfg(feature = "x11")]
-    use anyhow::Context as _;
-
     if headless {
         return Rc::new(LinuxPlatform {
             inner: HeadlessClient::new(),
@@ -50,18 +43,11 @@ pub fn current_platform(headless: bool) -> Rc<dyn gpui::Platform> {
             inner: WaylandClient::new(),
         }),
 
-        #[cfg(feature = "x11")]
-        "X11" => Rc::new(LinuxPlatform {
-            inner: X11Client::new()
-                .context("Failed to initialize X11 client.")
-                .unwrap(),
-        }),
-
         "Headless" => Rc::new(LinuxPlatform {
             inner: HeadlessClient::new(),
         }),
         _ => unreachable!(
-            r#"At least one of the "wayland" or "x11" features must be enabled on gpui_linux or gpui_platform."#
+            r#"The "wayland" feature must be enabled on gpui_linux or gpui_platform for desktop windows."#
         ),
     }
 }

@@ -28,7 +28,7 @@ two-face = { version = "0.5.2", default-features = false, features = ["syntect-f
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
-gpui_platform = { workspace = true, features = ["font-kit", "wayland", "x11"] }
+gpui_platform = { workspace = true, features = ["font-kit", "wayland"] }
 
 [lints]
 workspace = true

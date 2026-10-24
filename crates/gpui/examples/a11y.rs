@@ -4,7 +4,7 @@
 //!
 //! Run with: `cargo run -p gpui --example a11y`
 //!
-//! Or on Linux: `cargo run -p gpui --features gpui_platform/wayland,gpui_platform/x11 --example a11y`
+//! Or on Linux: `cargo run -p gpui --features gpui_platform/wayland --example a11y`
 //!
 //! This app uses GPUI's accessibility APIs to attach structured information to
 //! the element tree, which allows assistive technology to see and interact with

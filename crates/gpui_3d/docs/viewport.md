@@ -57,7 +57,7 @@ Unsupported viewports retain layout and outer styling but do not paint a mesh or
 capture UI; object callbacks do not report hits and pending UI routing is cleared
 on the next prepaint. The application chooses its fallback content.
 
-Linux X11, Wayland, Windows DX12, and the macOS Metal compositor query their
+Linux Wayland, Windows DX12, and the macOS Metal compositor query their
 current WGPU mesh renderer. Windows D3D11 fallback reports `RendererUnavailable`.
 Other platform windows report `BackendUnsupported` unless their renderer implements this capability.
 Support is refreshed when the WGPU renderer is recreated; do not retain a

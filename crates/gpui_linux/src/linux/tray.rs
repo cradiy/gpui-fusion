@@ -36,9 +36,9 @@ impl GpuiTray {
     }
 
     pub(crate) fn spawn(self) -> anyhow::Result<ksni::Handle<Self>> {
-        #[cfg(any(feature = "wayland", feature = "x11"))]
+        #[cfg(feature = "wayland")]
         let sandboxed = ashpd::is_sandboxed();
-        #[cfg(not(any(feature = "wayland", feature = "x11")))]
+        #[cfg(not(feature = "wayland"))]
         let sandboxed = std::path::Path::new("/.flatpak-info").exists();
         // A desktop's watcher may appear after application autostart. Keep the
         // item alive so ksni can register on watcher arrival and re-register
@@ -220,7 +220,7 @@ fn escape_label(label: &str) -> String {
 mod tests {
     use super::*;
 
-    #[cfg(any(feature = "wayland", feature = "x11"))]
+    #[cfg(feature = "wayland")]
     #[test]
     #[ignore = "requires a private bus: dbus-run-session -- cargo test -p gpui_linux --lib watcher_lifecycle -- --ignored"]
     fn watcher_lifecycle() {

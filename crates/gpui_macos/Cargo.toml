@@ -17,7 +17,7 @@ harness = false
 required-features = ["font-kit"]
 
 [features]
-default = ["gpui/default"]
+default = ["gpui/default", "font-kit"]
 test-support = ["gpui/test-support"]
 runtime_shaders = []
 font-kit = ["dep:font-kit"]

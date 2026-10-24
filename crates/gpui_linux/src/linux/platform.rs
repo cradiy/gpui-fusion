@@ -5,7 +5,7 @@ use std::{
     rc::Rc,
     sync::Arc,
 };
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 use std::{
     ffi::OsString,
     fs::File,
@@ -18,7 +18,7 @@ use anyhow::{Context as _, anyhow};
 use calloop::{LoopSignal, channel::Sender};
 use futures::channel::oneshot;
 use gpui_util::{ResultExt as _, new_std_command};
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 use xkbcommon::xkb::{self, Keycode, Keysym, State};
 
 use crate::linux::{GpuiTray, LinuxDispatcher, LinuxTrayMessage, PriorityQueueCalloopReceiver};
@@ -29,21 +29,21 @@ use gpui::{
     PlatformWindow, Result, RunnableVariant, Task, ThermalState, TrayEvent, TrayId, TrayOptions,
     WindowAppearance, WindowButtonLayout, WindowParams,
 };
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 use gpui::{Pixels, Point, px};
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(crate) const SCROLL_LINES: f32 = 3.0;
 
 // Values match the defaults on GTK.
 // Taken from https://github.com/GNOME/gtk/blob/main/gtk/gtksettings.c#L320
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(crate) const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(400);
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(crate) const DOUBLE_CLICK_DISTANCE: Pixels = px(5.0);
 pub(crate) const KEYRING_LABEL: &str = "zed-github-account";
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 const FILE_PICKER_PORTAL_MISSING: &str =
     "Couldn't open file picker due to missing xdg-desktop-portal implementation.";
 
@@ -95,7 +95,7 @@ pub(crate) trait LinuxClient {
     fn window_stack(&self) -> Option<Vec<AnyWindowHandle>>;
     fn run(&self);
 
-    #[cfg(any(feature = "wayland", feature = "x11"))]
+    #[cfg(feature = "wayland")]
     fn window_identifier(
         &self,
     ) -> impl Future<Output = Option<ashpd::WindowIdentifier>> + Send + 'static {
@@ -103,17 +103,17 @@ pub(crate) trait LinuxClient {
     }
 }
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(crate) struct ActivationHistory<T>(Vec<T>);
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 impl<T> Default for ActivationHistory<T> {
     fn default() -> Self {
         Self(Vec::new())
     }
 }
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 impl<T: PartialEq + Clone> ActivationHistory<T> {
     pub(crate) fn opened(&mut self, window: T) {
         self.closed(&window);
@@ -156,17 +156,14 @@ pub(crate) struct LinuxCommon {
     pub(crate) appearance: WindowAppearance,
     pub(crate) auto_hide_scrollbars: bool,
     pub(crate) button_layout: WindowButtonLayout,
-    #[cfg(any(feature = "wayland", feature = "x11"))]
+    #[cfg(feature = "wayland")]
     pub(crate) double_click_interval: Duration,
     pub(crate) callbacks: PlatformHandlers,
     pub(crate) signal: LoopSignal,
     pub(crate) menus: Vec<OwnedMenu>,
     pub(crate) trays: HashMap<TrayId, ksni::Handle<GpuiTray>>,
     pub(crate) tray_sender: Sender<LinuxTrayMessage>,
-    #[cfg_attr(
-        not(all(target_os = "linux", any(feature = "wayland", feature = "x11"))),
-        allow(dead_code)
-    )]
+    #[cfg_attr(not(all(target_os = "linux", feature = "wayland")), allow(dead_code))]
     wake_sender: Sender<()>,
     wake_listener_started: bool,
 }
@@ -184,9 +181,9 @@ impl LinuxCommon {
         let (wake_sender, wake_receiver) = calloop::channel::channel();
         let (tray_sender, tray_receiver) = calloop::channel::channel();
 
-        #[cfg(any(feature = "wayland", feature = "x11"))]
+        #[cfg(feature = "wayland")]
         let text_system = Arc::new(crate::linux::CosmicTextSystem::new("IBM Plex Sans"));
-        #[cfg(not(any(feature = "wayland", feature = "x11")))]
+        #[cfg(not(feature = "wayland"))]
         let text_system = Arc::new(gpui::NoopTextSystem::new());
 
         let callbacks = PlatformHandlers::default();
@@ -202,7 +199,7 @@ impl LinuxCommon {
             appearance: WindowAppearance::Light,
             auto_hide_scrollbars: false,
             button_layout: WindowButtonLayout::linux_default(),
-            #[cfg(any(feature = "wayland", feature = "x11"))]
+            #[cfg(feature = "wayland")]
             double_click_interval: DOUBLE_CLICK_INTERVAL,
             callbacks,
             signal,
@@ -218,7 +215,7 @@ impl LinuxCommon {
 
     pub(crate) fn start_wake_listener(&mut self) {
         if !self.wake_listener_started {
-            #[cfg(all(target_os = "linux", any(feature = "wayland", feature = "x11")))]
+            #[cfg(all(target_os = "linux", feature = "wayland"))]
             smol::spawn({
                 let wake_sender = self.wake_sender.clone();
                 async move {
@@ -264,7 +261,7 @@ pub(crate) fn dispatch_tray_message(client: &impl LinuxClient, message: LinuxTra
     }
 }
 
-#[cfg(all(target_os = "linux", any(feature = "wayland", feature = "x11")))]
+#[cfg(all(target_os = "linux", feature = "wayland"))]
 async fn listen_for_system_wake(wake_sender: Sender<()>) -> anyhow::Result<()> {
     use futures::StreamExt as _;
 
@@ -436,7 +433,7 @@ impl<P: LinuxClient + 'static> Platform for LinuxPlatform<P> {
         self.inner.active_window()
     }
 
-    #[cfg(any(feature = "wayland", feature = "x11"))]
+    #[cfg(feature = "wayland")]
     fn pick_screen_color(&self) -> oneshot::Receiver<Result<Option<gpui::Rgba>>> {
         let (mut tx, rx) = oneshot::channel();
         let identifier = self.inner.window_identifier();
@@ -545,13 +542,13 @@ impl<P: LinuxClient + 'static> Platform for LinuxPlatform<P> {
     ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>> {
         let (done_tx, done_rx) = oneshot::channel();
 
-        #[cfg(not(any(feature = "wayland", feature = "x11")))]
+        #[cfg(not(feature = "wayland"))]
         let _ = (done_tx.send(Ok(None)), options, mime_types);
 
-        #[cfg(any(feature = "wayland", feature = "x11"))]
+        #[cfg(feature = "wayland")]
         let identifier = self.inner.window_identifier();
 
-        #[cfg(any(feature = "wayland", feature = "x11"))]
+        #[cfg(feature = "wayland")]
         self.foreground_executor()
             .spawn(async move {
                 let title = if options.directories {
@@ -617,13 +614,13 @@ impl<P: LinuxClient + 'static> Platform for LinuxPlatform<P> {
     ) -> oneshot::Receiver<Result<Option<PathBuf>>> {
         let (done_tx, done_rx) = oneshot::channel();
 
-        #[cfg(not(any(feature = "wayland", feature = "x11")))]
+        #[cfg(not(feature = "wayland"))]
         let _ = (done_tx.send(Ok(None)), directory, suggested_name);
 
-        #[cfg(any(feature = "wayland", feature = "x11"))]
+        #[cfg(feature = "wayland")]
         let identifier = self.inner.window_identifier();
 
-        #[cfg(any(feature = "wayland", feature = "x11"))]
+        #[cfg(feature = "wayland")]
         self.foreground_executor()
             .spawn({
                 let directory = directory.to_owned();
@@ -916,7 +913,7 @@ impl<P: LinuxClient + 'static> Platform for LinuxPlatform<P> {
     fn add_recent_document(&self, _path: &Path) {}
 }
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(super) fn open_uri_internal(
     executor: BackgroundExecutor,
     uri: &str,
@@ -969,7 +966,7 @@ pub(super) fn open_uri_internal(
     }
 }
 
-#[cfg(any(feature = "x11", feature = "wayland"))]
+#[cfg(feature = "wayland")]
 pub(super) fn reveal_path_internal(
     executor: BackgroundExecutor,
     path: PathBuf,
@@ -996,13 +993,13 @@ pub(super) fn reveal_path_internal(
         .detach();
 }
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(super) fn is_within_click_distance(a: Point<Pixels>, b: Point<Pixels>) -> bool {
     let diff = a - b;
     diff.x.abs() <= DOUBLE_CLICK_DISTANCE && diff.y.abs() <= DOUBLE_CLICK_DISTANCE
 }
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(super) fn get_xkb_compose_state(cx: &xkb::Context) -> Option<xkb::compose::State> {
     let mut locales = Vec::default();
     if let Some(locale) = env::var_os("LC_CTYPE") {
@@ -1024,10 +1021,10 @@ pub(super) fn get_xkb_compose_state(cx: &xkb::Context) -> Option<xkb::compose::S
     state
 }
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(super) const PIPE_READ_TIMEOUT: Duration = Duration::from_secs(4);
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(super) fn read_fd_with_timeout(
     mut fd: filedescriptor::FileDescriptor,
     timeout: Duration,
@@ -1064,10 +1061,10 @@ pub(super) fn read_fd_with_timeout(
     }
 }
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(super) const DEFAULT_CURSOR_ICON_NAME: &str = "left_ptr";
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(super) fn cursor_style_to_icon_names(style: CursorStyle) -> &'static [&'static str] {
     // Based on cursor names from chromium:
     // https://github.com/chromium/chromium/blob/d3069cf9c973dc3627fa75f64085c6a86c8f41bf/ui/base/cursor/cursor_factory.cc#L113
@@ -1096,7 +1093,7 @@ pub(super) fn cursor_style_to_icon_names(style: CursorStyle) -> &'static [&'stat
     }
 }
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(super) fn log_cursor_icon_warning(message: impl std::fmt::Display) {
     if let Ok(xcursor_path) = env::var("XCURSOR_PATH") {
         log::warn!(
@@ -1110,7 +1107,7 @@ pub(super) fn log_cursor_icon_warning(message: impl std::fmt::Display) {
     }
 }
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 fn guess_ascii(keycode: Keycode, shift: bool) -> Option<char> {
     let c = match (keycode.raw(), shift) {
         (24, _) => 'q',
@@ -1164,7 +1161,7 @@ fn guess_ascii(keycode: Keycode, shift: bool) -> Option<char> {
     Some(c)
 }
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(super) fn keystroke_from_xkb(
     state: &State,
     mut modifiers: gpui::Modifiers,
@@ -1293,7 +1290,7 @@ pub(super) fn keystroke_from_xkb(
  * Returns which symbol the dead key represents
  * <https://developer.mozilla.org/en-US/docs/Web/API/UI_Events/Keyboard_event_key_values#dead_keycodes_for_linux>
  */
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub fn keystroke_underlying_dead_key(keysym: Keysym) -> Option<String> {
     match keysym {
         Keysym::dead_grave => Some("`".to_owned()),
@@ -1348,7 +1345,7 @@ pub fn keystroke_underlying_dead_key(keysym: Keysym) -> Option<String> {
         _ => None,
     }
 }
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(super) fn modifiers_from_xkb(keymap_state: &State) -> gpui::Modifiers {
     let shift = keymap_state.mod_name_is_active(xkb::MOD_NAME_SHIFT, xkb::STATE_MODS_EFFECTIVE);
     let alt = keymap_state.mod_name_is_active(xkb::MOD_NAME_ALT, xkb::STATE_MODS_EFFECTIVE);
@@ -1363,7 +1360,7 @@ pub(super) fn modifiers_from_xkb(keymap_state: &State) -> gpui::Modifiers {
     }
 }
 
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(super) fn capslock_from_xkb(keymap_state: &State) -> gpui::Capslock {
     let on = keymap_state.mod_name_is_active(xkb::MOD_NAME_CAPS, xkb::STATE_MODS_EFFECTIVE);
     gpui::Capslock { on }
@@ -1372,7 +1369,7 @@ pub(super) fn capslock_from_xkb(keymap_state: &State) -> gpui::Capslock {
 /// Resolve a Linux `dev_t` to PCI vendor/device IDs via sysfs, returning a
 /// [`CompositorGpuHint`] that the GPU adapter selection code can use to
 /// prioritize the compositor's rendering device.
-#[cfg(any(feature = "wayland", feature = "x11"))]
+#[cfg(feature = "wayland")]
 pub(super) fn compositor_gpu_hint_from_dev_t(dev: u64) -> Option<gpui_wgpu::CompositorGpuHint> {
     fn dev_major(dev: u64) -> u32 {
         ((dev >> 8) & 0xfff) as u32 | (((dev >> 32) & !0xfff) as u32)
@@ -1414,7 +1411,7 @@ mod tests {
     use super::*;
     use gpui::{Point, px};
 
-    #[cfg(any(feature = "wayland", feature = "x11"))]
+    #[cfg(feature = "wayland")]
     #[test]
     fn activation_history_restores_the_most_recent_surviving_window() {
         let mut history = ActivationHistory::default();
@@ -1459,7 +1456,7 @@ mod tests {
         ),);
     }
 
-    #[cfg(any(feature = "wayland", feature = "x11"))]
+    #[cfg(feature = "wayland")]
     mod read_fd_with_timeout {
         use super::super::{PIPE_READ_TIMEOUT, read_fd_with_timeout};
         use std::io::Write as _;

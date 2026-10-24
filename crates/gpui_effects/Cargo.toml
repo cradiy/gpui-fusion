@@ -24,7 +24,7 @@ workspace = true
 gpui_wgpu.workspace = true
 bytemuck = "1"
 gpui = { workspace = true, features = ["test-support", "automation"] }
-gpui_platform = { workspace = true, features = ["font-kit", "wayland", "x11"] }
+gpui_platform = { workspace = true, features = ["font-kit", "wayland"] }
 naga.workspace = true
 pollster.workspace = true
 wgpu.workspace = true

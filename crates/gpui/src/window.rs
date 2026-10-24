@@ -1520,7 +1520,7 @@ impl Window {
         self.platform_window.window_bounds()
     }
 
-    /// Return the `WindowBounds` excluding insets (Wayland and X11)
+    /// Return the `WindowBounds` excluding insets (Wayland)
     pub fn inner_window_bounds(&self) -> WindowBounds {
         self.platform_window.inner_window_bounds()
     }
@@ -2014,20 +2014,20 @@ impl Window {
         self.platform_window.zoom();
     }
 
-    /// Opens the native title bar context menu, useful when implementing client side decorations (Wayland and X11)
+    /// Opens the native title bar context menu, useful when implementing client side decorations (Wayland)
     pub fn show_window_menu(&self, position: Point<Pixels>) {
         self.platform_window.show_window_menu(position)
     }
 
     /// Handle window movement for Linux and macOS.
-    /// Tells the compositor to take control of window movement (Wayland and X11)
+    /// Tells the compositor to take control of window movement (Wayland)
     ///
     /// Events may not be received during a move operation.
     pub fn start_window_move(&self) {
         self.platform_window.start_window_move()
     }
 
-    /// When using client side decorations, set this to the width of the invisible decorations (Wayland and X11)
+    /// When using client side decorations, set this to the width of the invisible decorations (Wayland)
     pub fn set_client_inset(&mut self, inset: Pixels) {
         self.client_inset = Some(inset);
         self.platform_window.set_client_inset(inset);
@@ -2038,7 +2038,7 @@ impl Window {
         self.client_inset
     }
 
-    /// Returns whether the title bar window controls need to be rendered by the application (Wayland and X11)
+    /// Returns whether the title bar window controls need to be rendered by the application (Wayland)
     pub fn window_decorations(&self) -> Decorations {
         self.platform_window.window_decorations()
     }
@@ -3500,7 +3500,6 @@ impl Window {
                 }
             });
         } else if let Some(event) = event.downcast_ref::<crate::ScrollWheelEvent>() {
-            // This should be kept in sync with SCROLL_LINES in x11 platform.
             const SCROLL_LINES: f32 = 3.0;
             const SCROLL_PIXELS_PER_LAYER: f32 = 36.0;
             let delta_y = event

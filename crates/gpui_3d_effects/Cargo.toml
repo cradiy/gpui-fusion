@@ -20,7 +20,7 @@ gpui_3d.workspace = true
 anyhow.workspace = true
 gpui_3d = { workspace = true, features = ["wgpu"] }
 gpui_effects.workspace = true
-gpui_platform = { workspace = true, features = ["font-kit", "wayland", "x11"] }
+gpui_platform = { workspace = true, features = ["font-kit", "wayland"] }
 
 [[example]]
 name = "floating"

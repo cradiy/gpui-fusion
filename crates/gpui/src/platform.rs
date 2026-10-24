@@ -117,21 +117,9 @@ pub fn guess_compositor() -> &'static str {
     #[cfg(not(feature = "wayland"))]
     let wayland_display: Option<std::ffi::OsString> = None;
 
-    #[cfg(feature = "x11")]
-    let x11_display = std::env::var_os("DISPLAY");
-    #[cfg(not(feature = "x11"))]
-    let x11_display: Option<std::ffi::OsString> = None;
-
     let use_wayland = wayland_display.is_some_and(|display| !display.is_empty());
-    let use_x11 = x11_display.is_some_and(|display| !display.is_empty());
 
-    if use_wayland {
-        "Wayland"
-    } else if use_x11 {
-        "X11"
-    } else {
-        "Headless"
-    }
+    if use_wayland { "Wayland" } else { "Headless" }
 }
 
 #[expect(missing_docs)]
@@ -1623,7 +1611,7 @@ impl AtlasKey {
     #[cfg_attr(
         all(
             any(target_os = "linux", target_os = "freebsd"),
-            not(any(feature = "x11", feature = "wayland"))
+            not(feature = "wayland")
         ),
         allow(dead_code)
     )]
@@ -1760,7 +1748,7 @@ pub struct AtlasTextureId {
 #[cfg_attr(
     all(
         any(target_os = "linux", target_os = "freebsd"),
-        not(any(feature = "x11", feature = "wayland"))
+        not(feature = "wayland")
     ),
     allow(dead_code)
 )]
@@ -1799,7 +1787,7 @@ pub struct PlatformInputHandler {
 #[cfg_attr(
     all(
         any(target_os = "linux", target_os = "freebsd"),
-        not(any(feature = "x11", feature = "wayland"))
+        not(feature = "wayland")
     ),
     allow(dead_code)
 )]
@@ -2468,7 +2456,7 @@ pub struct WindowOptions {
     /// Note that this may be ignored.
     pub window_decorations: Option<WindowDecorations>,
 
-    /// Icon image for Windows and X11. Other platforms ignore this option.
+    /// Icon image for Windows. Other platforms ignore this option.
     pub icon: Option<Arc<image::RgbaImage>>,
 
     /// Tab group name, allows opening the window as a native tab on macOS 10.12+. Windows with the same tabbing identifier will be grouped together.
@@ -2480,7 +2468,7 @@ pub struct WindowOptions {
 #[cfg_attr(
     all(
         any(target_os = "linux", target_os = "freebsd"),
-        not(any(feature = "x11", feature = "wayland"))
+        not(feature = "wayland")
     ),
     allow(dead_code)
 )]
@@ -2524,7 +2512,7 @@ pub struct WindowParams {
     #[cfg_attr(any(target_os = "linux", target_os = "freebsd"), allow(dead_code))]
     pub show: bool,
 
-    /// An image to set as the window icon on Windows and X11.
+    /// An image to set as the window icon on Windows.
     #[cfg_attr(feature = "wayland", allow(dead_code))]
     pub icon: Option<Arc<image::RgbaImage>>,
 

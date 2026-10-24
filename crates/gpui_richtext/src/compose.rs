@@ -1,0 +1,198 @@
+use crate::{
+    Code, Document, Emphasis, Group, HardBreak, Link, Mark, Node, NodeId, Paragraph, Span,
+    Strikethrough, Strong, Text, Underline,
+};
+use anyhow::{Result, bail};
+use gpui::{HighlightStyle, SharedString};
+use std::{any::Any, sync::Arc};
+
+pub fn code_block(text: impl Into<SharedString>) -> NodeTree {
+    node(crate::CodeBlock::new(text))
+}
+
+/// A composable node subtree. Components describe content, not independent views.
+pub struct NodeTree {
+    pub(crate) id: Option<NodeId>,
+    pub(crate) payload: Arc<dyn Any + Send + Sync>,
+    pub(crate) children: Vec<NodeTree>,
+}
+
+impl NodeTree {
+    pub fn child(mut self, child: NodeTree) -> Self {
+        self.children.push(child);
+        self
+    }
+
+    pub fn children(mut self, children: impl IntoIterator<Item = NodeTree>) -> Self {
+        self.children.extend(children);
+        self
+    }
+}
+
+/// Compose any registered payload type, including application-defined types.
+pub fn node(payload: impl Any + Send + Sync) -> NodeTree {
+    NodeTree {
+        id: None,
+        payload: Arc::new(payload),
+        children: Vec::new(),
+    }
+}
+
+pub fn text(value: impl Into<SharedString>) -> NodeTree {
+    node(Text(value.into()))
+}
+pub fn paragraph() -> NodeTree {
+    node(Paragraph)
+}
+pub fn table() -> NodeTree {
+    node(crate::Table::default())
+}
+pub fn table_row() -> NodeTree {
+    node(crate::TableRow::default())
+}
+pub fn table_header() -> NodeTree {
+    node(crate::TableRow { header: true })
+}
+pub fn table_cell() -> NodeTree {
+    node(crate::TableCell)
+}
+pub fn heading(level: crate::HeadingLevel) -> NodeTree {
+    node(crate::Heading(level))
+}
+pub fn quote() -> NodeTree {
+    node(crate::Quote)
+}
+pub fn block_quote() -> NodeTree {
+    node(crate::BlockQuote)
+}
+
+pub fn details(summary: impl Into<SharedString>) -> NodeTree {
+    node(crate::Details::new(summary))
+}
+
+pub fn alert(kind: crate::AlertKind) -> NodeTree {
+    node(crate::Alert::new(kind))
+}
+
+pub fn definition_list() -> NodeTree {
+    node(crate::DefinitionList)
+}
+
+pub fn definition_term() -> NodeTree {
+    node(crate::DefinitionTerm)
+}
+
+pub fn definition_description() -> NodeTree {
+    node(crate::DefinitionDescription)
+}
+pub fn list_entry(marker: crate::ListMarker) -> NodeTree {
+    node(crate::ListEntry(marker))
+}
+pub fn rule() -> NodeTree {
+    node(crate::Rule)
+}
+pub fn image(source: impl Into<SharedString>, alt: impl Into<SharedString>) -> NodeTree {
+    node(crate::Image::new(source, alt))
+}
+pub fn bullet_item() -> NodeTree {
+    node(crate::ListItem(crate::ListMarker::Bullet))
+}
+pub fn numbered_item(number: u32) -> NodeTree {
+    node(crate::ListItem(crate::ListMarker::Number(number)))
+}
+pub fn task_item(checked: bool) -> NodeTree {
+    node(crate::ListItem(crate::ListMarker::Task { checked }))
+}
+pub fn group() -> NodeTree {
+    node(Group)
+}
+pub fn link(target: impl Into<SharedString>) -> NodeTree {
+    node(Link::new(target))
+}
+
+pub fn anchor(name: impl Into<SharedString>) -> NodeTree {
+    node(crate::Anchor(name.into()))
+}
+
+pub fn anchor_link(target: impl Into<SharedString>) -> NodeTree {
+    node(crate::AnchorLink::new(target))
+}
+pub fn link_with_text(target: impl Into<SharedString>, text: impl Into<SharedString>) -> NodeTree {
+    node(Link::new(target).text(text))
+}
+pub fn span(style: HighlightStyle) -> NodeTree {
+    node(Span(style))
+}
+pub fn strong() -> NodeTree {
+    node(Strong)
+}
+pub fn emphasis() -> NodeTree {
+    node(Emphasis)
+}
+pub fn underline() -> NodeTree {
+    node(Underline)
+}
+pub fn strikethrough() -> NodeTree {
+    node(Strikethrough)
+}
+pub fn mark() -> NodeTree {
+    node(Mark)
+}
+pub fn code() -> NodeTree {
+    node(Code)
+}
+pub fn hard_break() -> NodeTree {
+    node(HardBreak)
+}
+
+impl Document {
+    /// Build a snapshot from composed roots, assigning IDs in reading order.
+    /// Generated IDs are local to this snapshot and are not stable across edits.
+    /// Use `Document::new` when the application supplies persistent node identities.
+    pub fn from_roots(roots: impl IntoIterator<Item = NodeTree>) -> Result<Self> {
+        let mut pending: Vec<_> = roots.into_iter().map(|root| (root, None, 0)).collect();
+        pending.reverse();
+        let mut nodes: Vec<Node> = Vec::new();
+        let mut source_occurrences = std::collections::HashMap::<NodeId, u64>::new();
+        let mut roots = Vec::new();
+        while let Some((tree, parent, depth)) = pending.pop() {
+            if nodes.len() >= 100_000 || depth > 256 {
+                bail!("document exceeds node count or nesting limit");
+            }
+            let index = nodes.len();
+            let id = if let Some(base) = tree.id {
+                let occurrence = source_occurrences.entry(base).or_default();
+                if *occurrence >= 4096 {
+                    bail!("too many nodes at one source position");
+                }
+                let id = NodeId(base.0 + *occurrence);
+                *occurrence += 1;
+                id
+            } else {
+                NodeId(index as u64 + 1)
+            };
+            if let Some(parent) = parent {
+                let parent: &mut Node = &mut nodes[parent];
+                parent.children.push(id);
+            } else {
+                roots.push(id);
+            }
+            nodes.push(Node {
+                id,
+                payload: tree.payload,
+                children: Vec::new(),
+            });
+            pending.extend(
+                tree.children
+                    .into_iter()
+                    .rev()
+                    .map(|child| (child, Some(index), depth + 1)),
+            );
+        }
+        Self::new(nodes, roots)
+    }
+}
+
+pub fn keyboard() -> NodeTree {
+    node(crate::Keyboard)
+}

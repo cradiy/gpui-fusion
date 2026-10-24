@@ -154,7 +154,11 @@ impl TextSystem {
             return font_id;
         }
         for fallback in &self.fallback_font_stack {
-            if let Some(font_id) = self.font_id(fallback) {
+            let fallback = Font {
+                family: fallback.family.clone(),
+                ..font.clone()
+            };
+            if let Some(font_id) = self.font_id(&fallback) {
                 return font_id;
             }
         }
@@ -547,6 +551,26 @@ impl WindowTextSystem {
         wrap_width: Option<Pixels>,
         line_clamp: Option<usize>,
     ) -> Result<SmallVec<[WrappedLine; 1]>> {
+        self.shape_text_with_line_sizes(
+            text,
+            font_size,
+            runs,
+            wrap_width,
+            line_clamp,
+            &Default::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn shape_text_with_line_sizes(
+        &self,
+        text: SharedString,
+        font_size: Pixels,
+        runs: &[TextRun],
+        wrap_width: Option<Pixels>,
+        line_clamp: Option<usize>,
+        line_sizes: &std::collections::HashMap<usize, Pixels>,
+    ) -> Result<SmallVec<[WrappedLine; 1]>> {
         let mut runs = runs.iter().filter(|run| run.len > 0).cloned().peekable();
         let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
 
@@ -609,7 +633,7 @@ impl WindowTextSystem {
 
             let layout = self.line_layout_cache.layout_wrapped_line(
                 &line_text,
-                font_size,
+                line_sizes.get(&line_start).copied().unwrap_or(font_size),
                 &font_runs,
                 wrap_width,
                 max_wrap_lines.map(|max| max.saturating_sub(wrapped_lines)),
@@ -649,13 +673,14 @@ impl WindowTextSystem {
                 line_start,
                 line_start + second_line.len(),
             );
+            line_start += second_line.len() + '\n'.len_utf8();
             for line_text in split_lines {
-                line_start += line_text.len() + '\n'.len_utf8();
                 process_line(
                     SharedString::new(line_text),
                     line_start,
                     line_start + line_text.len(),
                 );
+                line_start += line_text.len() + '\n'.len_utf8();
             }
         } else {
             let end = text.len();

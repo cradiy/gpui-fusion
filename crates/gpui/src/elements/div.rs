@@ -696,7 +696,7 @@ impl Interactivity {
             "calling tooltip more than once on the same element is not supported"
         );
         self.tooltip_builder = Some(TooltipBuilder {
-            build: Rc::new(build_tooltip),
+            build: Rc::new(move |window, cx| Some(build_tooltip(window, cx))),
             hoverable: false,
         });
     }
@@ -715,7 +715,7 @@ impl Interactivity {
             "calling tooltip more than once on the same element is not supported"
         );
         self.tooltip_builder = Some(TooltipBuilder {
-            build: Rc::new(build_tooltip),
+            build: Rc::new(move |window, cx| Some(build_tooltip(window, cx))),
             hoverable: true,
         });
     }
@@ -1634,6 +1634,26 @@ pub trait StatefulInteractiveElement: InteractiveElement {
         self
     }
 
+    /// Construct a tooltip on hover, or return `None` to suppress it.
+    fn optional_tooltip(
+        mut self,
+        build_tooltip: impl Fn(&mut Window, &mut App) -> Option<AnyView> + 'static,
+    ) -> Self
+    where
+        Self: Sized,
+    {
+        let interactivity = self.interactivity();
+        debug_assert!(
+            interactivity.tooltip_builder.is_none(),
+            "calling tooltip more than once on the same element is not supported"
+        );
+        interactivity.tooltip_builder = Some(TooltipBuilder {
+            build: Rc::new(build_tooltip),
+            hoverable: false,
+        });
+        self
+    }
+
     /// Use the given callback to construct a new tooltip view when the mouse hovers over this element.
     /// The tooltip itself is also hoverable and won't disappear when the user moves the mouse into
     /// the tooltip. The fluent API equivalent to [`Interactivity::hoverable_tooltip`].
@@ -1688,7 +1708,7 @@ type DropListener = Box<dyn Fn(&dyn Any, &mut Window, &mut App) + 'static>;
 type CanDropPredicate = Box<dyn Fn(&dyn Any, &mut Window, &mut App) -> bool + 'static>;
 
 pub(crate) struct TooltipBuilder {
-    build: Rc<dyn Fn(&mut Window, &mut App) -> AnyView + 'static>,
+    build: Rc<dyn Fn(&mut Window, &mut App) -> Option<AnyView> + 'static>,
     hoverable: bool,
 }
 
@@ -3193,7 +3213,7 @@ impl Interactivity {
 
                 let tooltip_is_hoverable = tooltip_builder.hoverable;
                 let build_tooltip = Rc::new(move |window: &mut Window, cx: &mut App| {
-                    Some(((tooltip_builder.build)(window, cx), tooltip_is_hoverable))
+                    (tooltip_builder.build)(window, cx).map(|view| (view, tooltip_is_hoverable))
                 });
                 let check_is_hovered_during_prepaint = Rc::new({
                     let pending_mouse_down = pending_mouse_down.clone();

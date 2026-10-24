@@ -1,14 +1,11 @@
 use gpui::{prelude::*, *};
 use gpui_effects::{FrostedGlass, FrostedGlassAppearance, LiquidGlass, LiquidGlassAppearance};
-use uic::{
-    assets::{LucideAssets, LucideIcons},
-    components::{
-        command_palette::{
-            CommandItem, CommandPalette, CommandPaletteAction, CommandPaletteEvent,
-            CommandPaletteState,
-        },
-        modal,
+use gpui_icons::{GpuiIcons, IconAssets};
+use uic::components::{
+    command_palette::{
+        CommandItem, CommandPalette, CommandPaletteAction, CommandPaletteEvent, CommandPaletteState,
     },
+    modal,
 };
 
 fn commands() -> Vec<CommandItem> {
@@ -17,27 +14,27 @@ fn commands() -> Vec<CommandItem> {
             .group("Workspace")
             .description("Start with a clean page")
             .keywords("create write")
-            .icon(LucideIcons::FilePlus)
+            .icon(GpuiIcons::LucideFilePlus)
             .shortcut("Ctrl N"),
         CommandItem::new("open", "Open workspace")
             .group("Workspace")
             .description("Pick up where you left off")
-            .icon(LucideIcons::FolderOpen),
+            .icon(GpuiIcons::LucideFolderOpen),
         CommandItem::new("search", "Search everywhere")
             .group("Workspace")
             .description("Find a document, note or idea")
-            .icon(LucideIcons::Search),
+            .icon(GpuiIcons::LucideSearch),
         CommandItem::new("theme", "Change appearance")
             .group("Preferences")
             .keywords("theme dark light")
-            .icon(LucideIcons::Palette),
+            .icon(GpuiIcons::LucidePalette),
         CommandItem::new("settings", "Open settings")
             .group("Preferences")
-            .icon(LucideIcons::Settings),
+            .icon(GpuiIcons::LucideSettings),
         CommandItem::new("sync", "Sync workspace")
             .group("Preferences")
             .description("Unavailable while offline")
-            .icon(LucideIcons::RefreshCw)
+            .icon(GpuiIcons::LucideRefreshCw)
             .disabled(true),
     ]
 }
@@ -275,7 +272,7 @@ fn main() {
     #[cfg(target_family = "wasm")]
     gpui_platform::web_init();
     gpui_platform::application()
-        .with_assets(LucideAssets::new())
+        .with_assets(IconAssets::new())
         .run(|cx| {
             uic::init(cx);
             cx.open_window(

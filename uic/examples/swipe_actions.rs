@@ -1,5 +1,5 @@
 use gpui::{prelude::*, *};
-use uic::assets::{LucideAssets, LucideIcons};
+use gpui_icons::{GpuiIcons, IconAssets};
 use uic::components::swipe_actions::{
     SwipeActions, SwipeActionsState, SwipeDirection, SwipeTriggered,
 };
@@ -171,8 +171,8 @@ impl Render for Example {
                             .feedback(move |swipe, _, _| {
                                 let left = swipe.direction == SwipeDirection::Left;
                                 let accent = if left { 0x5573a3 } else { 0x348578 };
-                                let icon = if swipe.ready { LucideIcons::Check }
-                                    else if left { LucideIcons::Archive } else { LucideIcons::Pin };
+                                let icon = if swipe.ready { GpuiIcons::LucideCheck }
+                                    else if left { GpuiIcons::LucideArchive } else { GpuiIcons::LucidePin };
                                 div().relative().size_full().rounded_xl()
                                     .bg(rgb(if swipe.ready { accent } else if left { 0xe5ecf6 } else { 0xe1efea }))
                                     .text_color(rgb(if swipe.ready { 0xffffff } else { accent }))
@@ -195,7 +195,7 @@ fn main() {
     #[cfg(target_family = "wasm")]
     gpui_platform::web_init();
     gpui_platform::application()
-        .with_assets(LucideAssets::new())
+        .with_assets(IconAssets::new())
         .run(|cx| {
             cx.open_window(WindowOptions::default(), |window, cx| {
                 cx.new(|cx| Example::new(window, cx))

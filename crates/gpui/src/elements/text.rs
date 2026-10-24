@@ -274,7 +274,13 @@ impl Element for &'static str {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut state = TextLayout::default();
-        let layout_id = state.layout(SharedString::from(*self), None, window, cx);
+        let layout_id = state.layout(
+            SharedString::from(*self),
+            None,
+            TextLayoutOptions::default(),
+            window,
+            cx,
+        );
         (layout_id, state)
     }
 
@@ -348,7 +354,7 @@ impl Element for SharedString {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut state = TextLayout::default();
-        let layout_id = state.layout(self.clone(), None, window, cx);
+        let layout_id = state.layout(self.clone(), None, TextLayoutOptions::default(), window, cx);
         (layout_id, state)
     }
 
@@ -392,28 +398,128 @@ impl IntoElement for SharedString {
 /// For text with a uniform style, you can usually avoid calling this constructor
 /// and just pass text directly.
 pub struct StyledText {
+    inline_boxes: Vec<TextInlineBox>,
     text: SharedString,
     runs: Option<Vec<TextRun>>,
     delayed_highlights: Option<Vec<(Range<usize>, HighlightStyle)>>,
     delayed_font_family_overrides: Option<Vec<(Range<usize>, SharedString)>>,
     layout: TextLayout,
+    line_top_spacing: Vec<(usize, Pixels)>,
+    line_indents: Vec<TextLineIndent>,
+    empty_line_heights: Vec<(usize, Pixels)>,
+    line_typography: Vec<TextLineTypography>,
+}
+
+/// A single atomic inline object replacing a UTF-8 source range.
+/// Source glyphs are hidden; callers paint the object separately at its baseline position.
+#[derive(Clone, Debug)]
+pub struct TextInlineBox {
+    /// Nonempty UTF-8 byte range replaced by the object.
+    pub range: Range<usize>,
+    /// Width and total height reserved in logical pixels.
+    pub size: Size<Pixels>,
+    /// Distance from the object's top edge to the text baseline.
+    pub baseline: Pixels,
+}
+
+/// Typography for a newline-delimited source line, including its soft wraps.
+#[derive(Clone, Copy, Debug)]
+pub struct TextLineTypography {
+    /// UTF-8 byte offset of the first character in the source line.
+    pub line_start: usize,
+    /// Font size used for shaping and painting this line.
+    pub font_size: Pixels,
+    /// Height of each visual row, including wrapped continuations.
+    pub line_height: Pixels,
+}
+
+/// A source-line gutter shared by its first and wrapped continuation rows.
+#[derive(Clone, Copy, Debug)]
+pub struct TextLineIndent {
+    /// UTF-8 byte offset of the source line's first character.
+    pub line_start: usize,
+    /// Prefix bytes retained for copying but collapsed during layout. Callers
+    /// must hide their glyphs and draw any marker separately.
+    pub prefix_len: usize,
+    /// Left inset reserved for every visual row of this source line.
+    pub width: Pixels,
 }
 
 impl StyledText {
+    /// Replace sorted, non-overlapping source ranges with atomic layout boxes.
+    /// Invalid ranges or dimensions are ignored. Newlines inside an object do not break it.
+    /// Text-overflow truncation uses the original source representation.
+    pub fn with_inline_boxes(mut self, boxes: Vec<TextInlineBox>) -> Self {
+        let mut end = 0;
+        self.inline_boxes = boxes
+            .into_iter()
+            .filter(|object| {
+                let valid = object.range.start >= end
+                    && object.range.start < object.range.end
+                    && self.text.get(object.range.clone()).is_some()
+                    && [object.size.width, object.size.height, object.baseline]
+                        .iter()
+                        .all(|value| f32::from(*value).is_finite() && *value >= Pixels::ZERO)
+                    && object.baseline <= object.size.height;
+                if valid {
+                    end = object.range.end;
+                }
+                valid
+            })
+            .collect();
+        self
+    }
+
     /// Construct a new styled text element from the given string.
     pub fn new(text: impl Into<SharedString>) -> Self {
         StyledText {
+            inline_boxes: Vec::new(),
             text: text.into(),
             runs: None,
             delayed_highlights: None,
             delayed_font_family_overrides: None,
             layout: TextLayout::default(),
+            line_top_spacing: Vec::new(),
+            line_indents: Vec::new(),
+            empty_line_heights: Vec::new(),
+            line_typography: Vec::new(),
         }
     }
 
     /// Get the layout for this element. This can be used to map indices to pixels and vice versa.
     pub fn layout(&self) -> &TextLayout {
         &self.layout
+    }
+
+    /// Reserve vertical space before source lines without adding text. Offsets
+    /// must identify the start of a newline-delimited line. Invalid offsets are
+    /// ignored; negative spacing is clamped to zero. Wrapped continuations do
+    /// not repeat the spacing.
+    pub fn with_line_top_spacing(mut self, spacing: Vec<(usize, Pixels)>) -> Self {
+        self.line_top_spacing = spacing;
+        self
+    }
+
+    /// Indent specified newline-delimited source lines, including soft wraps.
+    /// Invalid line offsets, prefix boundaries, and widths are ignored.
+    pub fn with_line_indents(mut self, indents: Vec<TextLineIndent>) -> Self {
+        self.line_indents = indents;
+        self
+    }
+
+    /// Override the height of selected empty source lines by UTF-8 start offset.
+    /// Nonempty lines and nonpositive or nonfinite heights are ignored.
+    pub fn with_empty_line_heights(mut self, heights: Vec<(usize, Pixels)>) -> Self {
+        self.empty_line_heights = heights;
+        self
+    }
+
+    /// Override source-line typography while retaining continuous selection.
+    /// Invalid offsets and nonpositive or nonfinite metrics are ignored.
+    /// Overrides do not apply when text-overflow truncation is active.
+    pub fn with_line_typography(mut self, typography: Vec<TextLineTypography>) -> Self {
+        self.line_typography = typography;
+        self
     }
 
     /// Set the styling attributes for the given text, as well as
@@ -574,7 +680,61 @@ impl Element for StyledText {
             Self::apply_font_family_overrides(runs, overrides);
         }
 
-        let layout_id = self.layout.layout(self.text.clone(), runs, window, cx);
+        if window.text_style().text_overflow.is_some() {
+            self.inline_boxes.clear();
+        }
+        if !self.inline_boxes.is_empty() {
+            let source = runs
+                .take()
+                .unwrap_or_else(|| vec![window.text_style().to_run(self.text.len())]);
+            let mut hidden = Vec::new();
+            let mut offset = 0;
+            for run in source {
+                let end = offset + run.len;
+                let mut boundaries = vec![offset, end];
+                for object in &self.inline_boxes {
+                    if object.range.start > offset && object.range.start < end {
+                        boundaries.push(object.range.start);
+                    }
+                    if object.range.end > offset && object.range.end < end {
+                        boundaries.push(object.range.end);
+                    }
+                }
+                boundaries.sort_unstable();
+                boundaries.dedup();
+                for pair in boundaries.windows(2) {
+                    let mut part = run.clone();
+                    part.len = pair[1] - pair[0];
+                    if self
+                        .inline_boxes
+                        .iter()
+                        .any(|object| object.range.contains(&pair[0]))
+                    {
+                        part.color = crate::transparent_black();
+                        part.underline = None;
+                        part.strikethrough = None;
+                        part.background_color = None;
+                    }
+                    hidden.push(part);
+                }
+                offset = end;
+            }
+            runs = Some(hidden);
+        }
+
+        let layout_id = self.layout.layout(
+            self.text.clone(),
+            runs,
+            TextLayoutOptions {
+                inline_boxes: std::mem::take(&mut self.inline_boxes),
+                line_top_spacing: std::mem::take(&mut self.line_top_spacing),
+                line_indents: std::mem::take(&mut self.line_indents),
+                empty_line_heights: std::mem::take(&mut self.empty_line_heights),
+                line_typography: std::mem::take(&mut self.line_typography),
+            },
+            window,
+            cx,
+        );
         (layout_id, ())
     }
 
@@ -624,6 +784,27 @@ struct TextLayoutInner {
     wrap_width: Option<Pixels>,
     size: Option<Size<Pixels>>,
     bounds: Option<Bounds<Pixels>>,
+    line_top_spacing: Vec<Pixels>,
+    line_indents: Vec<Pixels>,
+    line_heights: Vec<Pixels>,
+}
+
+#[derive(Default)]
+struct TextLayoutOptions {
+    inline_boxes: Vec<TextInlineBox>,
+    line_top_spacing: Vec<(usize, Pixels)>,
+    line_indents: Vec<TextLineIndent>,
+    empty_line_heights: Vec<(usize, Pixels)>,
+    line_typography: Vec<TextLineTypography>,
+}
+
+impl TextLayoutInner {
+    fn height_for_line(&self, index: usize) -> Pixels {
+        self.line_heights
+            .get(index)
+            .copied()
+            .unwrap_or(self.line_height)
+    }
 }
 
 impl TextLayout {
@@ -631,9 +812,17 @@ impl TextLayout {
         &self,
         text: SharedString,
         runs: Option<Vec<TextRun>>,
+        options: TextLayoutOptions,
         window: &mut Window,
         _: &mut App,
     ) -> LayoutId {
+        let TextLayoutOptions {
+            inline_boxes,
+            line_top_spacing,
+            line_indents,
+            empty_line_heights,
+            line_typography,
+        } = options;
         let text_style = window.text_style();
         let font_size = text_style.font_size.to_pixels(window.rem_size());
         let line_height = window.pixel_snap(
@@ -719,14 +908,45 @@ impl TextLayout {
                 };
                 let len = text.len();
 
-                let Some(lines) = window
+                let typography: std::collections::HashMap<_, _> = line_typography
+                    .iter()
+                    .filter(|metrics| {
+                        truncate_width.is_none()
+                            && metrics.line_start <= text.len()
+                            && (metrics.line_start == 0
+                                || text.as_bytes().get(metrics.line_start - 1) == Some(&b'\n'))
+                            && metrics.font_size > Pixels::ZERO
+                            && f32::from(metrics.font_size).is_finite()
+                            && metrics.line_height > Pixels::ZERO
+                            && f32::from(metrics.line_height).is_finite()
+                    })
+                    .map(|metrics| (metrics.line_start, *metrics))
+                    .collect();
+                let line_sizes = typography
+                    .iter()
+                    .map(|(start, metrics)| (*start, metrics.font_size))
+                    .collect();
+                let shaping_text = if inline_boxes.is_empty() {
+                    text.clone()
+                } else {
+                    let mut shaping = text.to_string();
+                    for object in &inline_boxes {
+                        if let Some(source) = shaping.get(object.range.clone()) {
+                            let source = source.replace('\n', " ");
+                            shaping.replace_range(object.range.clone(), &source);
+                        }
+                    }
+                    shaping.into()
+                };
+                let Some(mut lines) = window
                     .text_system()
-                    .shape_text(
-                        text.clone(),
+                    .shape_text_with_line_sizes(
+                        shaping_text,
                         font_size,
                         &runs,
                         wrap_width,            // Wrap if we know the width.
                         text_style.line_clamp, // Limit the number of lines if line_clamp is set.
+                        &line_sizes,
                     )
                     .log_err()
                 else {
@@ -738,15 +958,100 @@ impl TextLayout {
                         wrap_width,
                         size: Some(Size::default()),
                         bounds: None,
+                        line_top_spacing: Vec::new(),
+                        line_indents: Vec::new(),
+                        line_heights: Vec::new(),
                     });
                     return Size::default();
                 };
 
                 let mut size: Size<Pixels> = Size::default();
-                for line in &lines {
-                    let line_size = line.size(line_height);
+                let spacing: std::collections::HashMap<_, _> =
+                    line_top_spacing.iter().copied().collect();
+                let mut line_start = 0;
+                let mut resolved_spacing = Vec::new();
+                let indents: std::collections::HashMap<_, _> = line_indents
+                    .iter()
+                    .map(|indent| (indent.line_start, indent))
+                    .collect();
+                let mut resolved_indents = Vec::new();
+                let heights: std::collections::HashMap<_, _> =
+                    empty_line_heights.iter().copied().collect();
+                let mut resolved_heights = Vec::new();
+                let mut remaining_wraps = text_style.line_clamp.map(|max| max.saturating_sub(1));
+                for line in &mut lines {
+                    if !inline_boxes.is_empty() {
+                        line.text = text[line_start..line_start + line.len()].to_owned().into();
+                    }
+                    let objects: Vec<_> = inline_boxes
+                        .iter()
+                        .filter(|object| {
+                            truncate_width.is_none()
+                                && object.range.start >= line_start
+                                && object.range.end <= line_start + line.len()
+                        })
+                        .map(|object| {
+                            let mut object = object.clone();
+                            object.range =
+                                object.range.start - line_start..object.range.end - line_start;
+                            object
+                        })
+                        .collect();
+                    if !objects.is_empty() {
+                        *line = std::mem::take(line).with_inline_boxes(&objects, remaining_wraps);
+                    }
+                    let indent = indents.get(&line_start).filter(|indent| {
+                        indent.width >= Pixels::ZERO
+                            && f32::from(indent.width).is_finite()
+                            && line.text.is_char_boundary(indent.prefix_len)
+                            && !line.runs().iter().flat_map(|run| &run.glyphs).any(|glyph| {
+                                glyph.index < indent.prefix_len
+                                    && glyph.cluster_end > indent.prefix_len
+                            })
+                    });
+                    let inset = indent.map_or(Pixels::ZERO, |indent| indent.width);
+                    if let Some(indent) = indent {
+                        *line = std::mem::take(line).with_collapsed_prefix(
+                            indent.prefix_len,
+                            inset,
+                            remaining_wraps,
+                        );
+                    }
+                    if let Some(remaining) = &mut remaining_wraps {
+                        *remaining = remaining.saturating_sub(line.wrap_boundaries.len());
+                    }
+                    if !indents.is_empty() {
+                        resolved_indents.push(inset);
+                    }
+                    let top = spacing
+                        .get(&line_start)
+                        .copied()
+                        .unwrap_or_default()
+                        .max(Pixels::ZERO);
+                    if !spacing.is_empty() {
+                        resolved_spacing.push(top);
+                    }
+                    size.height += top;
+                    let row_height = heights
+                        .get(&line_start)
+                        .copied()
+                        .filter(|height| {
+                            line.len() == 0
+                                && *height > Pixels::ZERO
+                                && f32::from(*height).is_finite()
+                        })
+                        .unwrap_or_else(|| {
+                            typography
+                                .get(&line_start)
+                                .map_or(line_height, |metrics| metrics.line_height)
+                        });
+                    if !heights.is_empty() || !typography.is_empty() || !inline_boxes.is_empty() {
+                        resolved_heights.push(row_height);
+                    }
+                    line_start += line.len() + 1;
+                    let line_size = line.size(row_height);
                     size.height += line_size.height;
-                    size.width = size.width.max(line_size.width).ceil();
+                    size.width = size.width.max(line_size.width + inset).ceil();
                 }
 
                 element_state.0.borrow_mut().replace(TextLayoutInner {
@@ -757,6 +1062,9 @@ impl TextLayout {
                     wrap_width,
                     size: Some(size),
                     bounds: None,
+                    line_top_spacing: resolved_spacing,
+                    line_indents: resolved_indents,
+                    line_heights: resolved_heights,
                 });
 
                 size
@@ -799,15 +1107,29 @@ impl TextLayout {
             .with_context(|| format!("prepaint has not been performed on {text}"))
             .unwrap();
 
-        let line_height = element_state.line_height;
         let mut line_origin = bounds.origin;
         let text_style = window.text_style();
-        for line in &element_state.lines {
+        for (index, line) in element_state.lines.iter().enumerate() {
+            let line_height = element_state.height_for_line(index);
+            let indent = element_state
+                .line_indents
+                .get(index)
+                .copied()
+                .unwrap_or_default();
+            line_origin.x = bounds.left() + indent;
+            let mut line_bounds = bounds;
+            line_bounds.origin.x += indent;
+            line_bounds.size.width = (line_bounds.size.width - indent).max(Pixels::ZERO);
+            line_origin.y += element_state
+                .line_top_spacing
+                .get(index)
+                .copied()
+                .unwrap_or_default();
             line.paint_background(
                 line_origin,
                 line_height,
                 text_style.text_align,
-                Some(bounds),
+                Some(line_bounds),
                 window,
                 cx,
             )
@@ -817,7 +1139,7 @@ impl TextLayout {
                     line_origin,
                     line_height,
                     text_style.text_align,
-                    Some(bounds),
+                    Some(line_bounds),
                     window,
                     cx,
                 )
@@ -830,12 +1152,27 @@ impl TextLayout {
                 window.paint_quad(quad);
             }
             let mut line_origin = bounds.origin;
-            for line in &element_state.lines {
+            for (index, line) in element_state.lines.iter().enumerate() {
+                let line_height = element_state.height_for_line(index);
+                let indent = element_state
+                    .line_indents
+                    .get(index)
+                    .copied()
+                    .unwrap_or_default();
+                line_origin.x = bounds.left() + indent;
+                let mut line_bounds = bounds;
+                line_bounds.origin.x += indent;
+                line_bounds.size.width = (line_bounds.size.width - indent).max(Pixels::ZERO);
+                line_origin.y += element_state
+                    .line_top_spacing
+                    .get(index)
+                    .copied()
+                    .unwrap_or_default();
                 line.paint(
                     line_origin,
                     line_height,
                     text_style.text_align,
-                    Some(bounds),
+                    Some(line_bounds),
                     window,
                     cx,
                 )
@@ -859,10 +1196,24 @@ impl TextLayout {
             return Err(0);
         }
 
-        let line_height = element_state.line_height;
         let mut line_origin = bounds.origin;
         let mut line_start_ix = 0;
-        for line in &element_state.lines {
+        for (index, line) in element_state.lines.iter().enumerate() {
+            let line_height = element_state.height_for_line(index);
+            line_origin.x = bounds.left()
+                + element_state
+                    .line_indents
+                    .get(index)
+                    .copied()
+                    .unwrap_or_default();
+            line_origin.y += element_state
+                .line_top_spacing
+                .get(index)
+                .copied()
+                .unwrap_or_default();
+            if position.y < line_origin.y {
+                return Err(line_start_ix);
+            }
             let line_bottom = line_origin.y + line.size(line_height).height;
             if position.y > line_bottom {
                 line_origin.y = line_bottom;
@@ -888,12 +1239,23 @@ impl TextLayout {
         let bounds = element_state
             .bounds
             .expect("prepaint has not been performed");
-        let line_height = element_state.line_height;
 
         let mut line_origin = bounds.origin;
         let mut line_start_ix = 0;
 
-        for line in &element_state.lines {
+        for (line_index, line) in element_state.lines.iter().enumerate() {
+            let line_height = element_state.height_for_line(line_index);
+            line_origin.x = bounds.left()
+                + element_state
+                    .line_indents
+                    .get(line_index)
+                    .copied()
+                    .unwrap_or_default();
+            line_origin.y += element_state
+                .line_top_spacing
+                .get(line_index)
+                .copied()
+                .unwrap_or_default();
             let line_end_ix = line_start_ix + line.len();
             if index < line_start_ix {
                 break;
@@ -943,6 +1305,42 @@ impl TextLayout {
             .iter()
             .map(|line| line.layout.clone())
             .collect()
+    }
+
+    /// Position on the text baseline for a UTF-8 byte offset, after prepaint.
+    pub fn baseline_for_index(&self, index: usize) -> Option<Point<Pixels>> {
+        let mut position = self.position_for_index(index)?;
+        let state = self.0.borrow();
+        let state = state.as_ref()?;
+        let mut start = 0;
+        for (line_index, line) in state.lines.iter().enumerate() {
+            if index <= start + line.len() {
+                let height = state.height_for_line(line_index);
+                let local = line.position_for_index(index - start, height)?;
+                let row = line.row_for_y(local.y, height);
+                let (ascent, descent) = line.row_metrics(row);
+                position.y += (line.row_height(row, height) - ascent - descent) / 2. + ascent;
+                return Some(position);
+            }
+            start += line.len() + 1;
+        }
+        None
+    }
+
+    /// Height of the displayed row containing a UTF-8 byte offset.
+    pub fn line_height_for_index(&self, index: usize) -> Option<Pixels> {
+        let state = self.0.borrow();
+        let state = state.as_ref()?;
+        let mut start = 0;
+        for (line_index, line) in state.lines.iter().enumerate() {
+            if index <= start + line.len() {
+                let height = state.height_for_line(line_index);
+                let local = line.position_for_index(index - start, height)?;
+                return Some(line.row_height(line.row_for_y(local.y, height), height));
+            }
+            start += line.len() + 1;
+        }
+        None
     }
 
     /// The bounds of this layout.
@@ -1006,6 +1404,8 @@ pub struct InteractiveText {
     tooltip_id: Option<TooltipId>,
     clickable_ranges: Vec<Range<usize>>,
     selection_color: Option<crate::Hsla>,
+    preserve_selection_on_update: bool,
+    selection_revision: u64,
 }
 
 struct InteractiveTextClickEvent {
@@ -1036,6 +1436,8 @@ impl InteractiveText {
             tooltip_id: None,
             clickable_ranges: Vec::new(),
             selection_color: None,
+            preserve_selection_on_update: false,
+            selection_revision: 0,
         }
     }
 
@@ -1047,6 +1449,19 @@ impl InteractiveText {
     /// only activated when layout preserves the original text offsets.
     pub fn selectable(mut self, selection_color: impl Into<crate::Hsla>) -> Self {
         self.selection_color = Some(selection_color.into());
+        self
+    }
+
+    /// Retain the selection when text through its final selected byte is unchanged.
+    /// Updates affecting that prefix reset the selection. Disabled by default.
+    pub fn preserve_selection_on_update(mut self, preserve: bool) -> Self {
+        self.preserve_selection_on_update = preserve;
+        self
+    }
+
+    /// Change this value to reset selection even when the displayed text is unchanged.
+    pub fn selection_revision(mut self, revision: u64) -> Self {
+        self.selection_revision = revision;
         self
     }
 
@@ -1141,7 +1556,11 @@ impl Element for InteractiveText {
                             .get_or_insert_with(|| Rc::new(RefCell::new(TextSelection::new(cx))));
                         let displayed_text =
                             self.text.layout.0.borrow().as_ref().unwrap().text.clone();
-                        if selection.borrow_mut().sync_text(displayed_text) {
+                        if selection.borrow_mut().sync_text(
+                            displayed_text,
+                            self.preserve_selection_on_update,
+                            self.selection_revision,
+                        ) {
                             interactive_state.mouse_down_index.set(None);
                         }
                         window.set_focus_handle(&selection.borrow().focus, cx);

@@ -1,10 +1,8 @@
 use gpui::{prelude::*, *};
-use uic::{
-    assets::{LucideAssets, LucideIcons},
-    components::{
-        reorderable_list::{ReorderHandle, ReorderState, ReorderableList},
-        swipe_actions::{SwipeActions, SwipeActionsState, SwipeDirection, SwipeTriggered},
-    },
+use gpui_icons::{GpuiIcons, IconAssets};
+use uic::components::{
+    reorderable_list::{ReorderHandle, ReorderState, ReorderableList},
+    swipe_actions::{SwipeActions, SwipeActionsState, SwipeDirection, SwipeTriggered},
 };
 
 struct Track {
@@ -160,7 +158,7 @@ impl Render for Example {
                 .when(track.saved, |row| {
                     row.child(
                         svg()
-                            .path(LucideIcons::Heart.path())
+                            .path(GpuiIcons::LucideHeart.path())
                             .size(px(18.))
                             .text_color(rgb(0xb77b7f)),
                     )
@@ -170,7 +168,7 @@ impl Render for Example {
                         &self.order,
                         track.id,
                         svg()
-                            .path(LucideIcons::GripVertical.path())
+                            .path(GpuiIcons::LucideGripVertical.path())
                             .size(px(22.))
                             .text_color(rgb(0x8996a8)),
                     )
@@ -210,7 +208,7 @@ fn main() {
     #[cfg(target_family = "wasm")]
     gpui_platform::web_init();
     gpui_platform::application()
-        .with_assets(LucideAssets::new())
+        .with_assets(IconAssets::new())
         .run(|cx| {
             cx.open_window(
                 WindowOptions {

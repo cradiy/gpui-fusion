@@ -14,14 +14,11 @@ scheduler = { workspace = true }
 chrono = { workspace = true }
 gpui = { workspace = true }
 gpui_effects = { workspace = true }
-rust-embed = { version = "8.11", features = ["include-exclude"] }
+gpui_icons = { workspace = true, features = ["lucide-core"] }
 uic_macros = { workspace = true }
 
-[target.'cfg(any(target_os = "android", target_family = "wasm"))'.dependencies]
-# These targets cannot read assets from the build machine in debug mode.
-rust-embed = { version = "8.11", features = ["debug-embed"] }
-
 [dev-dependencies]
+gpui_icons = { workspace = true, features = ["lucide-common"] }
 gpui = { workspace = true, features = ["test-support"] }
 gpui_wgpu = { workspace = true }
 gpui_platform = { workspace = true, features = ["wayland", "font-kit"] }

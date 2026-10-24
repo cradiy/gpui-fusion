@@ -6,7 +6,7 @@ use gpui::{
     prelude::*, px, radians, rgb, svg,
 };
 
-use crate::assets::LucideIcons;
+use gpui_icons::GpuiIcons;
 
 const DEFAULT_DURATION: Duration = Duration::from_secs(3);
 
@@ -232,11 +232,11 @@ impl Render for ToastManager {
 
 fn status_icon(variant: ToastVariant, color: Hsla, id: u64) -> AnyElement {
     let icon = match variant {
-        ToastVariant::Info => LucideIcons::Info,
-        ToastVariant::Success => LucideIcons::CircleCheck,
-        ToastVariant::Warn => LucideIcons::CircleAlert,
-        ToastVariant::Error => LucideIcons::CircleX,
-        ToastVariant::Loading => LucideIcons::Loader,
+        ToastVariant::Info => GpuiIcons::LucideInfo,
+        ToastVariant::Success => GpuiIcons::LucideCircleCheck,
+        ToastVariant::Warn => GpuiIcons::LucideCircleAlert,
+        ToastVariant::Error => GpuiIcons::LucideCircleX,
+        ToastVariant::Loading => GpuiIcons::LucideLoader,
     };
     let icon = svg().path(icon).size_4().flex_none().text_color(color);
 

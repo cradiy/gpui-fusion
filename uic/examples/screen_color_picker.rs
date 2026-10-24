@@ -83,7 +83,7 @@ impl Render for Demo {
 }
 fn main() {
     gpui_platform::application()
-        .with_assets(uic::assets::LucideAssets::new())
+        .with_assets(gpui_icons::IconAssets::new())
         .run(|cx: &mut App| {
             uic::init(cx);
             cx.open_window(

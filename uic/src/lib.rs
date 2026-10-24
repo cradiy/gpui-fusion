@@ -1,7 +1,6 @@
 #![allow(clippy::module_inception)]
-pub use uic_macros::{Chainable, file_enum};
+pub use uic_macros::Chainable;
 
-pub mod assets;
 pub mod components;
 pub mod desktop;
 pub mod utils;

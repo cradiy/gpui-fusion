@@ -20,6 +20,7 @@ pub(super) struct TextSelection {
     head: usize,
     dragging: bool,
     dragged: bool,
+    revision: u64,
 }
 
 impl TextSelection {
@@ -31,12 +32,22 @@ impl TextSelection {
             head: 0,
             dragging: false,
             dragged: false,
+            revision: 0,
         }
     }
 
-    pub fn sync_text(&mut self, text: SharedString) -> bool {
-        if self.text != text {
+    pub fn sync_text(&mut self, text: SharedString, preserve: bool, revision: u64) -> bool {
+        if self.text != text || self.revision != revision {
+            let end = self.range().end;
+            let keep = preserve
+                && self.revision == revision
+                && !self.range().is_empty()
+                && text.get(..end) == self.text.get(..end);
+            self.revision = revision;
             self.text = text;
+            if keep {
+                return true;
+            }
             self.anchor = 0;
             self.head = 0;
             self.dragging = false;
@@ -69,7 +80,19 @@ fn rows(layout: &TextLayout, align: TextAlign) -> Vec<Row> {
     let mut result = Vec::new();
     let mut line_start = 0;
     let mut y = bounds.top();
-    for line in &inner.lines {
+    for (line_index, line) in inner.lines.iter().enumerate() {
+        let line_height = inner.height_for_line(line_index);
+        let indent = inner
+            .line_indents
+            .get(line_index)
+            .copied()
+            .unwrap_or_default();
+        let available_width = (bounds.size.width - indent).max(px(0.));
+        y += inner
+            .line_top_spacing
+            .get(line_index)
+            .copied()
+            .unwrap_or_default();
         for index in 0..=line.wrap_boundaries().len() {
             let range = line.row_range(index).unwrap();
             let extent = line.row_extent(index).unwrap();
@@ -78,21 +101,21 @@ fn rows(layout: &TextLayout, align: TextAlign) -> Vec<Row> {
             let width = extent.end - base_x;
             let offset = match align {
                 TextAlign::Left => px(0.),
-                TextAlign::Center => (bounds.size.width - width) / 2.,
-                TextAlign::Right => bounds.size.width - width,
+                TextAlign::Center => (available_width - width) / 2.,
+                TextAlign::Right => available_width - width,
             };
             result.push(Row {
                 range: line_start + range.start..line_start + range.end,
                 line_start,
                 layout: unwrapped.clone(),
-                origin: point(bounds.left() + offset, y),
+                origin: point(bounds.left() + indent + offset, y),
                 base_x,
                 width,
-                height: inner.line_height,
+                height: line.row_height(index, line_height),
                 newline: index == line.wrap_boundaries().len()
                     && line_start + line.len() < inner.len,
             });
-            y += inner.line_height;
+            y += line.row_height(index, line_height);
         }
         line_start += line.len() + 1;
     }
@@ -145,6 +168,9 @@ pub(super) fn selection_quads(
     }
     let mut quads = Vec::new();
     for row in rows(layout, align) {
+        if row.range.is_empty() {
+            continue;
+        }
         let end = row.line_start + row.layout.len;
         let mut newline = row.newline && selected.start <= end && selected.end > end;
         let local = selected.start.saturating_sub(row.line_start)
@@ -272,19 +298,26 @@ pub(super) fn register_handlers(
         let hitbox = hitbox.clone();
         let down = mouse_down.clone();
         move |event: &MouseDownEvent, phase, window, cx| {
-            if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+            if event.button != MouseButton::Left {
                 return;
             }
-            if !hitbox.is_hovered(window) {
+            if phase == DispatchPhase::Capture && !hitbox.is_hovered(window) {
                 let mut state = state.borrow_mut();
+                let changed = !state.range().is_empty() || state.dragging;
                 state.anchor = 0;
                 state.head = 0;
                 state.dragging = false;
+                state.dragged = false;
                 if state.focus.is_focused(window) {
                     window.blur();
                 }
                 down.set(None);
-                window.refresh();
+                if changed {
+                    window.refresh();
+                }
+                return;
+            }
+            if phase != DispatchPhase::Bubble || !hitbox.is_hovered(window) {
                 return;
             }
             let index = index_at(&rows, event.position);
@@ -481,6 +514,8 @@ mod tests {
         .collect();
         let line = WrappedLine {
             layout: Arc::new(WrappedLineLayout {
+                inline_boxes: Vec::new(),
+                inline_box_rows: Vec::new(),
                 unwrapped_layout: Arc::new(LineLayout {
                     font_size: px(16.),
                     width: px(50.),
@@ -502,6 +537,9 @@ mod tests {
             len: 7,
             lines: smallvec::smallvec![line],
             line_height: px(20.),
+            line_top_spacing: vec![px(0.)],
+            line_indents: Vec::new(),
+            line_heights: Vec::new(),
             wrap_width: None,
             size: Some(size(px(200.), px(20.))),
             bounds: Some(Bounds::new(
@@ -522,6 +560,252 @@ mod tests {
         let rows = rows(&layout, TextAlign::Right);
         assert_eq!(index_at(&rows, point(px(299.), px(55.))), 1);
         assert_eq!(character_at(&rows, point(px(285.), px(55.))), Some(3));
+    }
+
+    #[crate::test]
+    fn line_typography_preserves_wrapped_hit_testing_and_selection(cx: &mut TestAppContext) {
+        let (_, mut visual) = setup(cx, TextAlign::Left);
+        let source = "Aperture\n\n光谱 measurements across bands\nNotes";
+        let large_start = source.find('光').unwrap();
+        for width in [300., 110.] {
+            let text = StyledText::new(source).with_line_typography(vec![
+                crate::TextLineTypography {
+                    line_start: 0,
+                    font_size: px(28.),
+                    line_height: px(38.),
+                },
+                crate::TextLineTypography {
+                    line_start: large_start,
+                    font_size: px(22.),
+                    line_height: px(32.),
+                },
+            ]);
+            let layout = text.layout().clone();
+            visual.draw(
+                point(px(0.), px(0.)),
+                size(
+                    crate::AvailableSpace::Definite(px(width)),
+                    crate::AvailableSpace::MinContent,
+                ),
+                move |_, _| {
+                    div()
+                        .w(px(width))
+                        .text_size(px(16.))
+                        .line_height(px(24.))
+                        .whitespace_normal()
+                        .child(text)
+                },
+            );
+            let visual_rows = rows(&layout, TextAlign::Left);
+            assert!(visual_rows.len() > 4);
+            for row in &visual_rows {
+                let (font_size, height) = if row.line_start == 0 {
+                    (28., 38.)
+                } else if row.line_start == large_start {
+                    (22., 32.)
+                } else {
+                    (16., 24.)
+                };
+                assert_eq!(row.layout.font_size, px(font_size));
+                assert_eq!(row.height, px(height));
+                if !row.range.is_empty() {
+                    assert_eq!(
+                        index_at(&visual_rows, row.origin + point(px(0.1), row.height / 2.)),
+                        row.range.start
+                    );
+                    let quads = selection_quads(
+                        &layout,
+                        row.range.clone(),
+                        TextAlign::Left,
+                        crate::black(),
+                    );
+                    assert!(!quads.is_empty());
+                    assert!(
+                        quads
+                            .iter()
+                            .all(|quad| quad.bounds.size.height == row.height)
+                    );
+                }
+            }
+            for pair in visual_rows.windows(2) {
+                assert_eq!(pair[1].origin.y, pair[0].origin.y + pair[0].height);
+            }
+        }
+    }
+
+    #[crate::test]
+    fn line_spacing_preserves_wrapped_selection_and_source_coordinates(cx: &mut TestAppContext) {
+        let (_, mut visual) = setup(cx, TextAlign::Left);
+        let source = "Title\nSeveral words wrap onto following rows.\nEnd";
+        for width in [180., 90.] {
+            let mut layouts = Vec::new();
+            for spacing in [Vec::new(), vec![(6, px(32.))]] {
+                let text = StyledText::new(source).with_line_top_spacing(spacing);
+                layouts.push(text.layout().clone());
+                visual.draw(
+                    point(px(0.), px(0.)),
+                    size(
+                        crate::AvailableSpace::Definite(px(width)),
+                        crate::AvailableSpace::MinContent,
+                    ),
+                    move |_, _| {
+                        div()
+                            .w(px(width))
+                            .text_size(px(16.))
+                            .line_height(px(24.))
+                            .whitespace_normal()
+                            .child(text)
+                    },
+                );
+            }
+            let original = rows(&layouts[0], TextAlign::Left);
+            let spaced = rows(&layouts[1], TextAlign::Left);
+            assert_eq!(original.len(), spaced.len());
+            for (before, after) in original.iter().zip(&spaced) {
+                assert_eq!(before.range, after.range);
+                let expected_gap = if after.line_start >= 6 {
+                    px(32.)
+                } else {
+                    px(0.)
+                };
+                assert_eq!(after.origin.y, before.origin.y + expected_gap);
+            }
+            let start = layouts[1].position_for_index(6).unwrap();
+            assert_eq!(
+                layouts[1].index_for_position(start + point(px(0.), px(1.))),
+                Ok(6)
+            );
+            assert_eq!(character_at(&spaced, start - point(px(0.), px(8.))), None);
+            let quads = selection_quads(
+                &layouts[1],
+                0..source.len(),
+                TextAlign::Left,
+                crate::black(),
+            );
+            assert!(
+                quads
+                    .iter()
+                    .all(|quad| quad.bounds.bottom() <= start.y - px(32.)
+                        || quad.bounds.top() >= start.y)
+            );
+            assert_eq!(layouts[1].text(), source);
+        }
+    }
+
+    #[crate::test]
+    fn indented_prefixes_share_wrapping_hit_testing_and_selection_geometry(
+        cx: &mut TestAppContext,
+    ) {
+        let (_, mut visual) = setup(cx, TextAlign::Left);
+        for width in [150., 72.] {
+            let mut reference_rows = None;
+            for prefix in ["[ ] ", "[x] ", "87. ", "509. "] {
+                let source = format!("{prefix}A boat returns before sunset.");
+                let len = source.len();
+                let text = StyledText::new(source.clone()).with_line_indents(vec![
+                    crate::TextLineIndent {
+                        line_start: 0,
+                        prefix_len: prefix.len(),
+                        width: px(32.),
+                    },
+                ]);
+                let layout = text.layout().clone();
+                visual.draw(
+                    point(px(0.), px(0.)),
+                    size(
+                        crate::AvailableSpace::Definite(px(width)),
+                        crate::AvailableSpace::MinContent,
+                    ),
+                    move |_, _| {
+                        div()
+                            .w(px(width))
+                            .text_size(px(16.))
+                            .line_height(px(24.))
+                            .whitespace_normal()
+                            .child(text)
+                    },
+                );
+                let shaped_rows = rows(&layout, TextAlign::Left);
+                assert!(shaped_rows.len() > 1);
+                let content_rows: Vec<_> = shaped_rows
+                    .iter()
+                    .map(|row| {
+                        assert_eq!(row.origin.x, px(32.));
+                        (
+                            row.range.start.saturating_sub(prefix.len()),
+                            row.range.end - prefix.len(),
+                        )
+                    })
+                    .collect();
+                if let Some(reference) = &reference_rows {
+                    assert_eq!(&content_rows, reference);
+                } else {
+                    reference_rows = Some(content_rows);
+                }
+                for row in &shaped_rows {
+                    let index = row.range.start.max(prefix.len());
+                    let position = layout.position_for_index(index).unwrap();
+                    assert_eq!(
+                        position.x,
+                        px(32.),
+                        "prefix={prefix:?} row={:?} position={position:?}",
+                        row.range
+                    );
+                    assert_eq!(
+                        character_at(&shaped_rows, position + point(px(0.5), px(1.))),
+                        Some(index)
+                    );
+                }
+                assert!(
+                    selection_quads(&layout, 0..len, TextAlign::Left, crate::black())
+                        .iter()
+                        .all(|quad| quad.bounds.left() >= px(32.))
+                );
+                assert_eq!(layout.text(), source);
+            }
+        }
+    }
+
+    #[crate::test]
+    fn compact_empty_lines_keep_source_and_following_hit_geometry(cx: &mut TestAppContext) {
+        let (_, mut visual) = setup(cx, TextAlign::Left);
+        let source = "Lime\n\nIris";
+        let text = StyledText::new(source).with_empty_line_heights(vec![(5, px(8.)), (6, px(2.))]);
+        let layout = text.layout().clone();
+        visual.draw(
+            point(px(0.), px(0.)),
+            size(
+                crate::AvailableSpace::Definite(px(180.)),
+                crate::AvailableSpace::MinContent,
+            ),
+            move |_, _| {
+                div()
+                    .w(px(180.))
+                    .text_size(px(16.))
+                    .line_height(px(24.))
+                    .child(text)
+            },
+        );
+        let shaped_rows = rows(&layout, TextAlign::Left);
+        assert_eq!(
+            shaped_rows.iter().map(|row| row.height).collect::<Vec<_>>(),
+            vec![px(24.), px(8.), px(24.)]
+        );
+        let start = layout.position_for_index(6).unwrap();
+        assert_eq!(start.y, px(32.));
+        assert_eq!(
+            character_at(&shaped_rows, start + point(px(1.), px(1.))),
+            Some(6)
+        );
+        assert_eq!(
+            layout.index_for_position(start + point(px(1.), px(1.))),
+            Ok(6)
+        );
+        let quads = selection_quads(&layout, 6..source.len(), TextAlign::Left, crate::black());
+        assert_eq!(quads.len(), 1);
+        assert_eq!(quads[0].bounds.top(), start.y);
+        assert_eq!(quads[0].bounds.size.height, px(24.));
+        assert_eq!(layout.text(), source);
     }
 
     fn setup(cx: &mut TestAppContext, align: TextAlign) -> (WindowHandle<Demo>, VisualTestContext) {
@@ -654,22 +938,74 @@ mod tests {
     }
 
     #[crate::test]
-    fn selectable_text_highlights_wrapped_and_empty_lines(cx: &mut TestAppContext) {
+    fn selectable_text_skips_empty_row_highlights_but_copies_newlines(cx: &mut TestAppContext) {
         let (window, mut visual) = setup(cx, TextAlign::Right);
-        window
+        let expected = window
             .update(&mut visual.cx, |view, _, _| {
                 let rows = rows(&view.layout, view.align);
                 assert!(rows.len() > 4);
+                assert!(rows.iter().any(|row| row.range.is_empty()));
                 let quads =
                     selection_quads(&view.layout, 0..view.text.len(), view.align, crate::blue());
-                assert_eq!(quads.len(), rows.len());
-                for (quad, row) in quads.iter().zip(&rows) {
+                let visible_rows: Vec<_> =
+                    rows.iter().filter(|row| !row.range.is_empty()).collect();
+                assert_eq!(quads.len(), visible_rows.len());
+                for (quad, row) in quads.iter().zip(visible_rows) {
                     assert_eq!(quad.bounds.origin, row.origin);
                     assert!(quad.bounds.size.width > px(0.));
                     assert_eq!(quad.bounds.size.height, row.height);
                 }
+                view.text.to_string()
             })
             .unwrap();
+        let start = position(window, &mut visual, 0);
+        visual.simulate_click(start, Default::default());
+        visual.simulate_keystrokes(&crate::platform_shortcut("ctrl-a"));
+        assert_eq!(copy(&mut visual), Some(expected));
+    }
+
+    #[crate::test]
+    fn selecting_another_text_clears_previous_highlights(cx: &mut TestAppContext) {
+        struct Pair;
+        impl Render for Pair {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .flex()
+                    .flex_col()
+                    .text_size(px(16.))
+                    .line_height(px(24.))
+                    .child(
+                        InteractiveText::new("first", StyledText::new("Copper"))
+                            .selectable(crate::black()),
+                    )
+                    .child(
+                        InteractiveText::new("second", StyledText::new("Silver"))
+                            .selectable(crate::black()),
+                    )
+            }
+        }
+        let window = cx.open_window(size(px(300.), px(200.)), |_, _| Pair);
+        let mut visual = VisualTestContext::from_window(window.into(), cx);
+        visual.update(|window, cx| {
+            window.draw(cx).clear();
+        });
+        for y in [12., 36., 12.] {
+            visual.simulate_click(point(px(4.), px(y)), Default::default());
+            visual.update(|window, cx| {
+                window.draw(cx).clear();
+                assert!(window.rendered_frame.scene.quads.is_empty());
+            });
+            visual.simulate_keystrokes(&crate::platform_shortcut("ctrl-a"));
+            visual.update(|window, cx| {
+                window.draw(cx).clear();
+                assert_eq!(window.rendered_frame.scene.quads.len(), 1);
+            });
+        }
+        visual.simulate_click(point(px(250.), px(150.)), Default::default());
+        visual.update(|window, cx| {
+            window.draw(cx).clear();
+            assert!(window.rendered_frame.scene.quads.is_empty());
+        });
     }
 
     #[crate::test]

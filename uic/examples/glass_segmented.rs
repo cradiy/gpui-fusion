@@ -2,10 +2,8 @@ use gpui::{
     Bounds, Context, FontWeight, Hsla, IntoElement, Render, Window, WindowBounds, WindowOptions,
     div, prelude::*, px, rgb, rgba, size, svg,
 };
-use uic::{
-    assets::{LucideAssets, LucideIcons},
-    components::glass::{GlassSegmentedAppearance, GlassSegmentedControl},
-};
+use gpui_icons::{GpuiIcons, IconAssets};
+use uic::components::glass::{GlassSegmentedAppearance, GlassSegmentedControl};
 
 struct Demo {
     selected: usize,
@@ -17,7 +15,7 @@ struct Demo {
     disabled: bool,
 }
 
-fn tab(icon: LucideIcons, label: &'static str, color: Hsla) -> impl IntoElement {
+fn tab(icon: GpuiIcons, label: &'static str, color: Hsla) -> impl IntoElement {
     div()
         .w(px(64.))
         .flex()
@@ -68,10 +66,10 @@ impl Demo {
         .animated(self.animated)
         .reduced_transparency(self.opaque)
         .disabled(self.disabled)
-        .option(0, tab(LucideIcons::House, "Overview", color))
-        .option(1, tab(LucideIcons::Activity, "Activity", color))
-        .option(2, tab(LucideIcons::Folder, "Files", color))
-        .disabled_option(3, tab(LucideIcons::Archive, "Archived", color))
+        .option(0, tab(GpuiIcons::LucideHouse, "Overview", color))
+        .option(1, tab(GpuiIcons::LucideActivity, "Activity", color))
+        .option(2, tab(GpuiIcons::LucideFolder, "Files", color))
+        .disabled_option(3, tab(GpuiIcons::LucideArchive, "Archived", color))
         .on_change(move |value, _, cx| {
             entity.update(cx, |this, cx| {
                 if vertical {
@@ -282,7 +280,7 @@ impl Render for Demo {
 
 fn main() {
     gpui_platform::application()
-        .with_assets(LucideAssets::new())
+        .with_assets(IconAssets::new())
         .run(|cx| {
             uic::init(cx);
             cx.open_window(

@@ -1,0 +1,521 @@
+#![cfg(feature = "markdown")]
+use gpui_richtext::{BlockKind, ListMarker, Registry, markdown};
+
+#[test]
+fn late_reference_resolution_preserves_distinct_disclosure_and_code_identities() {
+    let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
+    stream.push_str("[Release][index]\n\n<details>\n<summary>Build output</summary>\n\n```text\nfirst\n```\n\n</details>\n\n<details>\n<summary>Build output</summary>\n\n```text\nsecond\n```\n\n</details>\n").unwrap();
+    let before = stream.flush().unwrap();
+    let identities = |projection: &gpui_richtext::Projection| {
+        projection
+            .blocks()
+            .iter()
+            .filter_map(|block| {
+                if let BlockKind::Details { body, .. } = &block.kind {
+                    Some((
+                        block.node,
+                        body.blocks()
+                            .iter()
+                            .map(|block| block.node)
+                            .collect::<Vec<_>>(),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    let original = identities(&before);
+    assert_ne!(original[0].0, original[1].0);
+    stream.push_str("\n[index]: app:builds\n").unwrap();
+    let after = stream.flush().unwrap();
+    assert_ne!(before.text(), after.text());
+    assert_eq!(identities(&after), original);
+}
+
+#[test]
+fn disclosures_parse_nested_markdown_without_consuming_fenced_tags() {
+    let source = "<details open>\n<summary>Diagnostics &amp; logs</summary>\n\nRead [report](app:report).\n\n```html\n</details>\n```\n\n<details>\n<summary>Trace</summary>\n\n| Key | Value |\n| --- | --- |\n| Mode | Debug |\n\n</details>\n\n</details>\n\nAfter.\n";
+    let registry = Registry::with_standard_nodes();
+    let projection = registry.compile(&markdown::parse(source).unwrap()).unwrap();
+    let BlockKind::Details { details, body } = &projection.blocks()[0].kind else {
+        panic!("missing details")
+    };
+    assert!(details.open);
+    assert_eq!(details.summary.as_ref(), "Diagnostics & logs");
+    assert_eq!(body.links()[0].target.as_ref(), "app:report");
+    let code = body
+        .blocks()
+        .iter()
+        .find(|block| matches!(block.kind, BlockKind::Code { .. }))
+        .unwrap();
+    assert_eq!(&body.text()[code.range.clone()], "</details>\n");
+    let BlockKind::Details {
+        details: nested,
+        body: nested_body,
+    } = &body.blocks()[2].kind
+    else {
+        panic!("missing nested details")
+    };
+    assert!(!nested.open);
+    assert!(matches!(nested_body.blocks()[0].kind, BlockKind::Table(_)));
+    assert!(projection.text().ends_with("\n\nAfter."));
+    let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    assert_eq!(stream.finish().unwrap().text(), projection.text());
+}
+
+#[test]
+fn heading_fragments_resolve_unicode_duplicates_explicit_ids_and_image_links() {
+    let source = "[First](#温度) [Second](#温度-1) [Named](#sensor) [Encoded](#%E6%B8%A9%E5%BA%A6)\n\n# **温度**\n\n## 温度\n\n## Display `mode` {#sensor}\n\n[![Jump](jump.svg)](#sensor)\n\n# footnote-1\n\nText[^detail].\n\n[^detail]: Additional data.\n";
+    let registry = Registry::with_standard_nodes();
+    let projection = registry.compile(&markdown::parse(source).unwrap()).unwrap();
+    for link in projection
+        .links()
+        .iter()
+        .filter(|link| link.kind == gpui_richtext::LinkKind::Anchor)
+    {
+        assert!(
+            projection
+                .anchors()
+                .iter()
+                .any(|anchor| anchor.name == link.target)
+        );
+    }
+    let first = projection
+        .anchors()
+        .iter()
+        .find(|anchor| anchor.name.as_ref() == "heading:温度")
+        .unwrap();
+    assert!(projection.text()[first.offset..].starts_with("温度"));
+    assert_eq!(projection.links()[0].target, projection.links()[3].target);
+    let image = projection
+        .blocks()
+        .iter()
+        .find_map(|block| match &block.kind {
+            BlockKind::Image(image) => Some(image),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(image.link_kind, gpui_richtext::LinkKind::Anchor);
+    assert_eq!(image.link.as_deref(), Some("heading:sensor"));
+    assert!(!projection.text().contains("{#sensor}"));
+    assert!(markdown::parse("# One {#same}\n\n# Two {#same}").is_err());
+    let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    let streamed = stream.finish().unwrap();
+    assert_eq!(
+        format!("{:?}", streamed.anchors()),
+        format!("{:?}", projection.anchors())
+    );
+}
+
+#[test]
+fn table_images_compile_during_streaming_without_absorbing_adjacent_cells() {
+    let source = "| Asset | Label |\n| --- | --- |\n| Before [![图](plot.svg)](app:plot) after | **Legend** |\n";
+    let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    let projection = stream.finish().unwrap();
+    let BlockKind::Table(table) = &projection.blocks()[0].kind else {
+        panic!("table missing")
+    };
+    let row = &table.rows[1];
+    assert_eq!(
+        &projection.text()[row.cells[0].range.clone()],
+        "Before \n\n图\n\n after"
+    );
+    assert_eq!(&projection.text()[row.cells[1].range.clone()], "Legend");
+    let link = &projection.links()[0];
+    assert_eq!(&projection.text()[link.range.clone()], "图");
+    assert_eq!(link.target.as_ref(), "app:plot");
+}
+
+#[test]
+fn linked_images_split_styled_paragraphs_without_losing_targets_or_text() {
+    let source = "**Before [![地图](map.png \"Overview\") *catalog*](app:atlas) after**.\n\n[![](empty.png)](app:empty)\n";
+    let projection = Registry::with_standard_nodes()
+        .compile(&markdown::parse(source).unwrap())
+        .unwrap();
+    let images: Vec<_> = projection
+        .blocks()
+        .iter()
+        .filter_map(|block| match &block.kind {
+            BlockKind::Image(image) => Some((block, image)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(images.len(), 2);
+    let (block, image) = images[0];
+    assert_eq!(image.link.as_deref(), Some("app:atlas"));
+    assert_eq!(image.title.as_deref(), Some("Overview"));
+    assert_eq!(&projection.text()[block.range.clone()], "地图");
+    assert!(
+        projection
+            .links()
+            .iter()
+            .any(|link| link.node == images[1].0.node
+                && link.range.is_empty()
+                && link.target.as_ref() == "app:empty")
+    );
+    let catalog = projection
+        .spans()
+        .iter()
+        .find(|span| &projection.text()[span.range.clone()] == "catalog")
+        .unwrap();
+    assert_eq!(catalog.style.font_weight, Some(gpui::FontWeight::BOLD));
+    assert_eq!(catalog.style.font_style, Some(gpui::FontStyle::Italic));
+    assert!(
+        projection
+            .links()
+            .iter()
+            .any(|link| link.range == catalog.range && link.target.as_ref() == "app:atlas")
+    );
+    assert!(projection.text().contains(" after"));
+    let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    assert_eq!(stream.finish().unwrap().text(), projection.text());
+}
+
+#[test]
+fn streamed_footnotes_number_by_reference_and_keep_all_return_destinations() {
+    let source = "Read[^beta] again[^beta], then[^alpha].\n\n[^alpha]: Alpha **内容**.\n\n[^beta]: Beta [source](https://example.org/b).\n\n    A second paragraph.\n\n[^unused]: Omitted.\n";
+    let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    let projection = stream.finish().unwrap();
+    assert!(projection.text().starts_with("Read[1] again[1], then[2]."));
+    assert!(projection.text().find("Beta").unwrap() < projection.text().find("Alpha").unwrap());
+    assert!(!projection.text().contains("Omitted"));
+    for link in projection
+        .links()
+        .iter()
+        .filter(|link| link.kind == gpui_richtext::LinkKind::Anchor)
+    {
+        let anchor = projection
+            .anchors()
+            .iter()
+            .find(|anchor| anchor.name == link.target)
+            .unwrap();
+        assert!(projection.text().is_char_boundary(anchor.offset));
+    }
+    assert_eq!(projection.anchors().len(), 5);
+    assert_eq!(
+        projection
+            .links()
+            .iter()
+            .filter(|link| link.kind == gpui_richtext::LinkKind::External)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn nested_markdown_preserves_structure_targets_and_code_source() {
+    let source = "# Data catalog\n\n> Overview\n>\n> 3. Primary **record**\n>    - [x] Validate [schema](app:schema)\n>\n>    ```rust\n>    let label = \"温度\";\n>    ```\n\n---\n\n![Diagram](assets/catalog.png)\n\n| Field | Count |\n| :--- | ---: |\n| Nodes | 12 |\n";
+    let document = markdown::parse(source).unwrap();
+    let projection = Registry::with_standard_nodes().compile(&document).unwrap();
+    let items: Vec<_> = projection
+        .blocks()
+        .iter()
+        .filter(|block| matches!(block.kind, BlockKind::ListItem { .. }))
+        .collect();
+    assert!(matches!(
+        items[0].kind,
+        BlockKind::ListItem {
+            marker: ListMarker::Number(3)
+        }
+    ));
+    assert!(matches!(
+        items[1].kind,
+        BlockKind::ListItem {
+            marker: ListMarker::Task { checked: true }
+        }
+    ));
+    assert_eq!(
+        (items[0].indent, items[1].indent, items[1].quote_depth),
+        (0, 1, 1)
+    );
+    let link = &projection.links()[0];
+    assert_eq!(link.target.as_ref(), "app:schema");
+    assert_eq!(&projection.text()[link.range.clone()], "schema");
+    let code = projection
+        .blocks()
+        .iter()
+        .find(|block| matches!(block.kind, BlockKind::Code { .. }))
+        .unwrap();
+    assert_eq!(
+        &projection.text()[code.range.clone()],
+        "let label = \"温度\";\n"
+    );
+    assert_eq!((code.indent, code.quote_depth), (1, 1));
+    assert!(
+        projection
+            .blocks()
+            .iter()
+            .any(|block| matches!(block.kind, BlockKind::Rule))
+    );
+    assert!(projection.blocks().iter().any(|block| matches!(&block.kind, BlockKind::Image(image) if image.source.as_ref() == "assets/catalog.png" && image.alt.as_ref() == "Diagram")));
+    let BlockKind::Table(table) = &projection.blocks().last().unwrap().kind else {
+        panic!("table missing")
+    };
+    assert_eq!(table.columns[1].align, gpui::TextAlign::Right);
+    assert_eq!(
+        &projection.text()[table.rows[1].cells[1].range.clone()],
+        "12"
+    );
+}
+
+#[test]
+fn image_splits_paragraph_without_losing_text_and_html_stays_literal() {
+    let document =
+        markdown::parse("Above ![Plot](plot.png) below.\n\n<span>literal</span>").unwrap();
+    let projection = Registry::with_standard_nodes().compile(&document).unwrap();
+    assert_eq!(
+        projection.text().as_ref(),
+        "Above \n\nPlot\n\n below.\n\n<span>literal</span>"
+    );
+}
+
+#[test]
+fn callout_children_keep_local_and_document_coordinates_during_streaming() {
+    let source = "Preamble\n\n> [!WARNING]\n> Read [limits](app:limits).\n>\n> > [!TIP]\n> > Cache **温度**.\n>\n> ```text\n> stable\n> ```\n\nCodec\n: Converts bytes.\n\n: Accepts a [profile](app:profile).\n\nWindow\n: A bounded interval.\n";
+    let mut stream = markdown::MarkdownStream::new(Registry::with_standard_nodes());
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    let projection = stream.finish().unwrap();
+    let callout = &projection.blocks()[1];
+    let BlockKind::Alert { alert, body } = &callout.kind else {
+        panic!("callout missing")
+    };
+    assert_eq!(alert.kind, gpui_richtext::AlertKind::Warning);
+    assert_eq!(
+        &projection.text()[callout.range.clone()],
+        body.text().as_ref()
+    );
+    let link = &body.links()[0];
+    assert_eq!(&body.text()[link.range.clone()], "limits");
+    assert_eq!(
+        projection.links()[0].range.start,
+        callout.range.start + link.range.start
+    );
+    let BlockKind::Alert { body: nested, .. } = &body.blocks()[1].kind else {
+        panic!("nested callout missing")
+    };
+    let span = nested
+        .spans()
+        .iter()
+        .find(|span| span.style.font_weight.is_some())
+        .unwrap();
+    assert_eq!(&nested.text()[span.range.clone()], "温度");
+    assert_eq!(
+        projection.offset(span.node, 0),
+        Some(callout.range.start + body.blocks()[1].range.start + span.range.start)
+    );
+    let terms: Vec<_> = projection
+        .blocks()
+        .iter()
+        .filter(|block| matches!(block.kind, BlockKind::DefinitionTerm))
+        .collect();
+    assert_eq!(terms.len(), 2);
+    let descriptions: Vec<_> = projection
+        .blocks()
+        .iter()
+        .filter(|block| block.indent == 1)
+        .collect();
+    assert_eq!(descriptions.len(), 3);
+    assert_eq!(
+        projection.links().last().unwrap().target.as_ref(),
+        "app:profile"
+    );
+}
+
+#[test]
+fn inline_html_preserves_styles_links_images_and_literal_boundaries() {
+    let source = "# <mark>Review</mark>\n\nPress <kbd>F8</kbd>; <mark>**urgent** [record](app:record) <u>later</u></mark><br>plain ` <kbd>x</kbd> ` <u>unclosed\n\n| Label | Value |\n| --- | --- |\n| <mark>Flag</mark> | <kbd>Tab</kbd> |\n\nImage <mark>before ![plot](plot.svg) after</mark>.\n\nOpaque <kbd class=\"key\">raw</kbd>.\n";
+    let theme = gpui_richtext::RichTextTheme::dark();
+    let projection = theme
+        .registry()
+        .compile(&markdown::parse(source).unwrap())
+        .unwrap();
+    assert!(
+        projection
+            .text()
+            .contains("Press F8; urgent record later\nplain <kbd>x</kbd> <u>unclosed")
+    );
+    assert!(projection.text().contains("<kbd class=\"key\">raw</kbd>"));
+    let styled = |value: &str| {
+        let start = projection.text().find(value).unwrap();
+        projection
+            .spans()
+            .iter()
+            .find(|span| span.range.contains(&start))
+            .unwrap()
+    };
+    assert_eq!(styled("F8").font_family.as_deref(), Some("monospace"));
+    assert_eq!(
+        styled("urgent").style.font_weight,
+        Some(gpui::FontWeight::BOLD)
+    );
+    assert_eq!(
+        styled("urgent").style.background_color,
+        theme.text.mark.highlight.background_color
+    );
+    assert!(styled("later").style.underline.is_some());
+    assert_eq!(
+        styled("after").style.background_color,
+        theme.text.mark.highlight.background_color
+    );
+    assert!(styled("plain").style.background_color.is_none());
+    assert_eq!(projection.links()[0].target.as_ref(), "app:record");
+    assert!(
+        projection
+            .blocks()
+            .iter()
+            .any(|block| matches!(block.kind, BlockKind::Image(_)))
+    );
+    assert!(
+        projection
+            .anchors()
+            .iter()
+            .any(|anchor| anchor.name.as_ref() == "heading:review")
+    );
+    let mut stream = markdown::MarkdownStream::new(theme.registry());
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    assert_eq!(stream.finish().unwrap().text(), projection.text());
+}
+
+#[test]
+fn link_titles_survive_reference_resolution_image_splitting_and_streaming() {
+    let source = "[Export][archive]\n\n| Action |\n| --- |\n| [**Open** ![badge](badge.svg \"Badge artwork\") bundle][archive] |\n\n[![badge](badge.svg \"Badge artwork\")][archive]\n\n[Jump](#attachments \"Attachment index\")\n\n## Attachments\n\n[archive]: app:exports \"Download &amp; inspect\"\n";
+    let registry = Registry::with_standard_nodes();
+    let projection = registry.compile(&markdown::parse(source).unwrap()).unwrap();
+    let external: Vec<_> = projection
+        .links()
+        .iter()
+        .filter(|link| link.kind == gpui_richtext::LinkKind::External)
+        .collect();
+    assert_eq!(
+        external
+            .iter()
+            .map(|link| &projection.text()[link.range.clone()])
+            .collect::<Vec<_>>(),
+        ["Export", "Open", " ", "badge", " bundle", "badge"]
+    );
+    for link in external {
+        assert_eq!(link.title.as_deref(), Some("Download & inspect"));
+        assert_eq!(link.target.as_ref(), "app:exports");
+        assert!(!projection.text()[link.range.clone()].contains("Download"));
+    }
+    let internal = projection
+        .links()
+        .iter()
+        .find(|link| link.kind == gpui_richtext::LinkKind::Anchor)
+        .unwrap();
+    assert_eq!(internal.title.as_deref(), Some("Attachment index"));
+    let image = projection
+        .blocks()
+        .iter()
+        .find_map(|block| match &block.kind {
+            BlockKind::Image(image) => Some(image),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(image.title.as_deref(), Some("Badge artwork"));
+    assert_eq!(image.link_title.as_deref(), Some("Download & inspect"));
+    let mut stream = markdown::MarkdownStream::new(registry);
+    for character in source.chars() {
+        stream.push_str(&character.to_string()).unwrap();
+        stream.flush().unwrap();
+    }
+    let streamed = stream.finish().unwrap();
+    assert_eq!(streamed.text(), projection.text());
+    assert_eq!(
+        streamed
+            .links()
+            .iter()
+            .map(|link| (&link.target, &link.title, &link.range))
+            .collect::<Vec<_>>(),
+        projection
+            .links()
+            .iter()
+            .map(|link| (&link.target, &link.title, &link.range))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn front_matter_is_separate_from_body_and_stream_publication() {
+    use markdown::FrontMatterFormat;
+    let source = "---\ncategory: reference\nsummary: |\n  ---\n  retain punctuation\n...\n# Catalog\n\nVisible description.\n\n---\n\nEnd.\n";
+    let parsed = markdown::parse_with_metadata(source).unwrap();
+    let metadata = parsed.front_matter.as_ref().unwrap();
+    assert_eq!(metadata.format, FrontMatterFormat::Yaml);
+    assert!(metadata.complete);
+    assert_eq!(
+        metadata.source.as_ref(),
+        "category: reference\nsummary: |\n  ---\n  retain punctuation\n"
+    );
+    let registry = Registry::with_standard_nodes();
+    let projection = registry.compile(&parsed.document).unwrap();
+    assert_eq!(
+        projection.text().as_ref(),
+        "Catalog\n\nVisible description.\n\n\n\nEnd."
+    );
+    assert!(
+        projection
+            .blocks()
+            .iter()
+            .any(|block| matches!(block.kind, BlockKind::Rule))
+    );
+    let mut stream = markdown::MarkdownStream::new(registry);
+    let opening_length = "---\n".len();
+    let closing_start = source.find("...\n").unwrap();
+    for (index, character) in source.char_indices() {
+        stream.push_str(&character.to_string()).unwrap();
+        let snapshot = stream.flush().unwrap();
+        if index >= opening_length && index < closing_start {
+            assert!(snapshot.text().is_empty());
+            assert!(!stream.front_matter().unwrap().complete);
+        }
+    }
+    assert_eq!(stream.finish().unwrap().text(), projection.text());
+    assert_eq!(stream.front_matter(), parsed.front_matter.as_ref());
+    stream.clear();
+    assert!(stream.front_matter().is_none());
+    stream
+        .push_str("+++\r\nrevision = 7\r\n+++\r\nBody")
+        .unwrap();
+    assert_eq!(stream.finish().unwrap().text().as_ref(), "Body");
+    let metadata = stream.front_matter().unwrap();
+    assert_eq!(metadata.format, FrontMatterFormat::Toml);
+    assert_eq!(metadata.source.as_ref(), "revision = 7\r\n");
+    assert!(metadata.complete);
+    let incomplete = markdown::parse_with_metadata("+++\nrevision = 7").unwrap();
+    assert!(!incomplete.front_matter.unwrap().complete);
+    assert!(
+        Registry::with_standard_nodes()
+            .compile(&incomplete.document)
+            .unwrap()
+            .text()
+            .is_empty()
+    );
+}

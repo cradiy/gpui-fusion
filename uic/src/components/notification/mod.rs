@@ -5,7 +5,7 @@ use gpui::{
     SharedString, StyleRefinement, Styled, Window, div, prelude::*, px, rgb, svg,
 };
 
-use crate::assets::LucideIcons;
+use gpui_icons::GpuiIcons;
 
 const DEFAULT_DURATION: Duration = Duration::from_millis(4500);
 
@@ -320,7 +320,7 @@ impl NotificationManager {
                         }))
                         .child(
                             svg()
-                                .path(LucideIcons::X)
+                                .path(GpuiIcons::LucideX)
                                 .size_4()
                                 .text_color(appearance.close_foreground),
                         ),
@@ -345,10 +345,10 @@ impl Render for NotificationManager {
 
 fn status_icon(variant: NotificationVariant, color: Hsla) -> impl IntoElement {
     let icon = match variant {
-        NotificationVariant::Info => LucideIcons::Info,
-        NotificationVariant::Success => LucideIcons::CircleCheck,
-        NotificationVariant::Warn => LucideIcons::CircleAlert,
-        NotificationVariant::Error => LucideIcons::CircleX,
+        NotificationVariant::Info => GpuiIcons::LucideInfo,
+        NotificationVariant::Success => GpuiIcons::LucideCircleCheck,
+        NotificationVariant::Warn => GpuiIcons::LucideCircleAlert,
+        NotificationVariant::Error => GpuiIcons::LucideCircleX,
     };
     svg().path(icon).size_6().flex_none().text_color(color)
 }

@@ -139,5 +139,5 @@ This is a mixed-license repository:
   See [LICENSES.md](LICENSES.md)
   for the package boundary and each package's `Cargo.toml` and `LICENSE`.
 - Third-party assets retain their original licenses. In particular, the Lucide
-  icons bundled by `uic` retain the Lucide ISC and Feather MIT license text in
-  [`uic/assets/icons/LICENSE`](uic/assets/icons/LICENSE).
+  icons bundled by `gpui_icons` retain the Lucide ISC and Feather MIT license text in
+  [`crates/gpui_icons/assets/lucide/LICENSE`](crates/gpui_icons/assets/lucide/LICENSE).

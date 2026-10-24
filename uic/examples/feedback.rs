@@ -1,14 +1,12 @@
+use gpui_icons::IconAssets;
 use std::time::Duration;
 
 use gpui::{
     Context, IntoElement, Render, SharedString, Window, WindowOptions, div, prelude::*, px, rgb,
 };
-use uic::{
-    assets::LucideAssets,
-    components::{
-        notification::{self, Notification},
-        toast::{self, ToastVariant},
-    },
+use uic::components::{
+    notification::{self, Notification},
+    toast::{self, ToastVariant},
 };
 
 struct FeedbackExample;
@@ -212,7 +210,7 @@ impl Render for FeedbackExample {
 
 fn main() {
     gpui_platform::application()
-        .with_assets(LucideAssets::new())
+        .with_assets(IconAssets::new())
         .run(|cx| {
             uic::init(cx);
             cx.open_window(WindowOptions::default(), |_, cx| {

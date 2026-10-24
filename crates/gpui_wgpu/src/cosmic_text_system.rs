@@ -320,6 +320,23 @@ impl CosmicTextSystemState {
         };
 
         let name = gpui::font_name_with_fallbacks(name, &self.system_font_fallback);
+        let name = if name == "monospace" {
+            let db = self.font_system.db();
+            let configured = db.family_name(&Family::Monospace);
+            if db
+                .faces()
+                .any(|face| face.families.iter().any(|family| family.0 == configured))
+            {
+                configured
+            } else {
+                db.faces()
+                    .find(|face| face.monospaced)
+                    .and_then(|face| face.families.first())
+                    .map_or(configured, |family| family.0.as_str())
+            }
+        } else {
+            name
+        };
 
         let families = self
             .font_system
@@ -939,6 +956,69 @@ mod tests {
 
     const LILEX_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/lilex/Lilex-Regular.ttf");
     const LILEX_BOLD: &[u8] = include_bytes!("../../../assets/fonts/lilex/Lilex-Bold.ttf");
+
+    #[test]
+    fn generic_monospace_uses_equal_advances_instead_of_proportional_fallback() {
+        let platform = Arc::new(CosmicTextSystem::new_without_system_fonts("IBM Plex Sans"));
+        platform
+            .add_fonts(vec![
+                Cow::Borrowed(LILEX_REGULAR),
+                Cow::Borrowed(include_bytes!(
+                    "../../../assets/fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf"
+                )),
+            ])
+            .unwrap();
+        for family in ["Lilex", "Missing system monospace"] {
+            {
+                let mut state = platform.0.write();
+                state.font_system.db_mut().set_monospace_family(family);
+                state.font_ids_by_family_cache.clear();
+                state.resolved_font_cache.clear();
+            }
+            let system = Arc::new(gpui::TextSystem::new(platform.clone()));
+            let window = gpui::WindowTextSystem::new(system);
+            let width = |text: &'static str| {
+                window
+                    .shape_line(
+                        text.into(),
+                        px(20.),
+                        &[gpui::TextRun {
+                            len: text.len(),
+                            font: gpui::font("monospace"),
+                            color: gpui::white(),
+                            background_color: None,
+                            underline: None,
+                            strikethrough: None,
+                        }],
+                        None,
+                    )
+                    .width
+            };
+            assert!((width("   ") - width("WWW")).abs() < px(0.01));
+            assert!((width("iii") - width("WWW")).abs() < px(0.01));
+        }
+    }
+
+    #[test]
+    fn missing_family_preserves_bold_italic() {
+        let platform = Arc::new(CosmicTextSystem::new_without_system_fonts("Lilex"));
+        platform
+            .add_fonts(vec![
+                Cow::Borrowed(LILEX_REGULAR),
+                Cow::Borrowed(include_bytes!(
+                    "../../../assets/fonts/lilex/Lilex-BoldItalic.ttf"
+                )),
+            ])
+            .unwrap();
+        let system = gpui::TextSystem::new(platform.clone());
+        let requested = gpui::font("Unavailable Typeface").bold().italic();
+        let resolved = system.resolve_font(&requested);
+        let state = platform.0.read();
+        let loaded = state.loaded_font(resolved);
+        let face = state.font_system.db().face(loaded.font.id()).unwrap();
+        assert_eq!(face.style, cosmic_text::Style::Italic);
+        assert_eq!(loaded.weight, cosmic_text::Weight::BOLD);
+    }
 
     #[test]
     fn bidi_cluster_metadata_survives_shaping() {

@@ -369,6 +369,132 @@ pub struct WrappedLine {
 }
 
 impl WrappedLine {
+    #[allow(clippy::too_many_arguments)]
+    fn paint_inline_rows(
+        &self,
+        origin: Point<Pixels>,
+        line_height: Pixels,
+        align: TextAlign,
+        bounds: Option<Bounds<Pixels>>,
+        background: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<()> {
+        for row in 0..=self.wrap_boundaries.len() {
+            let extent = self.row_extent(row).unwrap();
+            let source = &self.layout.unwrapped_layout;
+            let (ascent, descent) = self.row_metrics(row);
+            let start = row
+                .checked_sub(1)
+                .and_then(|row| self.wrap_boundaries.get(row));
+            let end = self.wrap_boundaries.get(row);
+            let layout = LineLayout {
+                font_size: source.font_size,
+                width: extent.end - extent.start,
+                ascent,
+                descent,
+                len: source.len,
+                runs: source
+                    .runs
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| {
+                        start.is_none_or(|start| *index >= start.run_ix)
+                            && end.is_none_or(|end| *index <= end.run_ix)
+                    })
+                    .map(|(index, run)| super::ShapedRun {
+                        font_id: run.font_id,
+                        glyphs: run
+                            .glyphs
+                            .iter()
+                            .take(
+                                end.filter(|end| end.run_ix == index)
+                                    .map_or(run.glyphs.len(), |end| end.glyph_ix),
+                            )
+                            .skip(
+                                start
+                                    .filter(|start| start.run_ix == index)
+                                    .map_or(0, |start| start.glyph_ix),
+                            )
+                            .cloned()
+                            .map(|mut glyph| {
+                                glyph.position.x -= extent.start;
+                                glyph
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            };
+            let origin = origin + point(px(0.), self.row_top(row, line_height));
+            let height = self.row_height(row, line_height);
+            let width = bounds.map(|bounds| bounds.size.width).or(self.wrap_width);
+            if background {
+                paint_line_background(
+                    origin,
+                    &layout,
+                    height,
+                    align,
+                    width,
+                    &self.decoration_runs,
+                    &[],
+                    window,
+                    cx,
+                )?;
+            } else {
+                paint_line(
+                    origin,
+                    &layout,
+                    height,
+                    align,
+                    width,
+                    &self.decoration_runs,
+                    &[],
+                    &[],
+                    px(0.),
+                    window,
+                    cx,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn with_inline_boxes(
+        mut self,
+        boxes: &[crate::TextInlineBox],
+        max_wraps: Option<usize>,
+    ) -> Self {
+        let mut layout = self.layout.with_inline_boxes(&self.text, boxes);
+        if let Some(max) = max_wraps {
+            layout.wrap_boundaries.truncate(max);
+            layout.resolve_inline_rows();
+        }
+        self.layout = Arc::new(layout);
+        self
+    }
+
+    pub(crate) fn with_collapsed_prefix(
+        mut self,
+        prefix_len: usize,
+        indent: Pixels,
+        max_wraps: Option<usize>,
+    ) -> Self {
+        let mut layout = self.layout.with_adjusted_spacing(
+            &self.text,
+            None,
+            prefix_len,
+            self.layout
+                .wrap_width
+                .map(|width| (width - indent).max(px(1.))),
+        );
+        if let Some(max) = max_wraps {
+            layout.wrap_boundaries.truncate(max);
+            layout.resolve_inline_rows();
+        }
+        self.layout = Arc::new(layout);
+        self
+    }
+
     /// Places tabs at multiples of `stop` pixels from the left edge of each visual row.
     /// Recomputes wrapping and caret geometry without changing text or byte offsets.
     /// Nonpositive or nonfinite stops leave the layout unchanged.
@@ -400,6 +526,10 @@ impl WrappedLine {
             Some(bounds) => Some(bounds.size.width),
             None => self.layout.wrap_width,
         };
+
+        if !self.inline_boxes.is_empty() {
+            return self.paint_inline_rows(origin, line_height, align, bounds, false, window, cx);
+        }
 
         paint_line(
             origin,
@@ -433,6 +563,9 @@ impl WrappedLine {
             None => self.layout.wrap_width,
         };
 
+        if !self.inline_boxes.is_empty() {
+            return self.paint_inline_rows(origin, line_height, align, bounds, true, window, cx);
+        }
         paint_line_background(
             origin,
             &self.layout.unwrapped_layout,

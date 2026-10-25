@@ -24,6 +24,19 @@ passes then use diagonal offsets 5.5, 10.5, 20.5, 10.5, 40.5, 20.5, 80.5 and
 2.75, contrast 1.9 and brightness 0.7. The filtered artwork is composited over
 white, followed by 50% black and 5% white overlays. Dithering is disabled by default.
 
+Use `.adaptive_layout(true)` for portrait or changing viewport aspect ratios.
+The composition maps across both viewport axes. A mirrored base color field
+covers the viewport throughout rotation, and overlay edges fade smoothly into it.
+The default width-based composition is retained when this option is disabled.
+
+Use `.downsample(divisor)` to reduce the source-compositing and blur-pass
+resolution. The divisor is clamped to `1..=8` and defaults to one. A divisor of
+four processes these stages at one quarter of each dimension. Pixel-space blur
+and twist parameters follow the reduced raster density, while the final color
+adjustment, dithering and rounded-edge clipping remain at native resolution.
+Higher divisors trade background detail for lower texture and fill costs;
+foreground content and layout are unaffected.
+
 Artwork changes crossfade for 5/3 seconds; another change during a fade retains
 the visible image mixture. Pending image loads retain the last prepared image.
 

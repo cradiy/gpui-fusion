@@ -75,6 +75,8 @@ pub fn artwork_flow(id: impl Into<ElementId>, source: impl Into<ImageSource>) ->
         source: source.into(),
         options: ArtworkFlowOptions::default(),
         time: 0.,
+        downsample: 1,
+        adaptive_layout: false,
         style: StyleRefinement::default(),
     }
 }
@@ -85,6 +87,8 @@ pub struct ArtworkFlow {
     source: ImageSource,
     options: ArtworkFlowOptions,
     time: f32,
+    downsample: u32,
+    adaptive_layout: bool,
     style: StyleRefinement,
 }
 
@@ -92,6 +96,22 @@ impl ArtworkFlow {
     /// Replaces the appearance parameters.
     pub fn options(mut self, options: ArtworkFlowOptions) -> Self {
         self.options = options;
+        self
+    }
+
+    /// Distributes layers over both viewport axes, with a mirrored full-coverage
+    /// base and feathered overlays. Useful for portrait and changing aspect ratios.
+    /// Defaults to false, which preserves the width-based composition.
+    pub fn adaptive_layout(mut self, enabled: bool) -> Self {
+        self.adaptive_layout = enabled;
+        self
+    }
+
+    /// Reduces the source and blur-pass resolution by a divisor clamped to `1..=8`.
+    /// Color adjustment, dithering and rounded edges remain at native resolution.
+    /// Layout and image-change crossfades are unchanged. Defaults to one.
+    pub fn downsample(mut self, divisor: u32) -> Self {
+        self.downsample = divisor.clamp(1, 8);
         self
     }
 
@@ -309,29 +329,47 @@ impl Element for ArtworkFlow {
             .corner_radii
             .to_pixels(window.rem_size())
             .clamp_radii_for_quad_size(bounds.size);
-        let effect = PaintEffect::new(bounds, artwork_flow_shader())
-            .image(current, 0)
-            .second_image(previous, 0)
-            .uniforms(
-                self.options
-                    .uniforms(self.time, blend)
-                    .with_slot(6, [900. * window.raster_scale_factor(), -3.25, 0., 0.]),
-            );
-        let passes = processing_passes(
-            self.options,
-            window.raster_scale_factor(),
-            [
-                f32::from(radii.top_left),
-                f32::from(radii.top_right),
-                f32::from(radii.bottom_right),
-                f32::from(radii.bottom_left),
-            ]
-            .map(|r| r * window.raster_scale_factor()),
-        );
+        let corners = [
+            f32::from(radii.top_left),
+            f32::from(radii.top_right),
+            f32::from(radii.bottom_right),
+            f32::from(radii.bottom_left),
+        ]
+        .map(|r| r * window.raster_scale_factor());
+        let options = self.options;
+        let time = self.time;
+        let downsample = self.downsample;
+        let adaptive = if self.adaptive_layout { 1. } else { 0. };
+        let paint_source = move |window: &mut Window| {
+            let effect = PaintEffect::new(bounds, artwork_flow_shader())
+                .image(current, 0)
+                .second_image(previous, 0)
+                .uniforms(options.uniforms(time, blend).with_slot(
+                    6,
+                    [900. * window.raster_scale_factor(), -3.25, adaptive, 0.],
+                ));
+            let _ = window.paint_effect(effect);
+        };
         style.paint(bounds, window, cx, move |window, _| {
-            window.with_subtree_effect_chain(bounds, &passes, 1., |window| {
-                let _ = window.paint_effect(effect);
-            });
+            if downsample > 1 {
+                let color = color_pass(options, corners);
+                window.with_subtree_effect(
+                    bounds,
+                    color.shader,
+                    color.uniforms,
+                    0.,
+                    1.,
+                    |window| {
+                        window.with_subtree_raster_scale(1. / downsample as f32, |window| {
+                            let passes = blur_passes(window.raster_scale_factor());
+                            window.with_subtree_effect_chain(bounds, &passes, 1., paint_source);
+                        });
+                    },
+                );
+            } else {
+                let passes = processing_passes(options, window.raster_scale_factor(), corners);
+                window.with_subtree_effect_chain(bounds, &passes, 1., paint_source);
+            }
         });
     }
 }
@@ -346,27 +384,35 @@ fn processing_passes(
     scale: f32,
     corners: [f32; 4],
 ) -> Vec<gpui::SubtreeEffectPass> {
-    let pass = |shader, uniforms| gpui::SubtreeEffectPass {
-        shader,
-        uniforms,
-        time: 0.,
-        images: Default::default(),
-        bloom: None,
-        feedback: None,
-        distance_field: None,
-        particles: None,
-        particle_transition: None,
-    };
+    let mut passes = blur_passes(scale);
+    passes.push(color_pass(options, corners));
+    passes
+}
+
+fn blur_passes(scale: f32) -> Vec<gpui::SubtreeEffectPass> {
     let mut passes = Vec::with_capacity(9);
-    for offset in [5.5, 10.5, 20.5, 10.5, 40.5, 20.5, 80.5, 40.5] {
-        passes.push(pass(
-            artwork_flow_blur_shader(),
-            EffectUniforms::new().with_slot(0, [offset * scale, 0., 0., 0.]),
-        ));
-    }
-    passes.push(pass(
-        artwork_flow_color_shader(),
-        EffectUniforms::new()
+    passes.extend(
+        [5.5, 10.5, 20.5, 10.5, 40.5, 20.5, 80.5, 40.5]
+            .into_iter()
+            .map(|offset| gpui::SubtreeEffectPass {
+                shader: artwork_flow_blur_shader(),
+                uniforms: EffectUniforms::new().with_slot(0, [offset * scale, 0., 0., 0.]),
+                time: 0.,
+                images: Default::default(),
+                bloom: None,
+                feedback: None,
+                distance_field: None,
+                particles: None,
+                particle_transition: None,
+            }),
+    );
+    passes
+}
+
+fn color_pass(options: ArtworkFlowOptions, corners: [f32; 4]) -> gpui::SubtreeEffectPass {
+    gpui::SubtreeEffectPass {
+        shader: artwork_flow_color_shader(),
+        uniforms: EffectUniforms::new()
             .with_slot(
                 0,
                 [
@@ -377,8 +423,14 @@ fn processing_passes(
                 ],
             )
             .with_slot(1, corners),
-    ));
-    passes
+        time: 0.,
+        images: Default::default(),
+        bloom: None,
+        feedback: None,
+        distance_field: None,
+        particles: None,
+        particle_transition: None,
+    }
 }
 
 /// Four-corner Kawase sampling over the previously composited artwork.
@@ -451,7 +503,18 @@ mod tests {
         use gpui_wgpu::WgpuOffscreenRenderer;
         use std::borrow::Cow;
 
-        for (width, height) in [(64, 96), (96, 64)] {
+        let coverage_shader = EffectShader::wgsl_two_images(format!(
+            "{}\nfn effect(input: EffectInput, params: EffectParams) -> vec4<f32> {{ let alpha = flow_alpha(input, params).a; return vec4<f32>(vec3<f32>(alpha), 1.0); }}",
+            include_str!("shaders/artwork_flow.wgsl").replace("fn effect(", "fn flow_alpha("),
+        ));
+        for (width, height, adaptive) in [
+            (64, 96, false),
+            (96, 64, false),
+            (72, 168, false),
+            (72, 168, true),
+            (168, 72, true),
+            (96, 96, true),
+        ] {
             let mut renderer =
                 WgpuOffscreenRenderer::new(size(DevicePixels(width), DevicePixels(height)))?;
             let current = prepare_artwork(&image(|x, y| {
@@ -489,32 +552,9 @@ mod tests {
                 point(ScaledPixels(0.), ScaledPixels(0.)),
                 size(ScaledPixels(width as f32), ScaledPixels(height as f32)),
             );
-            let mut render = |time, blend, motion| {
-                let mut content = Scene::default();
-                content.insert_primitive(EffectQuad {
-                    order: 0,
-                    bounds,
-                    effect_bounds: bounds,
-                    content_mask: ContentMask { bounds },
-                    transformation: Default::default(),
-                    corner_radii: Default::default(),
-                    shader: artwork_flow_shader(),
-                    uniforms: ArtworkFlowOptions::default()
-                        .motion(motion)
-                        .uniforms(time, blend)
-                        .with_slot(6, [90., -3.25, 0., 0.]),
-                    time: 0.,
-                    opacity: 1.,
-                    image_tile: Some(current),
-                    second_image_tile: Some(previous),
-                    third_image_tile: None,
-                    fourth_image_tile: None,
-                });
-                content.finish();
-                let mut passes = processing_passes(ArtworkFlowOptions::default(), 0.1, [0.; 4]);
+            let layer = |content, bounds, mut passes: Vec<gpui::SubtreeEffectPass>| {
                 let last = passes.pop().unwrap();
-                let mut scene = Scene::default();
-                scene.insert_primitive(gpui::Primitive::SubtreeLayer(gpui::SubtreeLayer {
+                gpui::Primitive::SubtreeLayer(gpui::SubtreeLayer {
                     scene: std::rc::Rc::new(content),
                     second_scene: None,
                     scene3d: None,
@@ -535,12 +575,75 @@ mod tests {
                         third_image_tile: None,
                         fourth_image_tile: None,
                     },
-                }));
+                })
+            };
+            let mut render = |time, blend, motion, downsample: u32| {
+                let density = 1. / downsample as f32;
+                let source_bounds = bounds.map(|value| ScaledPixels(value.0 * density));
+                let mut content = Scene::default();
+                content.insert_primitive(EffectQuad {
+                    order: 0,
+                    bounds: source_bounds,
+                    effect_bounds: source_bounds,
+                    content_mask: ContentMask {
+                        bounds: source_bounds,
+                    },
+                    transformation: Default::default(),
+                    corner_radii: Default::default(),
+                    shader: artwork_flow_shader(),
+                    uniforms: ArtworkFlowOptions::default()
+                        .motion(motion)
+                        .uniforms(time, blend)
+                        .with_slot(
+                            6,
+                            [90. * density, -3.25, if adaptive { 1. } else { 0. }, 0.],
+                        ),
+                    time: 0.,
+                    opacity: 1.,
+                    image_tile: Some(current),
+                    second_image_tile: Some(previous),
+                    third_image_tile: None,
+                    fourth_image_tile: None,
+                });
+                content.finish();
+                if adaptive && downsample == 1 {
+                    content.effects[0].shader = coverage_shader.clone();
+                    let coverage = renderer.render_rgba(&content)?;
+                    assert!(
+                        coverage
+                            .chunks_exact(4)
+                            .all(|pixel| pixel[..3].iter().all(|v| *v >= 254)),
+                        "adaptive layers must cover the viewport before blur at {width}x{height}, time {time}"
+                    );
+                    content.effects[0].shader = artwork_flow_shader();
+                }
+                let mut scene = Scene::default();
+                if downsample > 1 {
+                    let mut reduced = Scene::default();
+                    reduced.raster_scale = Some(density);
+                    reduced.insert_primitive(layer(
+                        content,
+                        source_bounds,
+                        blur_passes(0.1 * density),
+                    ));
+                    reduced.finish();
+                    scene.insert_primitive(layer(
+                        reduced,
+                        bounds,
+                        vec![color_pass(ArtworkFlowOptions::default(), [0.; 4])],
+                    ));
+                } else {
+                    scene.insert_primitive(layer(
+                        content,
+                        bounds,
+                        processing_passes(ArtworkFlowOptions::default(), 0.1, [0.; 4]),
+                    ));
+                }
                 scene.finish();
                 renderer.render_rgba(&scene)
             };
-            let first = render(0., 1., 1.)?;
-            let later = render(20., 1., 1.)?;
+            let first = render(0., 1., 1., 1)?;
+            let later = render(20., 1., 1., 1)?;
             assert!(
                 first
                     .iter()
@@ -549,9 +652,9 @@ mod tests {
                     .count()
                     > first.len() / 10
             );
-            assert_eq!(render(0., 1., 0.)?, render(20., 1., 0.)?);
-            let outgoing = render(0., 0., 1.)?;
-            if width > height {
+            assert_eq!(render(0., 1., 0., 1)?, render(20., 1., 0., 1)?);
+            let outgoing = render(0., 0., 1., 1)?;
+            if adaptive || width > height {
                 for channel in 0..3 {
                     let values = outgoing.chunks_exact(4).map(|pixel| pixel[channel]);
                     let minimum = values.clone().min().unwrap();
@@ -562,11 +665,42 @@ mod tests {
                     );
                 }
             }
-            let middle = render(0., 0.5, 1.)?;
+            if adaptive {
+                for time in [20., 90.] {
+                    let moved = render(time, 0., 1., 1)?;
+                    assert!(
+                        moved
+                            .iter()
+                            .zip(&outgoing)
+                            .all(|(a, b)| a.abs_diff(*b) <= 1),
+                        "rotating a constant opaque field must not reveal viewport edges"
+                    );
+                }
+            }
+            let middle = render(0., 0.5, 1., 1)?;
             assert_ne!(outgoing, first);
             assert_ne!(middle, outgoing);
             assert_ne!(middle, first);
             assert!(first.chunks_exact(4).all(|pixel| pixel[3] == 255));
+            for divisor in [2, 4, 8] {
+                let reduced = render(0., 1., 1., divisor)?;
+                assert!(reduced.chunks_exact(4).all(|pixel| pixel[3] == 255));
+                let error = reduced
+                    .iter()
+                    .zip(&first)
+                    .map(|(a, b)| u64::from(a.abs_diff(*b)))
+                    .sum::<u64>() as f64
+                    / first.len() as f64;
+                let tolerance = if divisor <= 4 { 4. } else { 12. };
+                assert!(
+                    error < tolerance,
+                    "downsample {divisor}: mean channel error {error}"
+                );
+                assert_eq!(render(0., 1., 0., divisor)?, render(20., 1., 0., divisor)?);
+                let mixed = render(0., 0.5, 1., divisor)?;
+                assert_ne!(mixed, reduced);
+                assert_ne!(mixed, render(0., 0., 1., divisor)?);
+            }
         }
         Ok(())
     }

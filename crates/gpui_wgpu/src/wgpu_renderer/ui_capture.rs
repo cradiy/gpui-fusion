@@ -207,7 +207,7 @@ impl WgpuRenderer {
             if let Some(scale) = layer.scene.raster_scale {
                 anyhow::ensure!(
                     scale.is_finite()
-                        && scale >= 1.
+                        && scale >= 0.125
                         && layer.scene3d.is_none()
                         && layer.second_scene.is_none()
                         && layer.intermediate_effects.is_empty(),

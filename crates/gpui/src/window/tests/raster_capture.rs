@@ -386,7 +386,18 @@ fn raster_capture_updates_glyph_atlas_and_cached_paint_without_moving_layout_or_
     renders.set(0);
     let mut logical_bounds = None;
     let mut previous_tile = None;
-    for (density, count) in [(1., 0), (1., 0), (2., 1), (2., 1), (1., 2), (2., 3)] {
+    for (density, count) in [
+        (1., 0),
+        (1., 0),
+        (2., 1),
+        (2., 1),
+        (1., 2),
+        (2., 3),
+        (0.5, 4),
+        (0.5, 4),
+        (0.25, 5),
+        (1., 6),
+    ] {
         handle
             .update(cx, |root, _, cx| {
                 root.density = density;

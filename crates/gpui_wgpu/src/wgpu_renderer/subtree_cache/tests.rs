@@ -167,6 +167,8 @@ fn raster_capture_preserves_offset_alpha_and_nested_density() -> anyhow::Result<
         (3., false),
         (2., true),
         (1., false),
+        (0.5, false),
+        (0.25, false),
     ] {
         let total_density = density * if nested { 2. } else { 1. };
         let mut source = Scene::default();

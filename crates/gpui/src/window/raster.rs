@@ -19,7 +19,7 @@ fn limited_scale(multiplier: f32, size: Size<ScaledPixels>, padding: f32) -> f32
         .min(4.)
         .min(8192. / width.max(height))
         .min((16_777_216. / (width * height)).sqrt())
-        .max(1.);
+        .max(multiplier.min(1.));
     let fits = |scale: f32| {
         let width = f64::from((width * scale).ceil() + padding);
         let height = f64::from((height * scale).ceil() + padding);
@@ -44,11 +44,13 @@ fn limited_scale(multiplier: f32, size: Size<ScaledPixels>, padding: f32) -> f32
 }
 
 impl Window {
-    /// Paints an isolated subtree at a higher raster density without changing layout or input.
+    /// Paints an isolated subtree at a chosen raster density without changing layout or input.
     /// Use inside both `prepaint_subtree_effect` and a single-pass `with_subtree_effect`.
-    /// The multiplier must be finite and at least one. It is capped at four and reduced
+    /// The multiplier must be finite and at least one eighth. Values below one
+    /// downsample the capture; values above one are capped at four and budgeted
     /// using the full viewport to fit 8192 pixels per axis and 16,777,216 pixels.
-    /// Native density is never reduced. Unsupported backends keep normal density.
+    /// Upsampling requests retain at least native density. Unsupported backends
+    /// keep normal density. Shaders must use the resulting raster scale for pixel units.
     pub fn with_subtree_raster_scale<R>(
         &mut self,
         multiplier: f32,
@@ -61,7 +63,8 @@ impl Window {
     /// Pass the same bounds and multiplier during prepaint and paint, inside a single-pass
     /// subtree effect. Compatible WGPU captures use region limits; viewport-sized effects
     /// use full-window limits. A change requiring full-window capture may redraw the frame
-    /// at safe density before presentation. Native density is never reduced.
+    /// at safe density before presentation. Values below one deliberately downsample;
+    /// upsampling requests retain at least native density.
     pub fn with_subtree_raster_scale_in<R>(
         &mut self,
         bounds: Bounds<Pixels>,
@@ -78,7 +81,7 @@ impl Window {
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
         self.invalidator.debug_assert_paint_or_prepaint();
-        assert!(multiplier.is_finite() && multiplier >= 1.);
+        assert!(multiplier.is_finite() && multiplier >= 0.125);
         if !self.supports_subtree_effects() {
             return f(self);
         }

@@ -152,6 +152,24 @@ the normal executable entry unchanged. The same example runs on desktop with
 Use a normal GPUI window; additional windows and native popups are unsupported.
 In-window overlays remain available.
 
+The built-in Android logger defaults to Debug in debug builds and Info in release
+builds. Pass a `log::LevelFilter` expression in the entry attribute to configure it
+before JNI and renderer initialization:
+
+```rust,ignore
+#[gpui_platform::main(android_log_level = log::LevelFilter::Warn)]
+fn main() {
+    // Create and run the application.
+}
+```
+
+All levels, including Off and Trace, are supported. Expressions may call an
+application configuration function. This option affects Android only. Setting
+`log::set_max_level` inside `main` changes later logging but cannot filter earlier
+initialization. A manually maintained loader can call
+`gpui_android::initialize_with_log_level(vm, entry, level)`. Existing application
+loggers are preserved.
+
 The application is created on the first nonzero Surface size, not in Activity
 `onCreate`. It uses Android's main Looper. Foreground work is posted through a
 Handler and background work uses Rust workers. Visible, resumed, focused Views

@@ -29,6 +29,38 @@ fn custom_pipelines_reuse_isolate_and_release() -> anyhow::Result<()> {
         EffectPipelineKind::SubtreeImages,
     ];
     let renderer = create(&context, wgpu::CompositeAlphaMode::Opaque)?;
+    let prepare = renderer
+        .prepare_effect_pipelines(vec![shader.clone()], vec![shader.clone()])
+        .unwrap();
+    std::thread::spawn(prepare).join().unwrap()?;
+    let (capture_base, capture_effect) = {
+        let cache = context.pipeline_cache.lock().unwrap();
+        (
+            cache.pipelines[&super::super::PipelineKey {
+                format,
+                alpha: wgpu::CompositeAlphaMode::PreMultiplied,
+                samples: renderer.rendering_params.path_sample_count,
+                dual_source: renderer.dual_source_blending,
+            }]
+                .clone(),
+            cache.effects.pipelines[&EffectPipelineKey {
+                shader: shader.id().as_u64(),
+                format,
+                alpha: wgpu::CompositeAlphaMode::PreMultiplied,
+                kind: EffectPipelineKind::Quad,
+            }]
+                .clone(),
+        )
+    };
+    let warmed = [EffectPipelineKind::Quad, EffectPipelineKind::Subtree].map(|kind| {
+        context.pipeline_cache.lock().unwrap().effects.pipelines[&EffectPipelineKey {
+            shader: shader.id().as_u64(),
+            format,
+            alpha: wgpu::CompositeAlphaMode::Opaque,
+            kind,
+        }]
+            .clone()
+    });
     let mut originals = Vec::new();
     for kind in kinds {
         let pipeline = renderer.shared_effect_pipeline(format, &shader, kind)?;
@@ -38,6 +70,12 @@ fn custom_pipelines_reuse_isolate_and_release() -> anyhow::Result<()> {
                 .iter()
                 .all(|other: &Weak<wgpu::RenderPipeline>| !other.ptr_eq(&weak))
         );
+        if kind != EffectPipelineKind::SubtreeImages {
+            assert!(
+                warmed.iter().any(|prepared| prepared.ptr_eq(&weak)),
+                "normal rendering must reuse the worker-prepared pipeline"
+            );
+        }
         originals.push(weak);
     }
     let original_backdrop = Arc::downgrade(&renderer.shared_backdrop_effect_pipeline(&backdrop)?);
@@ -65,6 +103,14 @@ fn custom_pipelines_reuse_isolate_and_release() -> anyhow::Result<()> {
     let different_alpha =
         transparent.shared_effect_pipeline(format, &shader, EffectPipelineKind::Quad)?;
     assert!(!originals[0].ptr_eq(&Arc::downgrade(&different_alpha)));
+    assert!(
+        capture_base.ptr_eq(&Arc::downgrade(&transparent.resources().pipelines)),
+        "first isolated capture must reuse worker-prepared base pipelines"
+    );
+    assert!(
+        capture_effect.ptr_eq(&Arc::downgrade(&different_alpha)),
+        "first isolated capture must reuse its premultiplied effect pipeline"
+    );
     drop((different_alpha, transparent));
 
     let active = renderer.shared_effect_pipeline(format, &shader, EffectPipelineKind::Quad)?;

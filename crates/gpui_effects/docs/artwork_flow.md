@@ -48,3 +48,12 @@ or hidden. Other interface animations may use their own frame scheduling.
 
 `ArtworkFlowOptions` controls brightness, saturation, contrast, motion speed and
 stable spatial dithering. Standard sizing and rounded-corner styles apply.
+
+`prepare_artwork_flow(window, cx)` prepares the effect pipelines on the background
+executor when the active renderer supports it. Schedule it after the initial
+screen is displayed, before opening an artwork background. The returned task
+reports whether preparation is supported. WGPU prepares the presentation and
+premultiplied capture variants, including the capture renderer's base pipelines.
+To keep early navigation responsive, display the foreground while preparation is
+pending and reveal the background after the task completes. Pipelines share the
+renderer's bounded device-local cache; prepare again after device recovery.

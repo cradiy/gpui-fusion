@@ -81,6 +81,16 @@ pub fn artwork_flow(id: impl Into<ElementId>, source: impl Into<ImageSource>) ->
     }
 }
 
+/// Prepares artwork-flow pipelines on the active renderer's background executor.
+/// Call after the first screen is displayed; unsupported backends return false.
+pub fn prepare_artwork_flow(window: &Window, cx: &App) -> gpui::Task<anyhow::Result<bool>> {
+    window.prepare_effect_pipelines(
+        vec![artwork_flow_shader()],
+        vec![artwork_flow_blur_shader(), artwork_flow_color_shader()],
+        cx,
+    )
+}
+
 /// Styled artwork layers with cached image preprocessing and paint-time transforms.
 pub struct ArtworkFlow {
     id: ElementId,

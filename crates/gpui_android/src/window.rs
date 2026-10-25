@@ -795,6 +795,16 @@ impl PlatformWindow for AndroidWindowHandle {
             }
         }
     }
+    fn prepare_effect_pipelines(
+        &self,
+        quads: Vec<gpui::EffectShader>,
+        subtrees: Vec<gpui::EffectShader>,
+    ) -> Option<Box<dyn FnOnce() -> anyhow::Result<()> + Send>> {
+        self.renderer
+            .borrow()
+            .prepare_effect_pipelines(quads, subtrees)
+    }
+
     fn draw(&self, scene: &Scene) {
         let mut renderer = self.renderer.borrow_mut();
         if renderer.device_lost() {

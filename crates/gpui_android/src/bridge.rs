@@ -801,7 +801,21 @@ impl Host {
 /// Registers the Android host's JNI methods. Called by the generated entry point
 /// from the application's library loader, before constructing a `GpuiSession`.
 pub fn initialize(vm: JavaVM, entry: Entry) -> Result<()> {
-    crate::logging::initialize();
+    initialize_with_log_level(
+        vm,
+        entry,
+        if cfg!(debug_assertions) {
+            log::LevelFilter::Debug
+        } else {
+            log::LevelFilter::Info
+        },
+    )
+}
+
+/// Registers the host with an explicit built-in logger level before any JNI setup.
+/// An already installed application logger and its filtering are left intact.
+pub fn initialize_with_log_level(vm: JavaVM, entry: Entry, level: log::LevelFilter) -> Result<()> {
+    crate::logging::initialize(level);
     let vm = Arc::new(vm);
     let mut env = vm.get_env()?;
     let methods = [

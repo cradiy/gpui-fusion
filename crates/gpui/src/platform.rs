@@ -1169,6 +1169,15 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
         anyhow::bail!("native file export is unsupported by this platform")
     }
     fn draw(&self, scene: &Scene);
+    /// Returns device-local pipeline preparation work that may run off the UI thread.
+    /// Unsupported renderers return None. No drawing or presentation is performed.
+    fn prepare_effect_pipelines(
+        &self,
+        _quads: Vec<crate::EffectShader>,
+        _subtrees: Vec<crate::EffectShader>,
+    ) -> Option<Box<dyn FnOnce() -> anyhow::Result<()> + Send>> {
+        None
+    }
     /// Returns renderer diagnostics when supported; no GPU synchronization is performed.
     fn renderer_diagnostics(&self) -> Option<crate::RendererDiagnostics> {
         None

@@ -27,7 +27,7 @@ mod window;
 pub use background::{
     AndroidBackgroundExecution, BackgroundExecution, BackgroundStopReason, DataSyncNotification,
 };
-pub use bridge::{current_platform, initialize};
+pub use bridge::{current_platform, initialize, initialize_with_log_level};
 pub use jni;
 pub use permissions::{AndroidPermissions, PermissionStatus};
 pub use platform::AndroidPlatform;
@@ -36,6 +36,14 @@ pub use platform::AndroidPlatform;
 #[macro_export]
 macro_rules! android_entry {
     ($entry:path) => {
+        $crate::android_entry!(@loader $entry, $crate::initialize);
+    };
+    ($entry:path, $level:expr) => {
+        $crate::android_entry!(@loader $entry, |vm, entry| {
+            $crate::initialize_with_log_level(vm, entry, $level)
+        });
+    };
+    (@loader $entry:path, $initialize:expr) => {
         #[unsafe(no_mangle)]
         #[allow(
             clippy::main_recursion,
@@ -45,7 +53,7 @@ macro_rules! android_entry {
             vm: $crate::jni::JavaVM,
             _: *mut ::std::ffi::c_void,
         ) -> $crate::jni::sys::jint {
-            match $crate::initialize(vm, || ::std::process::Termination::report($entry())) {
+            match ($initialize)(vm, || ::std::process::Termination::report($entry())) {
                 Ok(()) => $crate::jni::sys::JNI_VERSION_1_6,
                 Err(error) => {
                     eprintln!("GPUI Android initialization failed: {error:#}");

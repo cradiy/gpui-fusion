@@ -8,11 +8,14 @@ unsafe extern "C" {
 struct AndroidLogger;
 static LOGGER: AndroidLogger = AndroidLogger;
 impl log::Log for AndroidLogger {
-    fn enabled(&self, _: &log::Metadata) -> bool {
-        true
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::max_level()
     }
 
     fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
         let text = format!("{}: {}", record.target(), record.args()).replace('\0', "�");
         let text = CString::new(text).expect("log message has no NUL bytes");
         let priority = match record.level() {
@@ -31,9 +34,9 @@ impl log::Log for AndroidLogger {
     fn flush(&self) {}
 }
 
-pub(crate) fn initialize() {
+pub(crate) fn initialize(level: log::LevelFilter) {
     if log::set_logger(&LOGGER).is_ok() {
-        log::set_max_level(log::LevelFilter::Trace);
+        log::set_max_level(level);
     }
     static PANIC_HOOK: std::sync::Once = std::sync::Once::new();
     PANIC_HOOK.call_once(|| {

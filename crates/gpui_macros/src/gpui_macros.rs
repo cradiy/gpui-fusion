@@ -19,6 +19,8 @@ use syn::{DeriveInput, Ident};
 /// Marks a synchronous `main` function as a GPUI application entry point.
 /// On Android, generates the host library loader that invokes it for each session.
 /// Other platforms use the function as their ordinary executable entry point.
+/// `android_log_level = expression` selects the built-in Android logger's
+/// `log::LevelFilter` before host initialization; other platforms ignore it.
 #[proc_macro_attribute]
 pub fn main(args: TokenStream, input: TokenStream) -> TokenStream {
     app_entry::main(args, input)

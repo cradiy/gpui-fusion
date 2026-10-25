@@ -71,6 +71,27 @@ impl Window {
         result
     }
 
+    /// Prepares custom quad and subtree pipelines on the background executor.
+    /// WGPU also prepares premultiplied capture targets and their base pipelines.
+    /// Returns false when unsupported. Entries use the renderer's bounded cache;
+    /// repeat after device recovery. This does not draw or wait for GPU execution.
+    pub fn prepare_effect_pipelines(
+        &self,
+        quads: Vec<EffectShader>,
+        subtrees: Vec<EffectShader>,
+        cx: &crate::App,
+    ) -> crate::Task<Result<bool>> {
+        match self
+            .platform_window
+            .prepare_effect_pipelines(quads, subtrees)
+        {
+            Some(prepare) => cx
+                .background_executor()
+                .spawn(async move { prepare().map(|()| true) }),
+            None => crate::Task::ready(Ok(false)),
+        }
+    }
+
     /// Returns whether isolated subtree effects are available on this window.
     pub fn supports_subtree_effects(&self) -> bool {
         self.platform_window.supports_subtree_effects()

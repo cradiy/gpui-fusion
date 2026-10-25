@@ -49,35 +49,42 @@ impl WgpuRenderer {
         samples: u32,
         dual_source: bool,
     ) -> (Arc<WgpuBindGroupLayouts>, Arc<WgpuPipelines>) {
-        let mut cache = context.pipeline_cache.lock().unwrap();
-        cache.set_device(&context.device);
-        let layouts = cache.layouts.clone().unwrap_or_else(|| {
-            let layouts = Arc::new(Self::create_bind_group_layouts(&context.device));
-            cache.layouts = Some(layouts.clone());
-            layouts
-        });
         let key = PipelineKey {
             format,
             alpha,
             samples,
             dual_source,
         };
+        let (layouts, cached) = {
+            let mut cache = context.pipeline_cache.lock().unwrap();
+            cache.set_device(&context.device);
+            let layouts = cache.layouts.clone().unwrap_or_else(|| {
+                let layouts = Arc::new(Self::create_bind_group_layouts(&context.device));
+                cache.layouts = Some(layouts.clone());
+                layouts
+            });
+            let pipelines = cache.pipelines.get(&key).and_then(Weak::upgrade);
+            (layouts, pipelines)
+        };
+        let candidate = cached.unwrap_or_else(|| {
+            let pipelines = Arc::new(Self::create_pipelines(
+                &context.device,
+                &layouts,
+                format,
+                alpha,
+                samples,
+                dual_source,
+            ));
+            pipelines
+        });
+        let mut cache = context.pipeline_cache.lock().unwrap();
+        cache.set_device(&context.device);
         let pipelines = cache
             .pipelines
             .get(&key)
             .and_then(Weak::upgrade)
-            .unwrap_or_else(|| {
-                let pipelines = Arc::new(Self::create_pipelines(
-                    &context.device,
-                    &layouts,
-                    format,
-                    alpha,
-                    samples,
-                    dual_source,
-                ));
-                cache.pipelines.insert(key, Arc::downgrade(&pipelines));
-                pipelines
-            });
+            .unwrap_or(candidate);
+        cache.pipelines.insert(key, Arc::downgrade(&pipelines));
         if let Some(index) = cache.retained.iter().position(|(cached, _)| *cached == key) {
             cache.retained.remove(index);
         } else if cache.retained.len() == RETAINED_PIPELINE_CAPACITY {

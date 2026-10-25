@@ -476,6 +476,9 @@ impl AudioPlayer {
             self.sync_backend(&player, cx);
             return result;
         }
+        if let PlaybackState::Error(error) = &self.state {
+            return Err((**error).clone());
+        }
         if self.state == PlaybackState::Ended {
             if !self.is_seekable() {
                 return Err(MediaError::unsupported(

@@ -19,6 +19,7 @@ use symphonia::core::{
 };
 
 use super::{
+    input::{AudioInput, InputState},
     output::{OutputStatus, PcmOutput, PcmOutputControl},
     player::AudioInfo,
     source::AudioSource,
@@ -28,6 +29,7 @@ use crate::{MediaError, MediaErrorKind, MediaRecovery, MediaResult, PlaybackTime
 const AUDIO_PREROLL_TARGET: Duration = Duration::from_millis(200);
 const AUDIO_BUFFER_TARGET: Duration = Duration::from_millis(500);
 const WORKER_POLL_INTERVAL: Duration = Duration::from_millis(5);
+const MAX_READ_RECOVERIES: usize = 2;
 const OUTPUT_REOPEN_TIMEOUT: Duration = Duration::from_secs(2);
 const OUTPUT_REOPEN_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -165,6 +167,7 @@ impl AudioSession {
                     #[cfg(target_os = "android")]
                     let _ = worker_platform.pause();
                     if !worker_desired.shutdown.load(Ordering::Acquire) {
+                        log::error!("Audio playback failed: {error}");
                         let _ = events.send_blocking(AudioWorkerEvent::Error(Arc::new(error)));
                     }
                 }
@@ -316,17 +319,8 @@ fn playback_worker(
     #[cfg(target_os = "android")] platform: &Arc<super::android::AndroidAudioControl>,
     events: &async_channel::Sender<AudioWorkerEvent>,
 ) -> MediaResult<()> {
-    let opened = source.open()?;
-    desired.seekable.store(opened.seekable, Ordering::Release);
-    let stream = MediaSourceStream::new(opened.source, MediaSourceStreamOptions::default());
-    let mut format = symphonia::default::get_probe()
-        .probe(
-            &opened.hint,
-            stream,
-            FormatOptions::default(),
-            MetadataOptions::default(),
-        )
-        .map_err(|error| symphonia_error("failed to detect the audio container", error))?;
+    let (mut format, mut input_state, seekable) = open_format(&source)?;
+    desired.seekable.store(seekable, Ordering::Release);
     let track = format
         .default_track(TrackType::Audio)
         .cloned()
@@ -365,8 +359,13 @@ fn playback_worker(
     *shared_timeline
         .lock()
         .unwrap_or_else(|error| error.into_inner()) =
-        PlaybackTimeline::new(Duration::ZERO, duration, opened.seekable);
+        PlaybackTimeline::new(Duration::ZERO, duration, seekable);
 
+    let mut read_recoveries = 0;
+    let mut recovered_at = Duration::ZERO;
+    let mut last_decoded_end = None::<Duration>;
+    let mut last_packet_duration = Duration::ZERO;
+    let mut discard_until = None::<Duration>;
     let mut output = None;
     let mut samples = Vec::new();
     let mut end_of_stream = false;
@@ -390,6 +389,9 @@ fn playback_worker(
                         mode,
                         track_id,
                     )?;
+                    last_decoded_end = None;
+                    discard_until = None;
+                    read_recoveries = 0;
                     desired.ready.store(false, Ordering::Release);
                     if let Some(output) = output.as_ref() {
                         output.control().set_playing(false);
@@ -397,7 +399,7 @@ fn playback_worker(
                     *shared_timeline
                         .lock()
                         .unwrap_or_else(|error| error.into_inner()) =
-                        PlaybackTimeline::new(position, duration, opened.seekable);
+                        PlaybackTimeline::new(position, duration, seekable);
                     if reopen_output {
                         resume_after_interrupt = Some(position);
                     }
@@ -411,12 +413,7 @@ fn playback_worker(
         if let Some(current) = output.as_ref() {
             match current.take_status()? {
                 OutputStatus::Ok => {
-                    update_timeline(
-                        current.position(),
-                        duration,
-                        opened.seekable,
-                        shared_timeline,
-                    );
+                    update_timeline(current.position(), duration, seekable, shared_timeline);
                 }
                 OutputStatus::Interrupted => {
                     let position = current.position();
@@ -425,7 +422,7 @@ fn playback_worker(
                     output_reopen_started = None;
                     desired.ready.store(false, Ordering::Release);
                     current.control().set_playing(false);
-                    update_timeline(position, duration, opened.seekable, shared_timeline);
+                    update_timeline(position, duration, seekable, shared_timeline);
                     // Android focus and noisy-output callbacks own pause decisions.
                     // Losing a device stream alone must preserve the current play intent.
                     #[cfg(not(target_os = "android"))]
@@ -446,12 +443,15 @@ fn playback_worker(
                 match commands.recv_timeout(WORKER_POLL_INTERVAL) {
                     Ok(AudioCommand::Seek(position, mode)) => {
                         seek(&mut *format, &mut *decoder, None, position, mode, track_id)?;
+                        last_decoded_end = None;
+                        discard_until = None;
+                        read_recoveries = 0;
                         desired.ready.store(false, Ordering::Release);
                         resume_after_interrupt = Some(position);
                         *shared_timeline
                             .lock()
                             .unwrap_or_else(|error| error.into_inner()) =
-                            PlaybackTimeline::new(position, duration, opened.seekable);
+                            PlaybackTimeline::new(position, duration, seekable);
                         end_of_stream = false;
                         ended_emitted = false;
                     }
@@ -485,6 +485,8 @@ fn playback_worker(
                             opened_output.reset(resume_at);
                         }
                         desired.ready.store(false, Ordering::Release);
+                        last_decoded_end = None;
+                        discard_until = Some(resume_at);
                         output = Some(opened_output);
                         reopen_output = false;
                         output_reopen_started = None;
@@ -515,7 +517,7 @@ fn playback_worker(
                 };
                 if !desired.ready.swap(true, Ordering::AcqRel) {
                     apply_desired_output(output, desired, shared_output);
-                    let info = audio_info(output, duration, opened.seekable, codec);
+                    let info = audio_info(output, duration, seekable, codec);
                     let _ = events.send_blocking(AudioWorkerEvent::Ready(info));
                 }
                 if output.is_drained() && !ended_emitted {
@@ -525,7 +527,7 @@ fn playback_worker(
                     #[cfg(target_os = "android")]
                     let _ = platform.pause();
                     let position = duration.unwrap_or_else(|| output.position());
-                    update_timeline(position, duration, opened.seekable, shared_timeline);
+                    update_timeline(position, duration, seekable, shared_timeline);
                     let _ = events.send_blocking(AudioWorkerEvent::Ended);
                 }
             }
@@ -539,6 +541,9 @@ fn playback_worker(
                         mode,
                         track_id,
                     )?;
+                    last_decoded_end = None;
+                    discard_until = None;
+                    read_recoveries = 0;
                     desired.ready.store(false, Ordering::Release);
                     if let Some(output) = output.as_ref() {
                         output.control().set_playing(false);
@@ -566,7 +571,7 @@ fn playback_worker(
             if !desired.ready.swap(true, Ordering::AcqRel) {
                 let output = output.as_ref().expect("audio output exists after preroll");
                 apply_desired_output(output, desired, shared_output);
-                let info = audio_info(output, duration, opened.seekable, codec);
+                let info = audio_info(output, duration, seekable, codec);
                 let _ = events.send_blocking(AudioWorkerEvent::Ready(info));
             }
             thread::sleep(WORKER_POLL_INTERVAL);
@@ -586,7 +591,58 @@ fn playback_worker(
                 log::debug!("symphonia skipped malformed audio packet: {error}");
                 continue;
             }
-            Err(error) => return Err(symphonia_error("failed to read an audio packet", error)),
+            Err(error) => {
+                let near_end = input_state.at_known_end()
+                    && duration
+                        .zip(last_decoded_end)
+                        .is_some_and(|(duration, end)| {
+                            duration.saturating_sub(end)
+                                <= last_packet_duration.min(Duration::from_millis(100))
+                        });
+                if matches!(&error, SymphoniaError::IoError(error) if error.kind() == std::io::ErrorKind::UnexpectedEof)
+                    && near_end
+                {
+                    log::warn!(
+                        "Discarding an incomplete final audio packet near {last_decoded_end:?}: {error}"
+                    );
+                    if let Some(output) = output.as_mut() {
+                        output.flush();
+                    }
+                    end_of_stream = true;
+                    continue;
+                }
+                let retryable = matches!(&error, SymphoniaError::IoError(error) if matches!(error.kind(),
+                    std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::Interrupted |
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut));
+                if seekable && retryable && read_recoveries < MAX_READ_RECOVERIES {
+                    let resume = last_decoded_end.unwrap_or_default();
+                    read_recoveries += 1;
+                    recovered_at = resume;
+                    log::warn!(
+                        "Recovering audio input at {resume:?}, attempt {read_recoveries}: {error}"
+                    );
+                    thread::sleep(Duration::from_millis(50));
+                    match reopen_format(&source, track_id, resume) {
+                        Ok((reopened, progress)) => {
+                            format = reopened;
+                            input_state = progress;
+                            decoder.reset();
+                            discard_until = Some(resume);
+                            continue;
+                        }
+                        Err(recovery_error) => {
+                            log::warn!("Could not recover audio input: {recovery_error}");
+                        }
+                    }
+                }
+                return Err(symphonia_error(
+                    format!(
+                        "failed to read audio near {:.2}s after {read_recoveries} recovery attempts",
+                        last_decoded_end.unwrap_or_default().as_secs_f64()
+                    ),
+                    error,
+                ));
+            }
         };
         if packet.track_id != track_id {
             continue;
@@ -622,13 +678,82 @@ fn playback_worker(
             output = Some(opened_output);
             reopen_output = false;
         }
+        let packet_start = track
+            .time_base
+            .and_then(|base| base.calc_time(packet.pts))
+            .and_then(std_duration);
+        let packet_duration = Duration::from_secs_f64(
+            decoded.samples_interleaved() as f64 / f64::from(channels) / f64::from(sample_rate),
+        );
+        last_packet_duration = packet_duration;
+        if let Some(start) = packet_start {
+            last_decoded_end = Some(
+                last_decoded_end
+                    .unwrap_or_default()
+                    .max(start.saturating_add(packet_duration)),
+            );
+            if start.saturating_sub(recovered_at) >= Duration::from_secs(5) {
+                read_recoveries = 0;
+            }
+        }
+        let skip = discard_until.zip(packet_start).map_or(0, |(until, start)| {
+            let frames = (until.saturating_sub(start).as_nanos() * u128::from(sample_rate))
+                .div_ceil(1_000_000_000);
+            usize::try_from(frames)
+                .unwrap_or(usize::MAX)
+                .saturating_mul(usize::from(channels))
+        });
+        if skip >= decoded.samples_interleaved() {
+            continue;
+        }
+        discard_until = None;
         samples.resize(decoded.samples_interleaved(), f32::MID);
         decoded.copy_to_slice_interleaved(&mut samples);
+        if skip > 0 {
+            samples.drain(..skip);
+        }
         output
             .as_mut()
             .expect("audio output was opened for the decoded format")
             .enqueue(&samples);
     }
+}
+
+fn open_format(
+    source: &AudioSource,
+) -> MediaResult<(Box<dyn FormatReader>, Arc<InputState>, bool)> {
+    let opened = source.open()?;
+    let (input, state) = AudioInput::new(opened.source);
+    let stream = MediaSourceStream::new(Box::new(input), MediaSourceStreamOptions::default());
+    let format = symphonia::default::get_probe()
+        .probe(
+            &opened.hint,
+            stream,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )
+        .map_err(|error| symphonia_error("failed to detect the audio container", error))?;
+    Ok((format, state, opened.seekable))
+}
+
+fn reopen_format(
+    source: &AudioSource,
+    track_id: u32,
+    resume: Duration,
+) -> MediaResult<(Box<dyn FormatReader>, Arc<InputState>)> {
+    let (mut format, state, _) = open_format(source)?;
+    let time = SymphoniaTime::try_from_nanos_u128(resume.as_nanos())
+        .ok_or_else(|| MediaError::invalid_input("audio position exceeds the supported range"))?;
+    format
+        .seek(
+            SymphoniaSeekMode::Accurate,
+            SeekTo::Time {
+                time,
+                track_id: Some(track_id),
+            },
+        )
+        .map_err(|error| symphonia_error("failed to restore audio input position", error))?;
+    Ok((format, state))
 }
 
 fn seek(
@@ -731,13 +856,16 @@ fn std_duration(time: symphonia::core::units::Time) -> Option<Duration> {
 }
 
 fn symphonia_error(context: impl std::fmt::Display, error: SymphoniaError) -> MediaError {
-    let kind = match error {
-        SymphoniaError::IoError(_) => MediaErrorKind::Io {
-            kind: std::io::ErrorKind::Other,
-        },
+    let recovery = if matches!(&error, SymphoniaError::IoError(_)) {
+        MediaRecovery::Retry
+    } else {
+        MediaRecovery::None
+    };
+    let kind = match &error {
+        SymphoniaError::IoError(error) => MediaErrorKind::Io { kind: error.kind() },
         SymphoniaError::Unsupported(_) => MediaErrorKind::UnsupportedCodec,
         SymphoniaError::SeekError(_) => MediaErrorKind::UnsupportedOperation,
         _ => MediaErrorKind::Decode,
     };
-    MediaError::from_error(kind, MediaRecovery::None, context, error)
+    MediaError::from_error(kind, recovery, context, error)
 }

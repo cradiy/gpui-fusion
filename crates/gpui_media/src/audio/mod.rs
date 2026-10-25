@@ -1,6 +1,8 @@
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(not(target_family = "wasm"))]
+mod input;
+#[cfg(not(target_family = "wasm"))]
 mod output;
 mod player;
 mod source;

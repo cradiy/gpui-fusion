@@ -123,7 +123,13 @@ fn software_extraction_is_independent_of_an_automatic_session() {
 #[ignore = "requires GStreamer MP4 and H.264 decoding plugins"]
 fn playback_preroll_and_reload_report_decoder_without_stale_observations() {
     let (sink, output) = MediaOutputSink::channel();
-    let session = GstreamerPlayback::new(&source(), None, sink).unwrap();
+    let session = GstreamerPlayback::new(
+        &source(),
+        gpui_media_core::MediaPlaybackMode::AudioVideo,
+        None,
+        sink,
+    )
+    .unwrap();
     let audio_sink = gst::ElementFactory::make("fakesink").build().unwrap();
     session.playbin.set_property("audio-sink", audio_sink);
     let tracker = DecoderTracker::default();
@@ -167,4 +173,34 @@ fn playback_preroll_and_reload_report_decoder_without_stale_observations() {
     drop(session);
     assert!(tracker.0.lock().unwrap().is_empty());
     assert_video_decoder(frame.decoder_info().unwrap());
+}
+
+#[test]
+fn audio_only_session_has_no_video_or_subtitle_sink() {
+    use crate::MediaPlaybackSession;
+    let (sink, _) = gpui_media_core::MediaOutputSink::channel_for(
+        gpui_media_core::MediaPlaybackMode::AudioOnly,
+    );
+    let session = GstreamerPlayback::new(
+        &source(),
+        gpui_media_core::MediaPlaybackMode::AudioOnly,
+        None,
+        sink,
+    )
+    .unwrap();
+    assert!(session.appsink.is_none());
+    assert!(
+        session
+            .playbin
+            .property::<Option<gst::Element>>("video-sink")
+            .is_none()
+    );
+    assert!(
+        session
+            .playbin
+            .property::<Option<gst::Element>>("text-sink")
+            .is_none()
+    );
+    assert!(!session.capabilities().video);
+    assert!(!session.capabilities().frame_stepping);
 }

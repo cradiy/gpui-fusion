@@ -2761,6 +2761,7 @@ dependencies = [
 name = "gpui_media"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-channel",
  "base64 0.22.1",
  "cpal",
@@ -2768,6 +2769,8 @@ dependencies = [
  "gpui_media_backend",
  "gpui_media_core",
  "gpui_platform",
+ "gpui_util",
+ "jni 0.21.1",
  "js-sys",
  "log",
  "symphonia",
@@ -2917,6 +2920,7 @@ dependencies = [
  "async-channel",
  "jni 0.21.1",
  "log",
+ "ndk-context",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

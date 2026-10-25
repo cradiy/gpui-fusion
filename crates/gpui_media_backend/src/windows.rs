@@ -22,17 +22,18 @@ use windows::{
             CLSID_MFMediaEngineClassFactory, IMFMediaEngine, IMFMediaEngineClassFactory,
             IMFMediaEngineEx, IMFMediaEngineNotify, IMFMediaEngineNotify_Impl, IMFTimedText,
             IMFTimedTextCue, IMFTimedTextNotify, IMFTimedTextNotify_Impl, IMFTimedTextTrackList,
-            MF_MEDIA_ENGINE_CALLBACK, MF_MEDIA_ENGINE_EVENT_BUFFERINGENDED,
-            MF_MEDIA_ENGINE_EVENT_CANPLAY, MF_MEDIA_ENGINE_EVENT_CANPLAYTHROUGH,
-            MF_MEDIA_ENGINE_EVENT_ENDED, MF_MEDIA_ENGINE_EVENT_ERROR,
-            MF_MEDIA_ENGINE_EVENT_FIRSTFRAMEREADY, MF_MEDIA_ENGINE_EVENT_LOADEDDATA,
-            MF_MEDIA_ENGINE_EVENT_PLAYING, MF_MEDIA_ENGINE_EVENT_SEEKED,
-            MF_MEDIA_ENGINE_EVENT_TRACKSCHANGE, MF_MEDIA_ENGINE_VIDEO_OUTPUT_FORMAT,
-            MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_AVG_BITRATE,
-            MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_SD_LANGUAGE, MF_SD_STREAM_NAME,
-            MF_TIMED_TEXT_CUE_EVENT, MF_TIMED_TEXT_CUE_EVENT_ACTIVE, MF_VERSION, MFARGB,
-            MFCreateAttributes, MFMediaType_Audio, MFMediaType_Subtitle, MFMediaType_Video,
-            MFSTARTUP_FULL, MFShutdown, MFStartup, MFVideoNormalizedRect,
+            MF_MEDIA_ENGINE_AUDIOONLY, MF_MEDIA_ENGINE_CALLBACK,
+            MF_MEDIA_ENGINE_EVENT_BUFFERINGENDED, MF_MEDIA_ENGINE_EVENT_CANPLAY,
+            MF_MEDIA_ENGINE_EVENT_CANPLAYTHROUGH, MF_MEDIA_ENGINE_EVENT_ENDED,
+            MF_MEDIA_ENGINE_EVENT_ERROR, MF_MEDIA_ENGINE_EVENT_FIRSTFRAMEREADY,
+            MF_MEDIA_ENGINE_EVENT_LOADEDDATA, MF_MEDIA_ENGINE_EVENT_PLAYING,
+            MF_MEDIA_ENGINE_EVENT_SEEKED, MF_MEDIA_ENGINE_EVENT_TRACKSCHANGE,
+            MF_MEDIA_ENGINE_VIDEO_OUTPUT_FORMAT, MF_MT_AUDIO_NUM_CHANNELS,
+            MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_AVG_BITRATE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE,
+            MF_SD_LANGUAGE, MF_SD_STREAM_NAME, MF_TIMED_TEXT_CUE_EVENT,
+            MF_TIMED_TEXT_CUE_EVENT_ACTIVE, MF_VERSION, MFARGB, MFCreateAttributes,
+            MFMediaType_Audio, MFMediaType_Subtitle, MFMediaType_Video, MFSTARTUP_FULL, MFShutdown,
+            MFStartup, MFVideoNormalizedRect,
         },
         System::Com::{
             CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
@@ -45,7 +46,7 @@ use windows::{
 
 use gpui_media_core::{
     AudioStreamInfo, FrameExtractionSession, FrameExtractorBackendRequest, MediaBackendEvent,
-    MediaCapabilities, MediaError, MediaErrorKind, MediaInfo, MediaOutputSink,
+    MediaCapabilities, MediaError, MediaErrorKind, MediaInfo, MediaOutputSink, MediaPlaybackMode,
     MediaPlaybackRequest, MediaPlaybackSession, MediaRecovery, MediaResult, MediaStreamId,
     PlaybackBuffer, PlaybackTimeline, SeekMode, SubtitleCue, SubtitleEvent, SubtitleFormat,
     SubtitleStreamInfo, VideoFrame, VideoStreamInfo,
@@ -111,6 +112,7 @@ struct WindowsPlayback {
     worker: Option<JoinHandle<()>>,
     media_info: Arc<RwLock<Option<Arc<MediaInfo>>>>,
     subtitles: bool,
+    mode: MediaPlaybackMode,
 }
 
 impl WindowsPlayback {
@@ -119,12 +121,14 @@ impl WindowsPlayback {
         let (commands, command_rx) = mpsc::channel();
         let (initialized_tx, initialized_rx) = mpsc::sync_channel(1);
         let source_uri = request.source.uri().to_owned();
+        let mode = request.mode;
         let media_info = Arc::new(RwLock::new(None));
         let media_info_for_worker = media_info.clone();
         let worker = std::thread::Builder::new()
-            .name("gpui-video-media-foundation".into())
+            .name("gpui-media-foundation".into())
             .spawn(move || {
-                let result = MediaFoundationWorker::new(&source_uri, output, media_info_for_worker);
+                let result =
+                    MediaFoundationWorker::new(&source_uri, output, media_info_for_worker, mode);
                 match result {
                     Ok(mut worker) => {
                         let subtitles = worker.timed_text.is_some();
@@ -150,6 +154,7 @@ impl WindowsPlayback {
             worker: Some(worker),
             media_info,
             subtitles,
+            mode,
         })
     }
 
@@ -176,14 +181,14 @@ impl Drop for WindowsPlayback {
 impl MediaPlaybackSession for WindowsPlayback {
     fn capabilities(&self) -> MediaCapabilities {
         MediaCapabilities {
-            video: true,
+            video: self.mode == MediaPlaybackMode::AudioVideo,
             audio: true,
             subtitles: self.subtitles,
             seeking: true,
             accurate_seeking: true,
             playback_rate: true,
-            frame_stepping: true,
-            frame_extraction: true,
+            frame_stepping: self.mode == MediaPlaybackMode::AudioVideo,
+            frame_extraction: self.mode == MediaPlaybackMode::AudioVideo,
             transport_switching: false,
         }
     }
@@ -357,7 +362,7 @@ impl IMFTimedTextNotify_Impl for TimedTextNotify_Impl {
 
 struct MediaFoundationWorker {
     engine: IMFMediaEngine,
-    imaging_factory: IWICImagingFactory,
+    imaging_factory: Option<IWICImagingFactory>,
     native_events: Receiver<NativeEvent>,
     output: MediaOutputSink,
     media_info: Arc<RwLock<Option<Arc<MediaInfo>>>>,
@@ -376,6 +381,7 @@ impl MediaFoundationWorker {
         source_uri: &str,
         output: MediaOutputSink,
         media_info: Arc<RwLock<Option<Arc<MediaInfo>>>>,
+        mode: MediaPlaybackMode,
     ) -> MediaResult<Self> {
         unsafe {
             CoInitializeEx(None, COINIT_MULTITHREADED)
@@ -399,12 +405,18 @@ impl MediaFoundationWorker {
                             error,
                         )
                     })?;
-            let imaging_factory: IWICImagingFactory =
-                CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).map_err(
-                    |error| {
-                        windows_backend_error("failed to create Windows Imaging factory", error)
-                    },
-                )?;
+            let imaging_factory: Option<IWICImagingFactory> = if mode
+                == MediaPlaybackMode::AudioVideo
+            {
+                Some(
+                    CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)
+                        .map_err(|error| {
+                            windows_backend_error("failed to create Windows Imaging factory", error)
+                        })?,
+                )
+            } else {
+                None
+            };
 
             let (event_tx, native_events) = mpsc::channel();
             let (timed_text_change_tx, timed_text_changes) = mpsc::channel();
@@ -420,19 +432,34 @@ impl MediaFoundationWorker {
                 .map_err(|error| {
                     windows_backend_error("failed to set Media Foundation callback", error)
                 })?;
-            attributes
-                .SetUINT32(
-                    &MF_MEDIA_ENGINE_VIDEO_OUTPUT_FORMAT,
-                    DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32,
-                )
+            if mode == MediaPlaybackMode::AudioVideo {
+                attributes
+                    .SetUINT32(
+                        &MF_MEDIA_ENGINE_VIDEO_OUTPUT_FORMAT,
+                        DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32,
+                    )
+                    .map_err(|error| {
+                        windows_backend_error(
+                            "failed to select Media Foundation video output",
+                            error,
+                        )
+                    })?;
+            }
+            let flags = if mode == MediaPlaybackMode::AudioOnly {
+                MF_MEDIA_ENGINE_AUDIOONLY.0 as u32
+            } else {
+                0
+            };
+            let engine = factory
+                .CreateInstance(flags, &attributes)
                 .map_err(|error| {
-                    windows_backend_error("failed to select Media Foundation video output", error)
+                    windows_backend_error("failed to create Media Foundation media engine", error)
                 })?;
-
-            let engine = factory.CreateInstance(0, &attributes).map_err(|error| {
-                windows_backend_error("failed to create Media Foundation media engine", error)
-            })?;
-            let timed_text = engine.cast::<IMFTimedText>().ok();
+            let timed_text = if mode == MediaPlaybackMode::AudioVideo {
+                engine.cast::<IMFTimedText>().ok()
+            } else {
+                None
+            };
             let timed_text_notify = if let Some(timed_text) = &timed_text {
                 timed_text.SetInBandEnabled(true).map_err(|error| {
                     windows_backend_error(
@@ -895,12 +922,17 @@ impl MediaFoundationWorker {
             });
         if recreate {
             let bitmap = unsafe {
-                self.imaging_factory.CreateBitmap(
-                    width,
-                    height,
-                    &GUID_WICPixelFormat32bppBGRA,
-                    WICBitmapCacheOnLoad,
-                )
+                self.imaging_factory
+                    .as_ref()
+                    .ok_or_else(|| {
+                        MediaError::unsupported("audio-only playback has no video output")
+                    })?
+                    .CreateBitmap(
+                        width,
+                        height,
+                        &GUID_WICPixelFormat32bppBGRA,
+                        WICBitmapCacheOnLoad,
+                    )
             }
             .map_err(|error| {
                 windows_backend_error("failed to allocate Media Foundation output bitmap", error)
@@ -1104,6 +1136,7 @@ impl WindowsFrameExtractor {
         let playback = WindowsPlayback::new(
             MediaPlaybackRequest {
                 source: request.source,
+                mode: MediaPlaybackMode::AudioVideo,
                 output_capabilities: None,
             },
             sink,

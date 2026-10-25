@@ -121,6 +121,15 @@ impl AudioSource {
         matches!(self.kind, AudioSourceKind::Stream(_))
     }
 
+    pub(crate) fn media_source(&self) -> MediaResult<MediaSource> {
+        match &self.kind {
+            AudioSourceKind::Media(source) => Ok(source.clone()),
+            AudioSourceKind::Stream(_) => Err(MediaError::unsupported(
+                "system media backends require a reopenable audio source",
+            )),
+        }
+    }
+
     #[cfg(target_family = "wasm")]
     pub(crate) fn browser_source(&self) -> MediaResult<MediaSource> {
         match &self.kind {

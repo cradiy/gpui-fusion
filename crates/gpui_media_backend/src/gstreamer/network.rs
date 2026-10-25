@@ -57,7 +57,7 @@ pub(crate) fn configure_playbin_progressive_download(
     set_playbin_flag(playbin, "download", enabled);
 }
 
-fn set_playbin_flag(playbin: &gst::Element, nick: &str, enabled: bool) {
+pub(super) fn set_playbin_flag(playbin: &gst::Element, nick: &str, enabled: bool) {
     let current = playbin.property_value("flags");
     let Some(flags_class) = gst::glib::FlagsClass::with_type(current.type_()) else {
         log::debug!("playbin flags property is not a GLib flags type");

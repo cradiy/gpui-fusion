@@ -1,6 +1,9 @@
 # Configure media support
 
-Enable the `video` Cargo feature to use `VideoPlayer` and inject `SystemBackend`:
+The `audio` feature enables `AudioPlayer`, its built-in decoder, and optional
+backend sessions. The `video` feature adds frame presentation through
+`VideoPlayer`. Backend selection does not require video. To configure a video
+player with `SystemBackend`:
 
 ```toml
 [dependencies]
@@ -29,6 +32,7 @@ For GPUiForge Android projects, select the host modules in `gpuiforge.json`:
 | Feature | Enable when using |
 | --- | --- |
 | `media` | `SystemBackend` playback or frame extraction |
+| `audio-playback` | Built-in `AudioPlayer` audio focus, output disconnection handling and optional wake locks; no Media3 dependency |
 | `files` | System file selection and document access |
 | `media-notifications` | `SystemMediaSession` notifications and transport controls |
 | `background-media` | Explicit background playback leases; includes `media-notifications` |
@@ -44,9 +48,11 @@ Add only the permissions needed by the application to
 Run `gpuiforge sync` after changing the configuration. Manually maintained
 hosts must include the matching modules and dependencies themselves.
 
-## Desktop dependencies
+## System backend dependencies
 
-Linux and macOS require GStreamer development libraries at build time and
+The built-in `AudioPlayer` does not require a system media backend or GStreamer.
+
+For `SystemBackend`, Linux and macOS require GStreamer development libraries at build time and
 runtime libraries with the plugins needed by the source media. Select at least
 one version feature on `gpui_media_backend`: `v1_24` (default), `v1_26`, or
 `v1_28`. These require GStreamer 1.24, 1.26 or 1.28 respectively. Features are

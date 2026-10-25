@@ -98,10 +98,18 @@ pub enum TransportChange {
     Reconfigured,
 }
 
+/// Track families requested by a playback client.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MediaPlaybackMode {
+    AudioOnly,
+    AudioVideo,
+}
+
 /// Data supplied when a media backend opens a playback session.
 #[derive(Clone, Debug)]
 pub struct MediaPlaybackRequest {
     pub source: MediaSource,
+    pub mode: MediaPlaybackMode,
     pub output_capabilities: Option<FrameOutputCapabilities>,
 }
 
@@ -154,6 +162,15 @@ impl MediaOutputSink {
                 counters,
             },
         )
+    }
+
+    /// Creates playback channels with video delivery disabled for audio-only clients.
+    pub fn channel_for(mode: MediaPlaybackMode) -> (Self, MediaOutput) {
+        let (sink, output) = Self::channel();
+        if mode == MediaPlaybackMode::AudioOnly {
+            output.video_frames.close();
+        }
+        (sink, output)
     }
 
     /// Publishes a decoded frame, replacing a stale frame that has not yet
@@ -369,6 +386,24 @@ mod tests {
         )
         .unwrap();
         Arc::new(VideoFrame::new(Arc::new(surface), None, None))
+    }
+
+    #[test]
+    fn audio_channels_disable_video_without_closing_playback_events() {
+        let (sink, output) =
+            super::MediaOutputSink::channel_for(super::MediaPlaybackMode::AudioOnly);
+        assert!(output.video_frames.is_closed());
+        assert!(!sink.publish_video_frame(frame(1)));
+        assert!(output.video_frames.try_recv().is_err());
+        assert!(sink.emit(super::MediaBackendEvent::Ready));
+        assert!(matches!(
+            output.events.try_recv(),
+            Ok(super::MediaBackendEvent::Ready)
+        ));
+        assert!(!sink.is_closed());
+        drop(output);
+        assert!(sink.is_closed());
+        assert!(!sink.emit(super::MediaBackendEvent::Ready));
     }
 
     #[test]

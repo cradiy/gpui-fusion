@@ -19,6 +19,7 @@ use std::{
 
 const CLASS: &str = "dev.gpui.android.MediaSession";
 static REGISTERED: Mutex<bool> = Mutex::new(false);
+static VIDEO_REGISTERED: Mutex<bool> = Mutex::new(false);
 static NEXT_ID: AtomicI64 = AtomicI64::new(1);
 static SESSIONS: OnceLock<Mutex<HashMap<i64, Weak<Mutex<State>>>>> = OnceLock::new();
 
@@ -72,6 +73,21 @@ pub(super) fn initialize() -> MediaResult<()> {
                         ),
                     ],
                 )?;
+                Ok(())
+            })
+            .map_err(error)?;
+        *registered = true;
+    }
+    Ok(())
+}
+
+fn initialize_video() -> MediaResult<()> {
+    initialize()?;
+    let runtime = AndroidRuntime::get().map_err(error)?;
+    let mut registered = VIDEO_REGISTERED.lock().map_err(error)?;
+    if !*registered {
+        runtime
+            .with_env(|env| {
                 let frames = runtime.load_class(env, "dev.gpui.android.MediaFrames")?;
                 env.register_native_methods(
                     frames,
@@ -115,6 +131,7 @@ pub(super) fn open_playback(
         Some(output),
         None,
         native,
+        request.mode == MediaPlaybackMode::AudioOnly,
     )?))
 }
 
@@ -153,8 +170,12 @@ fn open_session(
     output: Option<MediaOutputSink>,
     extraction: Option<ExtractionRequest>,
     native: bool,
+    audio_only: bool,
 ) -> MediaResult<AndroidSession> {
     initialize()?;
+    if !audio_only {
+        initialize_video()?;
+    }
     validate_source(source)?;
     let network = source.network_options();
     let position = extraction.as_ref().map_or(-1, |request| {
@@ -206,12 +227,13 @@ fn open_session(
             env.delete_local_ref(value)?;
         }
         let timeout = network.timeout().unwrap_or(Duration::from_secs(30)).as_millis().clamp(1, i32::MAX as u128) as i32;
-        let object = env.new_object(class, "(Landroid/content/Context;JLjava/lang/String;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;IJZ)V", &[
+        let object = env.new_object(class, "(Landroid/content/Context;JLjava/lang/String;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;IJZZ)V", &[
             JValue::Object(runtime.context()), JValue::Long(id), JValue::Object(&uri),
             JValue::Object(&mime_type),
             JValue::Object(&keys), JValue::Object(&values), JValue::Int(timeout),
             JValue::Long(position),
             JValue::Bool(native.into()),
+            JValue::Bool(audio_only.into()),
         ])?;
         Ok(env.new_global_ref(object)?)
     });
@@ -223,6 +245,7 @@ fn open_session(
             volume: 1.,
             muted: false,
             native_frames: native,
+            audio_only,
         }),
         Err(cause) => {
             if let Ok(mut sessions) = sessions().lock() {
@@ -286,6 +309,7 @@ impl FrameExtractionSession for AndroidFrameExtractor {
                 handle: self.handle,
                 sequence: self.sequence,
             }),
+            false,
             false,
         )?;
         receiver
@@ -735,6 +759,7 @@ struct AndroidSession {
     volume: f64,
     muted: bool,
     native_frames: bool,
+    audio_only: bool,
 }
 
 impl AndroidSession {
@@ -842,7 +867,7 @@ impl MediaPlaybackSession for AndroidSession {
             audio: state.audio,
             seeking: state.timeline.is_seekable(),
             accurate_seeking: true,
-            frame_extraction: true,
+            frame_extraction: !self.audio_only,
             playback_rate: true,
             subtitles: true,
             ..Default::default()

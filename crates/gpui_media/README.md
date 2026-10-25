@@ -10,10 +10,13 @@ different interfaces on top of the same core. Media contracts and decoded
 frames come from [`gpui_media_core`](../gpui_media_core/README.md), which has
 no GPUI dependency. This crate re-exports those types for UI applications.
 
-Pure audio playback is provided separately by `AudioPlayer`. It uses the same
-Symphonia and CPAL pipeline on desktop, and browser audio playback on Web and does not depend on
-`VideoPlayer` or a video backend. The default feature set enables
-both audio and video. See the complete
+`MediaPlayer` provides shared backend session control, timeline, buffering and
+system media integration. `AudioPlayer` requires only the `audio` feature. It
+defaults to Symphonia/CPAL on native targets and browser audio on Web, and can
+select a `MediaBackend` without enabling video. Backend audio sessions explicitly
+disable video delivery and rendering. The `video` feature exposes `VideoPlayer`
+with frame presentation, extraction and frame controls on the shared playback
+layer. Both features are enabled by default. See the
 [audio player guide](docs/audio-player.md).
 
 ## Public capabilities

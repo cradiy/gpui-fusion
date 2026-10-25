@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 use wasm_bindgen::{JsCast, closure::Closure};
-use web_sys::HtmlVideoElement;
+use web_sys::{HtmlMediaElement, HtmlVideoElement};
 
 mod frame_extractor;
 
@@ -38,7 +38,11 @@ pub(super) fn open_playback(
     request: MediaPlaybackRequest,
     output: MediaOutputSink,
 ) -> MediaResult<Box<dyn MediaPlaybackSession>> {
-    Ok(Box::new(BrowserSession::open(request.source, output)?))
+    Ok(Box::new(BrowserSession::open(
+        request.source,
+        output,
+        request.mode,
+    )?))
 }
 
 pub(super) fn open_frame_extractor(
@@ -48,7 +52,8 @@ pub(super) fn open_frame_extractor(
 }
 
 struct State {
-    element: HtmlVideoElement,
+    element: HtmlMediaElement,
+    video: Option<HtmlVideoElement>,
     output: MediaOutputSink,
     handle: FrameHandle,
     sequence: Cell<u64>,
@@ -75,7 +80,9 @@ impl State {
     }
 
     fn capture(&self) -> MediaResult<()> {
-        let video = &self.element;
+        let Some(video) = &self.video else {
+            return Ok(());
+        };
         if video.ready_state() < 2
             || video.seeking()
             || video.video_width() == 0
@@ -193,7 +200,11 @@ struct BrowserSession {
 }
 
 impl BrowserSession {
-    fn open(source: MediaSource, output: MediaOutputSink) -> MediaResult<Self> {
+    fn open(
+        source: MediaSource,
+        output: MediaOutputSink,
+        mode: MediaPlaybackMode,
+    ) -> MediaResult<Self> {
         initialize()?;
         if !["http:", "https:", "blob:", "data:"]
             .iter()
@@ -208,20 +219,25 @@ impl BrowserSession {
                 "browser media requests use browser-managed networking; custom network options are unsupported",
             ));
         }
-        let element: HtmlVideoElement = web_sys::window()
+        let element: HtmlMediaElement = web_sys::window()
             .unwrap()
             .document()
             .ok_or_else(|| MediaError::unsupported("no browser document"))?
-            .create_element("video")
+            .create_element(if mode == MediaPlaybackMode::AudioOnly {
+                "audio"
+            } else {
+                "video"
+            })
             .map_err(js_error)?
             .dyn_into()
             .map_err(js_error)?;
-        if !js_sys::Reflect::get(&element, &"requestVideoFrameCallback".into())
-            .map_err(js_error)?
-            .is_function()
-            || !js_sys::Reflect::get(&js_sys::global(), &"VideoFrame".into())
+        if mode == MediaPlaybackMode::AudioVideo
+            && (!js_sys::Reflect::get(&element, &"requestVideoFrameCallback".into())
                 .map_err(js_error)?
                 .is_function()
+                || !js_sys::Reflect::get(&js_sys::global(), &"VideoFrame".into())
+                    .map_err(js_error)?
+                    .is_function())
         {
             return Err(MediaError::unsupported(
                 "browser video requires VideoFrame and requestVideoFrameCallback",
@@ -230,8 +246,19 @@ impl BrowserSession {
         element.set_attribute("playsinline", "").map_err(js_error)?;
         element.set_cross_origin(Some("anonymous"));
         element.set_preload("auto");
+        let video = if mode == MediaPlaybackMode::AudioVideo {
+            Some(
+                element
+                    .clone()
+                    .dyn_into::<HtmlVideoElement>()
+                    .map_err(js_error)?,
+            )
+        } else {
+            None
+        };
         let state = Rc::new(State {
             element,
+            video,
             output,
             handle: FrameHandle::new(),
             sequence: Cell::new(0),
@@ -304,7 +331,7 @@ impl BrowserSession {
                 .map_err(js_error)?;
             state.listeners.borrow_mut().push((name, callback));
         }
-        {
+        if state.video.is_some() {
             let weak = Rc::downgrade(&state);
             *state.frame_callback.borrow_mut() = Some(Closure::wrap(Box::new(move |_: f64| {
                 let Some(state) = weak.upgrade() else { return };
@@ -337,11 +364,11 @@ impl MediaPlaybackSession for BrowserSession {
     fn capabilities(&self) -> MediaCapabilities {
         self.with(|state| {
             Ok(MediaCapabilities {
-                video: true,
+                video: state.video.is_some(),
                 audio: true,
                 seeking: state.timeline().is_seekable(),
                 playback_rate: true,
-                frame_extraction: true,
+                frame_extraction: state.video.is_some(),
                 ..Default::default()
             })
         })

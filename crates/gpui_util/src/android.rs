@@ -5,11 +5,12 @@ use jni::{
     JNIEnv, JavaVM,
     objects::{GlobalRef, JClass, JObject, JValue},
 };
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub mod hardware_buffer;
 
 static RUNTIME: OnceLock<AndroidRuntime> = OnceLock::new();
+static INITIALIZE: Mutex<()> = Mutex::new(());
 
 pub struct AndroidRuntime {
     vm: Arc<JavaVM>,
@@ -20,6 +21,9 @@ pub struct AndroidRuntime {
 impl AndroidRuntime {
     /// Retains the application context, never an Activity or View.
     pub fn initialize(env: &mut JNIEnv, context: &JObject) -> Result<()> {
+        let _initialize = INITIALIZE
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Android runtime initialization lock poisoned"))?;
         if RUNTIME.get().is_some() {
             return Ok(());
         }
@@ -44,6 +48,14 @@ impl AndroidRuntime {
             context: env.new_global_ref(application)?,
             loader: env.new_global_ref(loader)?,
         };
+        // The process-owned global context remains valid across Activity recreation.
+        // Initialize before application main so native libraries may use NDK services.
+        unsafe {
+            ndk_context::initialize_android_context(
+                runtime.vm.get_java_vm_pointer().cast(),
+                runtime.context.as_obj().as_raw().cast(),
+            );
+        }
         let _ = RUNTIME.set(runtime);
         Ok(())
     }

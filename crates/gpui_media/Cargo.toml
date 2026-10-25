@@ -8,7 +8,7 @@ authors = ["cradiy <cradiy.rs@gmail.com>"]
 
 [features]
 default = ["audio", "video"]
-audio = ["dep:base64", "dep:cpal", "dep:symphonia", "dep:ureq"]
+audio = ["dep:base64", "dep:cpal", "dep:symphonia", "dep:ureq", "dep:gpui_util", "dep:jni", "dep:anyhow"]
 video = []
 
 [dependencies]
@@ -28,6 +28,11 @@ symphonia = { version = "0.6.0", default-features = false, features = [
   "all-formats",
 ], optional = true }
 ureq = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+anyhow = { workspace = true, optional = true }
+gpui_util = { workspace = true, optional = true }
+jni = { version = "0.21.1", optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 wasm-bindgen-futures = "0.4"

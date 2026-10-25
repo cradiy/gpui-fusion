@@ -171,3 +171,17 @@ window continues rendering while the Activity is paused. Do not pause playback
 solely because it loses input focus. Bind a `SystemMediaSession` for system
 play/pause controls; picture-in-picture does not create a separate media session
 or background service. Other window backends currently report unsupported.
+
+## Background session preparation
+
+`MediaPlayerBuilder::prepare` opens the backend session without creating a GPUI
+entity or issuing play/pause commands. Call it on a background executor when
+backend initialization can block, then use `PreparedMediaPlayer::build` inside
+`cx.new` on the foreground thread. The build step applies volume and autoplay;
+playback command failures become player error states. Existing synchronous
+builder methods continue to return initialization errors directly.
+
+Keep ownership of each preparation task with its playback request. If a newer
+request supersedes it, discard the old result instead of attaching it. Dropping
+a prepared player releases the session. Backend events arriving before attachment
+remain queued for the resulting player.

@@ -127,11 +127,11 @@ impl AudioSession {
         }
         session.state.audio.set_src(source.uri());
         if autoplay {
-            session.play();
+            session.play()?;
         }
         Ok(session)
     }
-    pub(super) fn play(&self) {
+    pub(super) fn play(&self) -> MediaResult<()> {
         let revision = self.state.revision.get().wrapping_add(1);
         self.state.revision.set(revision);
         match self.state.audio.play() {
@@ -154,7 +154,19 @@ impl AudioSession {
             }
             Err(error) => self.state.error(error),
         }
+        Ok(())
     }
+    pub(super) fn set_audio_focus_enabled(&self, _: bool) -> MediaResult<()> {
+        Err(MediaError::unsupported(
+            "browser audio focus is managed by the browser",
+        ))
+    }
+    pub(super) fn set_wake_mode(&self, _: crate::PlaybackWakeMode) -> MediaResult<()> {
+        Err(MediaError::unsupported(
+            "native playback wake locks are unavailable in the browser",
+        ))
+    }
+
     pub(super) fn pause(&self) {
         self.state
             .revision

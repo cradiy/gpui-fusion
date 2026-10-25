@@ -47,6 +47,14 @@ impl PcmOutputControl {
         self.shared.muted.store(muted, Ordering::Release);
     }
 
+    #[cfg(target_os = "android")]
+    pub(super) fn set_ducked(&self, ducked: bool) {
+        self.shared.duck_bits.store(
+            (if ducked { 0.2f32 } else { 1.0f32 }).to_bits(),
+            Ordering::Release,
+        );
+    }
+
     pub(super) fn position(&self) -> Duration {
         let base = Duration::from_nanos(self.shared.base_nanos.load(Ordering::Acquire));
         base.saturating_add(duration_for_samples(
@@ -192,6 +200,7 @@ struct AudioQueue {
     buffered_samples: AtomicU64,
     consumed_samples: AtomicU64,
     volume_bits: AtomicU32,
+    duck_bits: AtomicU32,
     muted: AtomicBool,
     playing: AtomicBool,
     stream_error: Mutex<Option<OutputFailure>>,
@@ -205,6 +214,7 @@ impl AudioQueue {
             buffered_samples: AtomicU64::new(0),
             consumed_samples: AtomicU64::new(0),
             volume_bits: AtomicU32::new(1.0f32.to_bits()),
+            duck_bits: AtomicU32::new(1.0f32.to_bits()),
             muted: AtomicBool::new(false),
             playing: AtomicBool::new(false),
             stream_error: Mutex::new(None),
@@ -252,6 +262,7 @@ impl AudioQueue {
             0.0
         } else {
             f32::from_bits(self.volume_bits.load(Ordering::Acquire))
+                * f32::from_bits(self.duck_bits.load(Ordering::Acquire))
         };
         let mut queue = self
             .samples
@@ -505,6 +516,25 @@ mod tests {
 
         queue.reset(Duration::from_secs(2));
         assert_eq!(queue.buffered_samples.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn ducking_preserves_user_volume_and_restores_pcm_gain() {
+        let queue = AudioQueue::new();
+        queue.playing.store(true, Ordering::Release);
+        queue.volume_bits.store(0.5f32.to_bits(), Ordering::Release);
+        queue.duck_bits.store(0.2f32.to_bits(), Ordering::Release);
+        queue.enqueue(vec![1.0; 4]);
+        let mut output = [0.0f32; 2];
+        queue.write(&mut output);
+        assert_eq!(output, [0.1; 2]);
+        assert_eq!(
+            f32::from_bits(queue.volume_bits.load(Ordering::Acquire)),
+            0.5
+        );
+        queue.duck_bits.store(1.0f32.to_bits(), Ordering::Release);
+        queue.write(&mut output);
+        assert_eq!(output, [0.5; 2]);
     }
 
     #[test]

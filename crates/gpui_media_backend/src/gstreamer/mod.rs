@@ -20,10 +20,10 @@ use gpui_media_core::normalize_subtitle_text;
 use gpui_media_core::{
     AudioStreamInfo, FrameExtractionSession, FrameExtractorBackendRequest,
     FrameTransportPreference, MediaBackend, MediaBackendEvent, MediaCapabilities, MediaError,
-    MediaErrorKind, MediaInfo, MediaOutputSink, MediaPlaybackRequest, MediaPlaybackSession,
-    MediaRecovery, MediaResult, MediaSource, MediaStreamId, PlaybackBuffer, PlaybackTimeline,
-    SeekMode, SubtitleCue, SubtitleEvent, SubtitleFormat, SubtitleStreamInfo, TransportChange,
-    VideoFrame, VideoStreamInfo,
+    MediaErrorKind, MediaInfo, MediaOutputSink, MediaPlaybackMode, MediaPlaybackRequest,
+    MediaPlaybackSession, MediaRecovery, MediaResult, MediaSource, MediaStreamId, PlaybackBuffer,
+    PlaybackTimeline, SeekMode, SubtitleCue, SubtitleEvent, SubtitleFormat, SubtitleStreamInfo,
+    TransportChange, VideoFrame, VideoStreamInfo,
 };
 use network::{configure_playbin_network, configure_playbin_progressive_download};
 
@@ -54,7 +54,8 @@ pub(crate) fn initialize() -> MediaResult<()> {
 pub(crate) struct GstreamerPlayback {
     playbin: gst::Element,
     #[cfg(target_os = "linux")]
-    appsink: gst_app::AppSink,
+    appsink: Option<gst_app::AppSink>,
+    mode: MediaPlaybackMode,
     bus: gst::Bus,
     bus_shutdown: Arc<AtomicBool>,
     play_requested: Arc<AtomicBool>,
@@ -69,110 +70,123 @@ pub(crate) struct GstreamerPlayback {
 impl GstreamerPlayback {
     pub fn new(
         source: &MediaSource,
+        mode: MediaPlaybackMode,
         output_capabilities: Option<&FrameOutputCapabilities>,
         output: MediaOutputSink,
     ) -> MediaResult<Self> {
         initialize()?;
         let container_duration = iso_bmff::fragmented_duration(source);
 
-        let caps = appsink_caps(output_capabilities)?;
-        let appsink = gst_app::AppSink::builder()
-            .caps(&caps)
-            .max_buffers(2)
-            .wait_on_eos(false)
-            .sync(true)
-            .build();
-        #[cfg(feature = "v1_28")]
-        appsink.set_leaky_type(gst_app::AppLeakyType::Downstream);
-        #[cfg(not(feature = "v1_28"))]
-        appsink.set_drop(true);
-
-        let output_for_preroll = output.clone();
         let decoder_tracker = decoder::DecoderTracker::default();
-        let decoder_for_preroll = decoder_tracker.clone();
-        let decoder_for_samples = decoder_tracker.clone();
-        let output_for_samples = output.clone();
         let media_info = Arc::new(RwLock::new(None));
         let selected_subtitle = Arc::new(RwLock::new(None));
-        let sequence = Arc::new(AtomicU64::new(1));
-        let sequence_for_preroll = sequence.clone();
-        let surface_handle = FrameHandle::new();
-        let surface_handle_for_preroll = surface_handle;
         #[cfg(target_os = "linux")]
         let producer_drm_device = Arc::new(std::sync::RwLock::new(None));
-        #[cfg(target_os = "linux")]
-        let producer_drm_device_for_preroll = producer_drm_device.clone();
-        #[cfg(target_os = "linux")]
-        let producer_drm_device_for_samples = producer_drm_device.clone();
+        let appsink = if mode == MediaPlaybackMode::AudioVideo {
+            let caps = appsink_caps(output_capabilities)?;
+            let appsink = gst_app::AppSink::builder()
+                .caps(&caps)
+                .max_buffers(2)
+                .wait_on_eos(false)
+                .sync(true)
+                .build();
+            #[cfg(feature = "v1_28")]
+            appsink.set_leaky_type(gst_app::AppLeakyType::Downstream);
+            #[cfg(not(feature = "v1_28"))]
+            appsink.set_drop(true);
 
-        appsink.set_callbacks(
-            gst_app::AppSinkCallbacks::builder()
-                .propose_allocation(|_, query| {
-                    add_required_allocation_metas(query);
-                    true
-                })
-                .new_preroll(move |sink| {
-                    let sample = sink.pull_preroll().map_err(|_| gst::FlowError::Eos)?;
-                    publish_appsink_sample(
-                        &sample,
-                        decoder_for_preroll.info(sink),
-                        &output_for_preroll,
-                        &surface_handle_for_preroll,
-                        &sequence_for_preroll,
-                        #[cfg(target_os = "linux")]
-                        producer_drm_device_for_preroll
-                            .read()
-                            .ok()
-                            .and_then(|device| *device),
-                    )
-                })
-                .new_sample(move |sink| {
-                    let sample = sink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
-                    publish_appsink_sample(
-                        &sample,
-                        decoder_for_samples.info(sink),
-                        &output_for_samples,
-                        &surface_handle,
-                        &sequence,
-                        #[cfg(target_os = "linux")]
-                        producer_drm_device_for_samples
-                            .read()
-                            .ok()
-                            .and_then(|device| *device),
-                    )
-                })
-                .build(),
-        );
+            let output_for_preroll = output.clone();
+            let decoder_for_preroll = decoder_tracker.clone();
+            let decoder_for_samples = decoder_tracker.clone();
+            let output_for_samples = output.clone();
+            let sequence = Arc::new(AtomicU64::new(1));
+            let sequence_for_preroll = sequence.clone();
+            let surface_handle = FrameHandle::new();
+            let surface_handle_for_preroll = surface_handle;
+            #[cfg(target_os = "linux")]
+            let producer_drm_device_for_preroll = producer_drm_device.clone();
+            #[cfg(target_os = "linux")]
+            let producer_drm_device_for_samples = producer_drm_device.clone();
 
-        let subtitle_sink = gst_app::AppSink::builder()
-            .max_buffers(16)
-            .wait_on_eos(false)
-            .sync(true)
-            .build();
-        let output_for_subtitle_preroll = output.clone();
-        let output_for_subtitle_samples = output.clone();
-        let selected_subtitle_for_preroll = selected_subtitle.clone();
-        let selected_subtitle_for_samples = selected_subtitle.clone();
-        subtitle_sink.set_callbacks(
-            gst_app::AppSinkCallbacks::builder()
-                .new_preroll(move |sink| {
-                    let sample = sink.pull_preroll().map_err(|_| gst::FlowError::Eos)?;
-                    publish_subtitle_sample(
-                        &sample,
-                        &output_for_subtitle_preroll,
-                        &selected_subtitle_for_preroll,
-                    )
-                })
-                .new_sample(move |sink| {
-                    let sample = sink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
-                    publish_subtitle_sample(
-                        &sample,
-                        &output_for_subtitle_samples,
-                        &selected_subtitle_for_samples,
-                    )
-                })
-                .build(),
-        );
+            appsink.set_callbacks(
+                gst_app::AppSinkCallbacks::builder()
+                    .propose_allocation(|_, query| {
+                        add_required_allocation_metas(query);
+                        true
+                    })
+                    .new_preroll(move |sink| {
+                        let sample = sink.pull_preroll().map_err(|_| gst::FlowError::Eos)?;
+                        publish_appsink_sample(
+                            &sample,
+                            decoder_for_preroll.info(sink),
+                            &output_for_preroll,
+                            &surface_handle_for_preroll,
+                            &sequence_for_preroll,
+                            #[cfg(target_os = "linux")]
+                            producer_drm_device_for_preroll
+                                .read()
+                                .ok()
+                                .and_then(|device| *device),
+                        )
+                    })
+                    .new_sample(move |sink| {
+                        let sample = sink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
+                        publish_appsink_sample(
+                            &sample,
+                            decoder_for_samples.info(sink),
+                            &output_for_samples,
+                            &surface_handle,
+                            &sequence,
+                            #[cfg(target_os = "linux")]
+                            producer_drm_device_for_samples
+                                .read()
+                                .ok()
+                                .and_then(|device| *device),
+                        )
+                    })
+                    .build(),
+            );
+
+            Some(appsink)
+        } else {
+            None
+        };
+
+        let subtitle_sink = if mode == MediaPlaybackMode::AudioVideo {
+            let subtitle_sink = gst_app::AppSink::builder()
+                .max_buffers(16)
+                .wait_on_eos(false)
+                .sync(true)
+                .build();
+            let output_for_subtitle_preroll = output.clone();
+            let output_for_subtitle_samples = output.clone();
+            let selected_subtitle_for_preroll = selected_subtitle.clone();
+            let selected_subtitle_for_samples = selected_subtitle.clone();
+            subtitle_sink.set_callbacks(
+                gst_app::AppSinkCallbacks::builder()
+                    .new_preroll(move |sink| {
+                        let sample = sink.pull_preroll().map_err(|_| gst::FlowError::Eos)?;
+                        publish_subtitle_sample(
+                            &sample,
+                            &output_for_subtitle_preroll,
+                            &selected_subtitle_for_preroll,
+                        )
+                    })
+                    .new_sample(move |sink| {
+                        let sample = sink.pull_sample().map_err(|_| gst::FlowError::Eos)?;
+                        publish_subtitle_sample(
+                            &sample,
+                            &output_for_subtitle_samples,
+                            &selected_subtitle_for_samples,
+                        )
+                    })
+                    .build(),
+            );
+
+            Some(subtitle_sink)
+        } else {
+            None
+        };
 
         let playbin = gst::ElementFactory::make("playbin3")
             .build()
@@ -180,10 +194,19 @@ impl GstreamerPlayback {
                 gst_backend_error("GStreamer element 'playbin3' is not installed", error)
             })?;
         configure_playbin_network(&playbin, source.network_options());
-        decoder_tracker.attach(&playbin);
+        if mode == MediaPlaybackMode::AudioOnly {
+            network::set_playbin_flag(&playbin, "video", false);
+            network::set_playbin_flag(&playbin, "text", false);
+        } else {
+            decoder_tracker.attach(&playbin);
+        }
         playbin.set_property("uri", source.uri());
-        playbin.set_property("video-sink", &appsink);
-        playbin.set_property("text-sink", &subtitle_sink);
+        if let Some(appsink) = &appsink {
+            playbin.set_property("video-sink", appsink);
+        }
+        if let Some(subtitle_sink) = &subtitle_sink {
+            playbin.set_property("text-sink", subtitle_sink);
+        }
         configure_playbin_progressive_download(&playbin, source.uri(), source.network_options());
 
         let bus = playbin
@@ -295,6 +318,7 @@ impl GstreamerPlayback {
 
         Ok(Self {
             playbin,
+            mode,
             #[cfg(target_os = "linux")]
             appsink,
             bus,
@@ -505,9 +529,16 @@ impl GstreamerPlayback {
 
         let result = (|| {
             let caps = cpu_appsink_caps()?;
-            self.appsink.set_caps(Some(&caps));
+            self.appsink
+                .as_ref()
+                .ok_or_else(|| MediaError::unsupported("audio-only playback has no video sink"))?
+                .set_caps(Some(&caps));
 
-            if let Some(sink_pad) = self.appsink.static_pad("sink") {
+            if let Some(sink_pad) = self
+                .appsink
+                .as_ref()
+                .and_then(|sink| sink.static_pad("sink"))
+            {
                 sink_pad.send_event(gst::event::Reconfigure::new());
             }
 
@@ -776,6 +807,7 @@ impl MediaBackend for GstreamerSystemBackend {
     ) -> MediaResult<Box<dyn MediaPlaybackSession>> {
         GstreamerPlayback::new(
             &request.source,
+            request.mode,
             request.output_capabilities.as_ref(),
             output,
         )
@@ -806,15 +838,16 @@ impl MediaBackend for GstreamerSystemBackend {
 impl MediaPlaybackSession for GstreamerPlayback {
     fn capabilities(&self) -> MediaCapabilities {
         MediaCapabilities {
-            video: true,
+            video: self.mode == MediaPlaybackMode::AudioVideo,
             audio: true,
-            subtitles: true,
+            subtitles: self.mode == MediaPlaybackMode::AudioVideo,
             seeking: true,
             accurate_seeking: true,
             playback_rate: true,
-            frame_stepping: true,
-            frame_extraction: true,
-            transport_switching: cfg!(target_os = "linux"),
+            frame_stepping: self.mode == MediaPlaybackMode::AudioVideo,
+            frame_extraction: self.mode == MediaPlaybackMode::AudioVideo,
+            transport_switching: self.mode == MediaPlaybackMode::AudioVideo
+                && cfg!(target_os = "linux"),
         }
     }
 

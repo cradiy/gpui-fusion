@@ -1,9 +1,10 @@
 # Audio player
 
 `AudioPlayer` is a presentation-free audio component. It is independent from
-`VideoPlayer`: Symphonia performs demuxing and decoding on a worker thread,
-while CPAL writes decoded PCM to the platform's default output device on desktop.
-On Web, the component directly uses browser audio playback and needs no video backend. Audio
+`VideoPlayer`. By default, Symphonia performs demuxing and decoding on a worker
+thread and CPAL writes PCM to the default native output device. On Web, it uses
+browser audio playback. A caller-selected `MediaBackend` uses the shared
+`MediaPlayer` session controls and requires no video feature. Audio
 and video are enabled by default. An audio-only application can disable the
 default features:
 
@@ -60,6 +61,56 @@ let media = MediaSource::from_uri("https://example.test/live.mp3")?
 let source = AudioSource::from(media);
 # Ok::<(), gpui_media::MediaError>(())
 ```
+
+## Optional media backends
+
+The built-in decoder does not require `gpui_media_backend`. To select another
+implementation, pass a backend to the audio builder:
+
+```rust
+use gpui::Context;
+use gpui_media::{AudioPlayer, AudioSource, MediaBackend, MediaResult};
+
+fn backend_audio(
+    source: AudioSource,
+    backend: impl MediaBackend,
+    cx: &mut Context<AudioPlayer>,
+) -> MediaResult<AudioPlayer> {
+    AudioPlayer::builder(source).backend(backend).build(cx)
+}
+```
+
+`SystemBackend` selects Media3 on Android, GStreamer on Linux/macOS, Media
+Foundation on Windows, and browser media playback on Web. It is optional on all
+platforms. Backend-specific configuration and host requirements still apply.
+Audio requests use `MediaPlaybackMode::AudioOnly`: system backends disable video
+tracks and frame output, including for containers with both audio and video.
+On Android, the built-in decoder supports audio focus, automatic pause when an
+output device is disconnected, and optional CPU/Wi-Fi wake locks independently
+of Media3. Enable the GPUiForge `audio-playback` host feature. Wake locks require
+`android.permission.WAKE_LOCK`; select `PlaybackWakeMode::Local` for local files
+or `Network` for network streams. Focus is requested before playback and released
+on pause, completion, failure, or drop. Transient focus loss pauses playback and
+resumes on focus gain unless the application paused in the meantime. Ducking
+attenuates output without changing the application's volume setting. When a
+route change invalidates the native output stream, playback reopens the default
+output without clearing play intent. A paused player remains paused.
+
+Use GPUI system media controls and the GPUiForge `media-notifications` and
+`background-media` features for lock-screen controls and foreground execution.
+These are separate from the decoder. Android focus requests require a foreground
+application or an eligible foreground service on recent Android releases.
+Other built-in outputs report unsupported focus and wake-lock operations.
+Selected media backends provide these controls according to their capabilities.
+
+`AudioPlayerBuilder::prepare` opens a session without starting playback or
+creating a GPUI entity. Run preparation off the UI thread when the backend can
+block; browser operations stay on the browser thread. Attach the result with
+`PreparedAudioPlayer::build` inside `cx.new`. Keep ownership with the active
+playback request and discard superseded results. Dropping an unbuilt result
+releases its session. Command failures after attachment are player error states.
+Caller-fed encoded streams use the built-in decoder and cannot be passed to a
+URI-based system backend.
 
 ## Caller-fed encoded streams
 

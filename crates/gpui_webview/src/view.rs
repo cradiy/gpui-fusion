@@ -25,6 +25,7 @@ pub struct WebView {
     pressed_buttons: Vec<MouseButton>,
     pointer_position: Point<Pixels>,
     marked_text: Option<String>,
+    input_revision: u64,
     pending_composition: Vec<(u64, String, bool)>,
     _focus_subscriptions: Vec<Subscription>,
 }
@@ -89,10 +90,7 @@ impl WebView {
                 this.input(Input::Focus(true), cx)
             }),
             cx.on_blur(&focus, window, |this, window, cx| {
-                this.pending_composition.clear();
-                this.signals
-                    .ime_revision
-                    .set(this.signals.ime_revision.get().wrapping_add(1));
+                this.invalidate_input();
                 this.pointer_position = window.mouse_position();
                 for button in std::mem::take(&mut this.pressed_buttons) {
                     this.input(
@@ -121,6 +119,7 @@ impl WebView {
             pressed_buttons: Vec::new(),
             pointer_position: Point::default(),
             marked_text: None,
+            input_revision: 0,
             pending_composition: Vec::new(),
             _focus_subscriptions: subscriptions,
         }
@@ -154,6 +153,7 @@ impl WebView {
 
     /// Navigate immediately, or replace the initial URL while initialization is pending.
     pub fn navigate(&mut self, url: Url, cx: &mut Context<Self>) {
+        self.invalidate_input();
         self.options.url = url.clone();
         if let Some(engine) = self.engine.borrow_mut().as_mut() {
             engine.navigate(url);
@@ -161,18 +161,21 @@ impl WebView {
         self.poll(cx);
     }
     pub fn reload(&mut self, cx: &mut Context<Self>) {
+        self.invalidate_input();
         if let Some(engine) = self.engine.borrow_mut().as_mut() {
             engine.reload();
         }
         self.poll(cx);
     }
     pub fn go_back(&mut self, cx: &mut Context<Self>) {
+        self.invalidate_input();
         if let Some(engine) = self.engine.borrow_mut().as_mut() {
             engine.back();
         }
         self.poll(cx);
     }
     pub fn go_forward(&mut self, cx: &mut Context<Self>) {
+        self.invalidate_input();
         if let Some(engine) = self.engine.borrow_mut().as_mut() {
             engine.forward();
         }
@@ -207,8 +210,12 @@ impl WebView {
         if let Some(engine) = self.engine.borrow_mut().as_mut() {
             engine.poll();
         }
-        if self.signals.ime.borrow().is_none() {
+        let revision = self.signals.ime_revision.get();
+        if self.input_revision != revision || self.signals.ime.borrow().is_none() {
             self.marked_text = None;
+            self.pending_composition
+                .retain(|(queued, _, _)| *queued == revision);
+            self.input_revision = revision;
         }
         let clipboard = std::mem::take(&mut *self.signals.clipboard.borrow_mut());
         for request in clipboard {

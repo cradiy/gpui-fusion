@@ -1,5 +1,5 @@
 use gpui::{prelude::*, *};
-use gpui_webview::{Url, WebView, WebViewBackend, WebViewEvent, WebViewOptions};
+use gpui_webview::{Url, WebView, WebViewBackend, WebViewDialogKind, WebViewEvent, WebViewOptions};
 
 struct BrowserWindow {
     view: Entity<WebView>,
@@ -28,6 +28,28 @@ impl BrowserWindow {
                     this.title = error.clone().into();
                     eprintln!("{error}");
                 }
+                WebViewEvent::DialogRequested(dialog) => {
+                    if !dialog.is_pending() {
+                        return;
+                    }
+                    if matches!(dialog.kind, WebViewDialogKind::Prompt { .. }) {
+                        dialog.cancel();
+                        return;
+                    }
+                    let dialog = dialog.clone();
+                    let bounds = Bounds::centered(None, size(px(480.), px(240.)), cx);
+                    let _ = cx.open_window(
+                        WindowOptions {
+                            titlebar: Some(TitlebarOptions {
+                                title: Some("Page dialog".into()),
+                                ..Default::default()
+                            }),
+                            window_bounds: Some(WindowBounds::Windowed(bounds)),
+                            ..Default::default()
+                        },
+                        |_, cx| cx.new(|_| PageDialog(dialog)),
+                    );
+                }
                 _ => {}
             }
             cx.notify();
@@ -38,6 +60,54 @@ impl BrowserWindow {
             home,
             _events: events,
         }
+    }
+}
+struct PageDialog(gpui_webview::WebViewDialog);
+impl Render for PageDialog {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .p_6()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .bg(rgb(0x131e29))
+            .text_color(rgb(0xe2ebf4))
+            .child("Message from web content")
+            .child(self.0.message.clone())
+            .child(
+                div()
+                    .flex()
+                    .gap_4()
+                    .child(
+                        div()
+                            .id("accept")
+                            .p_3()
+                            .rounded_md()
+                            .bg(rgb(0x386ca1))
+                            .cursor_pointer()
+                            .child("OK")
+                            .on_click(cx.listener(|this, _, window, _| {
+                                this.0.accept();
+                                window.remove_window();
+                            })),
+                    )
+                    .when(self.0.kind != WebViewDialogKind::Alert, |row| {
+                        row.child(
+                            div()
+                                .id("cancel")
+                                .p_3()
+                                .rounded_md()
+                                .bg(rgb(0x203244))
+                                .cursor_pointer()
+                                .child("Cancel")
+                                .on_click(cx.listener(|this, _, window, _| {
+                                    this.0.cancel();
+                                    window.remove_window();
+                                })),
+                        )
+                    }),
+            )
     }
 }
 impl Render for BrowserWindow {

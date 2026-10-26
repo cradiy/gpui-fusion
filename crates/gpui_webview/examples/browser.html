@@ -9,10 +9,14 @@ input:focus,button:focus{border-color:#96c7fa;outline:2px solid #96c7fa;outline-
 </style>
 <h1>Embedded browser laboratory</h1><p>This page is rendered by Servo inside a native GPUI window.</p>
 <section><h2>Keyboard input</h2><input placeholder="Type here" aria-label="Text entry"><p id="mirror">Waiting for input</p></section>
+<section><h2>Focus navigation</h2><label>Secondary entry <input aria-label="Secondary entry" autocomplete="off"></label></section>
 <section><h2>JavaScript interaction</h2><button id="increment">Increment</button><output id="count">0</output></section>
+<section><h2>Page dialogs</h2><button id="notice">Show notice</button> <button id="confirm">Request confirmation</button><p id="decision">No response yet</p></section>
 <section><h2>Navigation</h2><a href="https://example.org">Open an external page</a></section><div id="content"></div>
 <script>
 let count=0;document.querySelector('#increment').onclick=()=>document.querySelector('#count').textContent=++count;
+document.querySelector('#notice').onclick=()=>{alert('The background operation has finished.');document.querySelector('#decision').textContent='Notice acknowledged';};
+document.querySelector('#confirm').onclick=()=>{document.querySelector('#decision').textContent=confirm('Apply the pending preferences?')?'Confirmed':'Cancelled';};
 document.querySelector('input').oninput=e=>document.querySelector('#mirror').textContent=e.target.value;
 for(let i=0;i<14;i++){const section=document.createElement('section');section.innerHTML=`<h2>Scrollable panel ${i+1}</h2><p>Resize the window and scroll to verify that the browser viewport follows its native container.</p>`;document.querySelector('#content').append(section);}
 </script>

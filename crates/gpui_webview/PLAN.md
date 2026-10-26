@@ -28,9 +28,10 @@ Pointer events use GPUI window-relative logical coordinates. The backend subtrac
 - Mouse movement and buttons, wheel input, basic keyboard events and focus forwarding.
 - IME preedit, commit, cancellation, and field-bound candidate placement through GPUI's input handler.
 - Engine keyboard shortcuts and text clipboard access through GPUI.
+- Application-owned JavaScript dialog requests with single-use acceptance, cancellation, and prompt text responses. Unhandled requests, navigation, and view closure cancel pending responses. The browser example displays alerts and confirmations in separate GPUI windows and cancels text prompts.
 - A browser example using the public component API.
 
-This is an experimental native surface implementation. GPUI overlays, arbitrary clipping, transforms, partial occlusion, hidden views, and scrolling parents are not supported integration contracts yet. The backend does not implement download handling, file pickers, JavaScript dialogs, permission prompts, direct touch/pinch gestures, or accessibility tree grafting. Text caret geometry across writing modes and font metrics requires broader validation. Cross-platform backends are not implemented.
+This is an experimental native surface implementation. GPUI overlays, arbitrary clipping, transforms, partial occlusion, hidden views, and scrolling parents are not supported integration contracts yet. The backend does not implement download handling, file pickers, permission prompts, direct touch/pinch gestures, or accessibility tree grafting. Text caret geometry across writing modes and font metrics requires broader validation. Cross-platform backends are not implemented.
 
 The input handler exposes composition-local offsets. Surrounding-text queries and deletion, arbitrary document-range replacement, and IME-selected subranges within preedit are not supported. Candidate placement uses the focused field rectangle rather than an exact glyph caret. Undo and redo require editing-history support in Servo.
 

@@ -4,7 +4,18 @@ use gpui::*;
 use std::ops::Range;
 
 impl WebView {
+    pub(super) fn invalidate_input(&mut self) {
+        self.marked_text = None;
+        self.pending_composition.clear();
+        self.input_revision = self.signals.ime_revision.get().wrapping_add(1);
+        self.signals.ime_revision.set(self.input_revision);
+    }
+
     fn queue_composition(&mut self, text: String, commit: bool, cx: &mut Context<Self>) {
+        if self.signals.ime.borrow().is_none() {
+            self.marked_text = None;
+            return;
+        }
         let schedule = self.pending_composition.is_empty();
         let revision = self.signals.ime_revision.get();
         if self

@@ -1,8 +1,10 @@
 //! Native rectangular browser views for GPUI.
 
 mod backend;
+mod dialog;
 mod view;
 
+pub use dialog::{WebViewDialog, WebViewDialogKind};
 pub use url::Url;
 pub use view::WebView;
 
@@ -47,6 +49,7 @@ pub enum WebViewEvent {
     TitleChanged(Option<String>),
     UrlChanged(Url),
     Failed(String),
+    DialogRequested(WebViewDialog),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -1,11 +1,13 @@
 use super::{ClipboardRequest, Engine, ImeState, Input, Signals, wayland::ChildSurface};
-use crate::{Url, WebViewEvent, WebViewOptions};
+use crate::{
+    Url, WebViewDialog, WebViewDialogKind, WebViewEvent, WebViewOptions, dialog::DialogCancellation,
+};
 use ::servo::{EventLoopWaker, RenderingContext, WebViewDelegate};
 use anyhow::Result;
 use gpui::{App, Bounds, CursorStyle, Global, MouseButton, Pixels, Point, Window};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     rc::Rc,
     sync::{Arc, Mutex, Weak},
 };
@@ -56,6 +58,7 @@ impl Runtime {
 struct ServoDelegate {
     signals: Rc<Signals>,
     ime_id: Cell<Option<::servo::EmbedderControlId>>,
+    dialogs: Rc<RefCell<Vec<(::servo::EmbedderControlId, DialogCancellation)>>>,
 }
 impl std::ops::Deref for ServoDelegate {
     type Target = Signals;
@@ -64,7 +67,40 @@ impl std::ops::Deref for ServoDelegate {
     }
 }
 impl WebViewDelegate for ServoDelegate {
-    fn show_embedder_control(&self, _: ::servo::WebView, control: ::servo::EmbedderControl) {
+    fn show_embedder_control(&self, view: ::servo::WebView, control: ::servo::EmbedderControl) {
+        let id = control.id();
+        if let ::servo::EmbedderControl::SimpleDialog(dialog) = control {
+            let kind = match &dialog {
+                ::servo::SimpleDialog::Alert(_) => WebViewDialogKind::Alert,
+                ::servo::SimpleDialog::Confirm(_) => WebViewDialogKind::Confirm,
+                ::servo::SimpleDialog::Prompt(prompt) => WebViewDialogKind::Prompt {
+                    default_value: prompt.current_value().into(),
+                },
+            };
+            let wake = self.wake.clone();
+            let request = WebViewDialog::new(
+                kind,
+                dialog.message().into(),
+                view.url(),
+                Box::new(move |value| {
+                    match (dialog, value) {
+                        (::servo::SimpleDialog::Prompt(mut prompt), Some(value)) => {
+                            prompt.set_current_value(&value);
+                            prompt.confirm();
+                        }
+                        (dialog, Some(_)) => dialog.confirm(),
+                        (dialog, None) => dialog.dismiss(),
+                    }
+                    let _ = wake.try_send(());
+                }),
+            );
+            self.dialogs
+                .borrow_mut()
+                .retain(|(_, pending)| pending.is_pending());
+            self.dialogs.borrow_mut().push((id, request.cancellation()));
+            self.emit(WebViewEvent::DialogRequested(request));
+            return;
+        }
         let ::servo::EmbedderControl::InputMethod(control) = control else {
             return;
         };
@@ -104,6 +140,9 @@ impl WebViewDelegate for ServoDelegate {
         self.request_frame();
     }
     fn hide_embedder_control(&self, _: ::servo::WebView, id: ::servo::EmbedderControlId) {
+        self.dialogs
+            .borrow_mut()
+            .retain(|(pending, _)| *pending != id);
         if self.ime_id.get() == Some(id) {
             self.ime_id.set(None);
             self.ime_revision
@@ -171,6 +210,7 @@ impl ::servo::ClipboardDelegate for Signals {
 }
 
 pub(super) struct ServoBackend {
+    dialogs: Rc<RefCell<Vec<(::servo::EmbedderControlId, DialogCancellation)>>>,
     webview: ::servo::WebView,
     servo: ::servo::Servo,
     context: Rc<::servo::WindowRenderingContext>,
@@ -179,7 +219,7 @@ pub(super) struct ServoBackend {
     bounds: Bounds<Pixels>,
     scale: Cell<f32>,
     input_scale: Point<f32>,
-    composing: bool,
+    composition_revision: Option<u64>,
 }
 impl ServoBackend {
     pub fn new(
@@ -201,17 +241,20 @@ impl ServoBackend {
             .make_current()
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
         let servo = Runtime::acquire(cx, &signals);
+        let dialogs = Rc::new(RefCell::new(Vec::new()));
         let webview = ::servo::WebViewBuilder::new(&servo, context.clone())
             .url(options.url.clone())
             .hidpi_scale_factor(euclid::Scale::new(window.scale_factor()))
             .delegate(Rc::new(ServoDelegate {
                 signals: signals.clone(),
                 ime_id: Cell::new(None),
+                dialogs: dialogs.clone(),
             }))
             .clipboard_delegate(signals.clone())
             .build();
         webview.show();
         Ok(Self {
+            dialogs,
             webview,
             servo,
             context,
@@ -220,7 +263,7 @@ impl ServoBackend {
             bounds: Bounds::default(),
             scale: Cell::new(window.scale_factor()),
             input_scale: gpui::point(window.scale_factor(), window.scale_factor()),
-            composing: false,
+            composition_revision: None,
         })
     }
     fn point(&self, position: Point<Pixels>) -> ::servo::WebViewPoint {
@@ -229,6 +272,11 @@ impl ServoBackend {
             (f32::from(position.y) - f32::from(self.bounds.origin.y).round()) * self.input_scale.y,
         )
         .into()
+    }
+}
+impl Drop for ServoBackend {
+    fn drop(&mut self) {
+        self.dialogs.borrow_mut().clear();
     }
 }
 impl Engine for ServoBackend {
@@ -271,15 +319,18 @@ impl Engine for ServoBackend {
     }
     fn poll(&mut self) {
         self.servo.spin_event_loop();
-        if self.signals.ime.borrow().is_none() {
-            self.composing = false;
+        if self.signals.ime.borrow().is_none()
+            || self.composition_revision != Some(self.signals.ime_revision.get())
+        {
+            self.composition_revision = None;
         }
     }
     fn input(&mut self, input: Input) {
         use ::servo::{InputEvent, Key, MouseButtonAction, NamedKey};
         let event = match input {
             Input::Composition { text, commit } => {
-                if !self.composing {
+                let revision = self.signals.ime_revision.get();
+                if self.composition_revision != Some(revision) {
                     self.webview.notify_input_event(InputEvent::Ime(
                         ::servo::ImeEvent::Composition(::servo::CompositionEvent {
                             state: ::servo::CompositionState::Start,
@@ -287,7 +338,7 @@ impl Engine for ServoBackend {
                         }),
                     ));
                 }
-                self.composing = !commit;
+                self.composition_revision = (!commit).then_some(revision);
                 if commit {
                     self.webview.notify_input_event(InputEvent::Ime(
                         ::servo::ImeEvent::Composition(::servo::CompositionEvent {
@@ -397,15 +448,19 @@ impl Engine for ServoBackend {
         self.webview.notify_input_event(event);
     }
     fn navigate(&mut self, url: Url) {
+        self.dialogs.borrow_mut().clear();
         self.webview.load(url);
     }
     fn reload(&mut self) {
+        self.dialogs.borrow_mut().clear();
         self.webview.reload();
     }
     fn back(&mut self) {
+        self.dialogs.borrow_mut().clear();
         self.webview.go_back(1);
     }
     fn forward(&mut self) {
+        self.dialogs.borrow_mut().clear();
         self.webview.go_forward(1);
     }
 }

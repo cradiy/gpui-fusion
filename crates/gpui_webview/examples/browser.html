@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8"><title>Embedded browser laboratory</title>
+<style>
+:root{color-scheme:dark;font:18px system-ui;background:#131e29;color:#e2ebf4}body{max-width:850px;margin:0 auto;padding:40px}h1{font-size:36px}p{color:#afc4d8;line-height:1.7}section{padding:24px;background:#203244;border-radius:12px;margin:24px 0}input,button{font:inherit;padding:12px;border:1px solid #6484a4;border-radius:6px}input{width:55%}button{cursor:pointer;background:#386ca1;color:white}output{display:inline-block;margin:0 20px;font-weight:bold}
+input,button{box-sizing:border-box;border-radius:8px}
+input{appearance:none;background:#131e29;color:#e2ebf4;max-width:100%}
+input::placeholder{color:#91a9bf;opacity:1}
+input:focus,button:focus{border-color:#96c7fa;outline:2px solid #96c7fa;outline-offset:3px}
+</style>
+<h1>Embedded browser laboratory</h1><p>This page is rendered by Servo inside a native GPUI window.</p>
+<section><h2>Keyboard input</h2><input placeholder="Type here" aria-label="Text entry"><p id="mirror">Waiting for input</p></section>
+<section><h2>JavaScript interaction</h2><button id="increment">Increment</button><output id="count">0</output></section>
+<section><h2>Navigation</h2><a href="https://example.org">Open an external page</a></section><div id="content"></div>
+<script>
+let count=0;document.querySelector('#increment').onclick=()=>document.querySelector('#count').textContent=++count;
+document.querySelector('input').oninput=e=>document.querySelector('#mirror').textContent=e.target.value;
+for(let i=0;i<14;i++){const section=document.createElement('section');section.innerHTML=`<h2>Scrollable panel ${i+1}</h2><p>Resize the window and scroll to verify that the browser viewport follows its native container.</p>`;document.querySelector('#content').append(section);}
+</script>

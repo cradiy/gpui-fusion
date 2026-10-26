@@ -39,7 +39,7 @@ First-party packages outside the Apache-2.0 scope are authored by
 These include `gpui_3d`, `gpui_3d_effects`, `gpui_3d_gltf`, `gpui_android`,
 `gpui_automation`, `gpui_effects`, `gpui_icons`, `gpui-icons-macros`, `gpui_inspector`, `gpui_io`, `gpui_media`,
 `gpui_media_backend`, `gpui_media_core`, `gpui_notifications`, `gpui_render`, `gpui_richtext`,
-`gpui_wayland_source`, `uic`, `uic-macros`, and the standalone example packages
+`gpui_wayland_source`, `gpui_webview`, `uic`, `uic-macros`, and the standalone example packages
 outside the Apache-2.0 scope.
 
 ## Third-party and inherited material
@@ -47,6 +47,10 @@ outside the Apache-2.0 scope.
 Third-party dependencies, bundled assets, and source copied from inherited
 packages retain their licenses and attribution. In particular,
 `crates/gpui_icons/assets/lucide/LICENSE` contains the Lucide ISC and Feather MIT notices.
+
+The optional `gpui_webview/servo` backend uses the Servo and Stylo forks under
+MPL-2.0 and their transitive dependencies under their respective licenses.
+The fork repositories retain their upstream source headers and license notices.
 
 The optional `gpui_richtext/syntax-extra` feature embeds syntax definitions from
 `two-face`; their notices are available through `gpui_richtext::syntax::licenses`.

@@ -43,6 +43,7 @@ impl WebView {
             wake: Arc::new(sender),
             dirty: Cell::new(false),
             animating: Cell::new(false),
+            visible: Cell::new(true),
             cursor: Cell::new(CursorStyle::Arrow),
             events: RefCell::new(Vec::new()),
             ime: RefCell::new(None),
@@ -55,7 +56,7 @@ impl WebView {
                 let Some(signals) = weak_signals.upgrade() else {
                     break;
                 };
-                let animating = signals.animating.get();
+                let animating = signals.animating.get() && signals.visible.get();
                 drop(signals);
                 if animating {
                     let _ = futures::future::select(
@@ -129,6 +130,41 @@ impl WebView {
 
     pub fn status(&self) -> &WebViewStatus {
         &self.status
+    }
+
+    /// Whether this view is enabled for display. Closed views are never visible.
+    pub fn is_visible(&self) -> bool {
+        self.signals.visible.get() && self.status != WebViewStatus::Closed
+    }
+
+    /// Hide or show the native surface while retaining the page and its history.
+    /// Hidden views do not paint or use the host animation timer. Script execution
+    /// and network requests can continue; this is not a page suspension API.
+    pub fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if self.status == WebViewStatus::Closed || self.signals.visible.get() == visible {
+            return;
+        }
+        if !visible {
+            for button in std::mem::take(&mut self.pressed_buttons) {
+                self.input(
+                    Input::Button {
+                        position: self.pointer_position,
+                        button,
+                        pressed: false,
+                    },
+                    cx,
+                );
+            }
+            self.input(Input::Focus(false), cx);
+            self.invalidate_input();
+            self.signals.ime.borrow_mut().take();
+        }
+        self.signals.visible.set(visible);
+        if let Some(engine) = self.engine.borrow_mut().as_mut() {
+            engine.set_visible(visible);
+        }
+        let _ = self.signals.wake.try_send(());
+        cx.notify();
     }
 
     /// Attach an auxiliary-window request when this view initializes.
@@ -220,7 +256,10 @@ impl WebView {
         match request.and_then(|request| {
             backend::create(&self.options, request, self.signals.clone(), window, cx)
         }) {
-            Ok(engine) => {
+            Ok(mut engine) => {
+                if !self.signals.visible.get() {
+                    engine.set_visible(false);
+                }
                 *self.engine.borrow_mut() = Some(engine);
                 self.status = WebViewStatus::Ready;
                 self.signals.emit(WebViewEvent::Ready);
@@ -235,6 +274,9 @@ impl WebView {
         cx.notify();
     }
     fn input(&mut self, input: Input, cx: &mut Context<Self>) {
+        if !self.is_visible() {
+            return;
+        }
         if let Some(engine) = self.engine.borrow_mut().as_mut() {
             engine.input(input);
         }
@@ -267,7 +309,7 @@ impl WebView {
             }
         }
         let events = std::mem::take(&mut *self.signals.events.borrow_mut());
-        if self.signals.dirty.get() || !events.is_empty() {
+        if (self.is_visible() && self.signals.dirty.get()) || !events.is_empty() {
             cx.notify();
         }
         for event in events {
@@ -290,6 +332,9 @@ impl Drop for WebView {
 }
 impl Render for WebView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.is_visible() {
+            return div().size_full().into_any_element();
+        }
         let layout = self.engine.clone();
         let paint = self.engine.clone();
         let signals = self.signals.clone();
@@ -419,5 +464,6 @@ impl Render for WebView {
                 )
                 .size_full(),
             )
+            .into_any_element()
     }
 }

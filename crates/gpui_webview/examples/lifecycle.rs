@@ -11,6 +11,7 @@ struct Arguments {
 struct LifecycleWindow {
     url: Url,
     views: Vec<Entity<WebView>>,
+    visible: bool,
 }
 
 impl Render for LifecycleWindow {
@@ -33,8 +34,11 @@ impl Render for LifecycleWindow {
                         cx.listener(|this, _, window, cx| {
                             let options =
                                 WebViewOptions::new(WebViewBackend::Servo, this.url.clone());
-                            this.views
-                                .push(cx.new(|cx| WebView::new(options, window, cx)));
+                            this.views.push(cx.new(|cx| {
+                                let mut view = WebView::new(options, window, cx);
+                                view.set_visible(this.visible, cx);
+                                view
+                            }));
                             cx.notify();
                         }),
                     ))
@@ -58,6 +62,19 @@ impl Render for LifecycleWindow {
                             .on_click(cx.listener(|this, _, _, cx| {
                                 for view in this.views.drain(..) {
                                     view.update(cx, |view, cx| view.close(cx));
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .id("visibility")
+                            .cursor_pointer()
+                            .child(if self.visible { "Hide all" } else { "Show all" })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.visible = !this.visible;
+                                for view in &this.views {
+                                    view.update(cx, |view, cx| view.set_visible(this.visible, cx));
                                 }
                                 cx.notify();
                             })),
@@ -104,6 +121,7 @@ fn main() {
                 cx.new(|_| LifecycleWindow {
                     url: arguments.url,
                     views: Vec::new(),
+                    visible: true,
                 })
             },
         )

@@ -335,6 +335,16 @@ impl Drop for ServoBackend {
     }
 }
 impl Engine for ServoBackend {
+    fn set_visible(&mut self, visible: bool) {
+        if visible {
+            self.webview.show();
+            self.signals.request_frame();
+        } else {
+            self.webview.hide();
+            self.child.hide();
+        }
+    }
+
     fn place(&mut self, bounds: Bounds<Pixels>, scale: f32) {
         if self.bounds == bounds && self.scale.get() == scale {
             return;
@@ -362,6 +372,9 @@ impl Engine for ServoBackend {
         self.signals.request_frame();
     }
     fn paint(&mut self) -> Result<()> {
+        if !self.signals.visible.get() {
+            return Ok(());
+        }
         if self.signals.dirty.replace(false) {
             self.context
                 .make_current()

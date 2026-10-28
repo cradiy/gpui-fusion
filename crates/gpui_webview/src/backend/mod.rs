@@ -18,6 +18,7 @@ pub(crate) struct Signals {
     pub wake: Arc<async_channel::Sender<()>>,
     pub dirty: Cell<bool>,
     pub animating: Cell<bool>,
+    pub visible: Cell<bool>,
     pub cursor: Cell<CursorStyle>,
     pub events: RefCell<Vec<WebViewEvent>>,
     pub ime: RefCell<Option<ImeState>>,
@@ -73,6 +74,7 @@ pub(crate) enum Input {
 }
 
 pub(crate) trait Engine {
+    fn set_visible(&mut self, visible: bool);
     fn place(&mut self, bounds: Bounds<Pixels>, scale: f32);
     fn paint(&mut self) -> Result<()>;
     fn poll(&mut self);

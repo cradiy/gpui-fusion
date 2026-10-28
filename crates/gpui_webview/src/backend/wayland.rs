@@ -94,6 +94,12 @@ impl ChildSurface {
         let _ = self.queue.dispatch_pending(&mut Events);
         let _ = self.connection.flush();
     }
+
+    pub fn hide(&self) {
+        self.surface.attach(None, 0, 0);
+        self.surface.commit();
+        let _ = self.connection.flush();
+    }
 }
 impl HasDisplayHandle for ChildSurface {
     fn display_handle(&self) -> Result<DisplayHandle<'_>, raw_window_handle::HandleError> {

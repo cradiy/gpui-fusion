@@ -48,7 +48,7 @@ cargo run -p gpui_webview --features servo --example browser --profile release-f
 ```
 
 The lifecycle example starts with a GPUI window and no browser views. Use
-**Add view**, **Remove view**, and **Close all** to inspect initialization,
+**Add view**, **Remove view**, **Hide all** / **Show all**, and **Close all** to inspect initialization,
 multiple views, and resource release without exiting the host process. The
 toolbar displays the process ID. An optional URL selects the page for new
 views; the default is `about:blank`.
@@ -61,6 +61,12 @@ Views share one Servo runtime per GPUI application. Closing all views releases
 their documents and renderers; the shared runtime remains available for new
 views. Compare memory against the initial host window in the same build and
 window size, and allow time for background page reclamation.
+
+Call `WebView::set_visible(false, cx)` before retaining a view outside the visible
+layout. Hidden views detach their native surface and stop host animation polling
+and painting, while preserving the document and history. Showing the view resumes
+rendering. Hiding does not suspend JavaScript or network activity and does not
+release the renderer. Use `close` to permanently release a view's resources.
 
 Pass an absolute URL as the first argument to open a remote page:
 

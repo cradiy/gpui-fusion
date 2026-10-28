@@ -72,8 +72,15 @@ Enter a URL in the example's address bar and press **Enter** or click **Go** to
 navigate. Addresses without a scheme use HTTPS. The address bar follows page
 navigation, including redirects and history changes.
 
+Requests to open auxiliary windows are delivered through
+`WebViewEvent::NewWindowRequested`. Applications can pass the request to
+`WebView::from_window_request` in a new GPUI window, preserving the engine's
+destination and opener semantics. Requests are handled once; dropping all
+unhandled clones rejects the request. The browser example opens these requests
+in separate windows and closes them when the engine accepts a script close.
+
 The example's **Console** button opens page logs in a separate window, with the
-newest messages first. It retains up to 500 messages across navigation, truncates
+newest messages first. It clears on navigation, retains up to 500 messages, truncates
 each displayed message to 16,384 characters, and provides a **Clear** action.
 Console output also goes to stderr. JavaScript evaluation and object inspection
 are not available in this panel.

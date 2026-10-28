@@ -18,6 +18,7 @@ mod input;
 /// Subscribe to [`WebViewEvent`] for readiness and initialization failures.
 pub struct WebView {
     options: WebViewOptions,
+    new_window: Option<crate::WebViewWindowRequest>,
     engine: Rc<RefCell<Option<Box<dyn Engine>>>>,
     signals: Rc<Signals>,
     status: WebViewStatus,
@@ -112,6 +113,7 @@ impl WebView {
         ];
         Self {
             options,
+            new_window: None,
             engine: Rc::new(RefCell::new(None)),
             signals,
             status: WebViewStatus::Initializing,
@@ -129,12 +131,34 @@ impl WebView {
         &self.status
     }
 
+    /// Attach an auxiliary-window request when this view initializes.
+    /// The engine preserves the requested destination and opener semantics.
+    pub fn from_window_request(
+        request: crate::WebViewWindowRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut view = Self::new(
+            WebViewOptions::new(
+                crate::WebViewBackend::Servo,
+                Url::parse("about:blank").unwrap(),
+            ),
+            window,
+            cx,
+        );
+        view.new_window = Some(request);
+        view
+    }
+
     /// Permanently release this view's native resources. Create another view to reopen it.
     pub fn close(&mut self, cx: &mut Context<Self>) {
         if self.status == WebViewStatus::Closed {
             return;
         }
         self.engine.borrow_mut().take();
+        if let Some(request) = self.new_window.take() {
+            request.cancel();
+        }
         self.pressed_buttons.clear();
         self.marked_text = None;
         self.pending_composition.clear();
@@ -153,6 +177,9 @@ impl WebView {
 
     /// Navigate immediately, or replace the initial URL while initialization is pending.
     pub fn navigate(&mut self, url: Url, cx: &mut Context<Self>) {
+        if let Some(request) = self.new_window.take() {
+            request.cancel();
+        }
         self.invalidate_input();
         self.options.url = url.clone();
         if let Some(engine) = self.engine.borrow_mut().as_mut() {
@@ -185,7 +212,14 @@ impl WebView {
         if self.status != WebViewStatus::Initializing {
             return;
         }
-        match backend::create(&self.options, self.signals.clone(), window, cx) {
+        let request = self
+            .new_window
+            .take()
+            .map(|request| request.take())
+            .transpose();
+        match request.and_then(|request| {
+            backend::create(&self.options, request, self.signals.clone(), window, cx)
+        }) {
             Ok(engine) => {
                 *self.engine.borrow_mut() = Some(engine);
                 self.status = WebViewStatus::Ready;
@@ -237,6 +271,10 @@ impl WebView {
             cx.notify();
         }
         for event in events {
+            if matches!(event, WebViewEvent::Closed) {
+                self.close(cx);
+                break;
+            }
             if let WebViewEvent::Failed(message) = &event {
                 self.status = WebViewStatus::Failed(message.clone());
             }

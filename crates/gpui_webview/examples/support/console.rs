@@ -8,6 +8,11 @@ pub struct PageConsole {
 }
 
 impl PageConsole {
+    pub fn clear(&mut self, cx: &mut Context<Self>) {
+        self.entries.clear();
+        cx.notify();
+    }
+
     pub fn push(&mut self, message: &WebViewConsoleMessage, cx: &mut Context<Self>) {
         if self.entries.len() == 500 {
             self.entries.pop_front();
@@ -45,8 +50,7 @@ impl Render for PageConsole {
                             .cursor_pointer()
                             .child("Clear")
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.entries.clear();
-                                cx.notify();
+                                this.clear(cx);
                             })),
                     ),
             )

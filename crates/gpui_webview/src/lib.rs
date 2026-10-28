@@ -2,9 +2,11 @@
 
 mod backend;
 mod dialog;
+mod new_window;
 mod view;
 
 pub use dialog::{WebViewDialog, WebViewDialogKind};
+pub use new_window::WebViewWindowRequest;
 pub use url::Url;
 pub use view::WebView;
 
@@ -70,6 +72,7 @@ pub enum WebViewEvent {
     UrlChanged(Url),
     Failed(String),
     DialogRequested(WebViewDialog),
+    NewWindowRequested(WebViewWindowRequest),
     ConsoleMessage(WebViewConsoleMessage),
 }
 

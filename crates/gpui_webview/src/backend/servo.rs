@@ -42,6 +42,8 @@ impl Runtime {
             let wakes = Arc::new(Mutex::new(Vec::new()));
             let servo = ::servo::ServoBuilder::default()
                 .preferences(::servo::Preferences {
+                    dom_web_animations_enabled: true,
+                    dom_exec_command_enabled: true,
                     dom_async_clipboard_enabled: true,
                     dom_async_clipboard_read_enabled: false,
                     dom_intersection_observer_enabled: true,
@@ -77,6 +79,23 @@ impl std::ops::Deref for ServoDelegate {
     }
 }
 impl WebViewDelegate for ServoDelegate {
+    fn notify_closed(&self, _: ::servo::WebView) {
+        self.emit(WebViewEvent::Closed);
+    }
+
+    fn request_create_new(
+        &self,
+        parent: ::servo::WebView,
+        request: ::servo::CreateNewWebViewRequest,
+    ) {
+        self.emit(WebViewEvent::NewWindowRequested(
+            crate::WebViewWindowRequest::new(
+                parent.url(),
+                crate::new_window::NewWindow::Servo(request),
+            ),
+        ));
+    }
+
     fn show_console_message(
         &self,
         _: ::servo::WebView,
@@ -256,6 +275,7 @@ pub(super) struct ServoBackend {
 impl ServoBackend {
     pub fn new(
         options: &WebViewOptions,
+        new_window: Option<crate::new_window::NewWindow>,
         signals: Rc<Signals>,
         window: &Window,
         cx: &mut App,
@@ -274,8 +294,11 @@ impl ServoBackend {
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
         let servo = Runtime::acquire(cx, &signals);
         let dialogs = Rc::new(RefCell::new(Vec::new()));
-        let webview = ::servo::WebViewBuilder::new(&servo, context.clone())
-            .url(options.url.clone())
+        let builder = match new_window {
+            Some(crate::new_window::NewWindow::Servo(request)) => request.builder(context.clone()),
+            None => ::servo::WebViewBuilder::new(&servo, context.clone()).url(options.url.clone()),
+        };
+        let webview = builder
             .hidpi_scale_factor(euclid::Scale::new(window.scale_factor()))
             .delegate(Rc::new(ServoDelegate {
                 signals: signals.clone(),

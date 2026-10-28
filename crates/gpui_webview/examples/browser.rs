@@ -40,6 +40,15 @@ impl BrowserWindow {
                 cx,
             )
         });
+        Self::with_view(home, view, window, cx)
+    }
+
+    fn with_view(
+        home: Url,
+        view: Entity<WebView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let console = cx.new(|_| PageConsole::default());
         let address = cx.new(|cx| {
             TextInput::new(cx)
@@ -53,8 +62,31 @@ impl BrowserWindow {
         });
         let events = cx.subscribe_in(&view, window, |this, _, event, window, cx| {
             match event {
+                WebViewEvent::NewWindowRequested(request) => {
+                    let request = request.clone();
+                    let options = WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                            None,
+                            size(px(1000.), px(760.)),
+                            cx,
+                        ))),
+                        ..Default::default()
+                    };
+                    if let Err(error) = cx.open_window(options, move |window, cx| {
+                        let view = cx.new(|cx| WebView::from_window_request(request, window, cx));
+                        cx.new(|cx| {
+                            Self::with_view(Url::parse("about:blank").unwrap(), view, window, cx)
+                        })
+                    }) {
+                        this.address_error = Some(error.to_string());
+                    }
+                }
+                WebViewEvent::Closed => window.remove_window(),
                 WebViewEvent::TitleChanged(Some(title)) => window.set_window_title(title),
-                WebViewEvent::LoadStarted => this.address_error = None,
+                WebViewEvent::LoadStarted => {
+                    this.address_error = None;
+                    this.console.update(cx, |console, cx| console.clear(cx));
+                }
                 WebViewEvent::UrlChanged(url) if *url != this.current_url => {
                     this.current_url = url.clone();
                     this.address.update(cx, |address, cx| {

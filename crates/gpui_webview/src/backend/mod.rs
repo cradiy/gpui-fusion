@@ -85,6 +85,7 @@ pub(crate) trait Engine {
 
 pub(crate) fn create(
     options: &WebViewOptions,
+    new_window: Option<crate::new_window::NewWindow>,
     signals: Rc<Signals>,
     window: &Window,
     cx: &mut App,
@@ -92,11 +93,11 @@ pub(crate) fn create(
     match options.backend {
         #[cfg(all(feature = "servo", target_os = "linux"))]
         WebViewBackend::Servo => Ok(Box::new(servo::ServoBackend::new(
-            options, signals, window, cx,
+            options, new_window, signals, window, cx,
         )?)),
         #[cfg(not(all(feature = "servo", target_os = "linux")))]
         WebViewBackend::Servo => {
-            let _ = (signals, window, cx);
+            let _ = (new_window, signals, window, cx);
             bail!("Servo requires the gpui_webview/servo feature and Linux Wayland")
         }
     }

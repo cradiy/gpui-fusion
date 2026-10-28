@@ -26,6 +26,7 @@ members = [
   "crates/gpui_tokio",
   "crates/gpui_util",
   "crates/gpui_web",
+  "crates/gpui_webview",
   "crates/gpui_wgpu",
   "crates/gpui_render",
   "crates/gpui_richtext",
@@ -79,6 +80,7 @@ gpui_3d_effects = { path = "crates/gpui_3d_effects" }
 gpui_3d_gltf = { path = "crates/gpui_3d_gltf" }
 gpui_platform = { path = "crates/gpui_platform", default-features = false }
 gpui_web = { path = "crates/gpui_web", default-features = false }
+gpui_webview = { path = "crates/gpui_webview", default-features = false }
 gpui_wgpu = { path = "crates/gpui_wgpu" }
 gpui_render = { path = "crates/gpui_render" }
 gpui_richtext = { path = "crates/gpui_richtext" }
@@ -370,6 +372,8 @@ proc-macro2 = { opt-level = 3 }
 
 taffy = { opt-level = 3 }
 resvg = { opt-level = 3 }
+tiny-skia = { opt-level = 3 }
+tiny-skia-path = { opt-level = 3 }
 serde_json = { opt-level = 3 }
 # Text shaping and font fallback run on the input frame's critical path.
 cosmic-text = { opt-level = 3 }
@@ -378,6 +382,14 @@ skrifa = { opt-level = 3 }
 read-fonts = { opt-level = 3 }
 font-types = { opt-level = 3 }
 swash = { opt-level = 3 }
+vello_cpu = { opt-level = 3 }
+vello_common = { opt-level = 3 }
+fearless_simd = { opt-level = 3 }
+color = { opt-level = 3 }
+peniko = { opt-level = 3 }
+servo-canvas = { opt-level = 3 }
+webrender = { opt-level = 3 }
+webrender_api = { opt-level = 3 }
 fontdb = { opt-level = 3 }
 unicode-bidi = { opt-level = 3 }
 unicode-linebreak = { opt-level = 3 }

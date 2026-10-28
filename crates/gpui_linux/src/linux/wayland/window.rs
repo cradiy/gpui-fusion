@@ -4,6 +4,7 @@ use std::{
     ptr::NonNull,
     rc::Rc,
     sync::Arc,
+    time::{Duration, Instant},
 };
 
 use collections::{FxHashMap, HashMap};
@@ -248,6 +249,9 @@ pub struct WaylandWindowState {
     hovered: bool,
     pub(crate) force_render_after_recovery: bool,
     renderer_presented: bool,
+    last_present_time: Instant,
+    idle_release_pending: bool,
+    idle_release_task: Option<gpui::Task<()>>,
     in_progress_configure: Option<InProgressConfigure>,
     resize_throttle: bool,
     in_progress_window_controls: Option<WindowControls>,
@@ -785,6 +789,9 @@ impl WaylandWindowState {
             hovered: false,
             force_render_after_recovery: false,
             renderer_presented: false,
+            last_present_time: Instant::now(),
+            idle_release_pending: false,
+            idle_release_task: None,
             in_progress_window_controls: None,
             window_controls: WindowControls::default(),
             client_inset: None,
@@ -2321,6 +2328,36 @@ impl PlatformWindow for WaylandWindow {
         state.renderer_presented = state.renderer.draw(scene);
         if state.renderer_presented {
             state.presented_destination = destination;
+            state.last_present_time = Instant::now();
+            if !state.idle_release_pending {
+                state.idle_release_pending = true;
+                let weak = Rc::downgrade(&self.0.state);
+                let background = state
+                    .client
+                    .get_client()
+                    .borrow()
+                    .common
+                    .background_executor
+                    .clone();
+                state.idle_release_task = Some(state.globals.executor.spawn(async move {
+                    let idle_delay = Duration::from_secs(2);
+                    let mut delay = idle_delay;
+                    loop {
+                        background.timer(delay).await;
+                        let Some(state) = weak.upgrade() else {
+                            break;
+                        };
+                        let mut state = state.borrow_mut();
+                        let elapsed = state.last_present_time.elapsed();
+                        if elapsed >= idle_delay {
+                            state.renderer.release_idle_resources();
+                            state.idle_release_pending = false;
+                            break;
+                        }
+                        delay = idle_delay - elapsed;
+                    }
+                }));
+            }
         } else if let Some(viewport) = &state.viewport {
             // Texture acquisition can fail without presenting. Cancel the
             // pending destination before any unrelated surface commit.

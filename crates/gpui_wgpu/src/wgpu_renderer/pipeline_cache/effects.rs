@@ -55,13 +55,14 @@ impl WgpuRenderer {
         Some(Box::new(move || {
             // Isolated raster captures render into a premultiplied target.
             // Their base pipelines must be ready before the first capture too.
-            Self::shared_pipelines(
+            let (_, pipelines) = Self::shared_pipelines(
                 &context,
                 format,
                 wgpu::CompositeAlphaMode::PreMultiplied,
                 samples,
                 dual_source,
             );
+            pipelines.prepare();
             let mut alphas = vec![alpha];
             if alpha != wgpu::CompositeAlphaMode::PreMultiplied {
                 alphas.push(wgpu::CompositeAlphaMode::PreMultiplied);

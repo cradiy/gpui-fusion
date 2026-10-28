@@ -41,6 +41,16 @@ impl Runtime {
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
             let wakes = Arc::new(Mutex::new(Vec::new()));
             let servo = ::servo::ServoBuilder::default()
+                .preferences(::servo::Preferences {
+                    dom_async_clipboard_enabled: true,
+                    dom_async_clipboard_read_enabled: false,
+                    dom_intersection_observer_enabled: true,
+                    dom_adoptedstylesheet_enabled: true,
+                    dom_visual_viewport_enabled: true,
+                    layout_css_masking_enabled: true,
+                    session_history_max_length: 0,
+                    ..Default::default()
+                })
                 .event_loop_waker(Box::new(RuntimeWaker(wakes.clone())))
                 .build();
             cx.set_global(Self { servo, wakes });
@@ -67,6 +77,28 @@ impl std::ops::Deref for ServoDelegate {
     }
 }
 impl WebViewDelegate for ServoDelegate {
+    fn show_console_message(
+        &self,
+        _: ::servo::WebView,
+        level: ::servo::ConsoleLogLevel,
+        message: String,
+    ) {
+        use crate::WebViewConsoleLevel as Level;
+        let level = match level {
+            ::servo::ConsoleLogLevel::Log => Level::Log,
+            ::servo::ConsoleLogLevel::Debug => Level::Debug,
+            ::servo::ConsoleLogLevel::Info => Level::Info,
+            ::servo::ConsoleLogLevel::Warn => Level::Warn,
+            ::servo::ConsoleLogLevel::Error => Level::Error,
+            ::servo::ConsoleLogLevel::Trace => Level::Trace,
+            ::servo::ConsoleLogLevel::Dir => Level::Dir,
+        };
+        self.emit(WebViewEvent::ConsoleMessage(crate::WebViewConsoleMessage {
+            level,
+            message,
+        }));
+    }
+
     fn show_embedder_control(&self, view: ::servo::WebView, control: ::servo::EmbedderControl) {
         let id = control.id();
         if let ::servo::EmbedderControl::SimpleDialog(dialog) = control {

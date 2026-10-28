@@ -169,6 +169,55 @@ fn shared_monochrome_coverage_opacity_and_transformed_clip() -> anyhow::Result<(
     );
     assert_eq!(partial[0], partial[1]);
     assert_eq!(partial[1], partial[2]);
+    renderer.renderer.release_idle_resources();
+    assert_eq!(renderer.render_rgba(&scene)?, result);
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn scratch_targets_rebuild_after_idle_release() -> anyhow::Result<()> {
+    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(96), DevicePixels(64)))?;
+    let mut builder = gpui::PathBuilder::fill();
+    builder.move_to(point(px(8.), px(8.)));
+    builder.line_to(point(px(88.), px(16.)));
+    builder.line_to(point(px(40.), px(56.)));
+    builder.close();
+    let mut path = builder.build()?.scale(1.);
+    path.color = rgba(0xff8033ff).into();
+    path.content_mask = ContentMask {
+        bounds: bounds(0., 0., 96., 64.),
+    };
+    let mut scene = Scene::default();
+    scene.insert_primitive(path);
+    scene.insert_primitive(gpui::BackdropBlur {
+        order: Default::default(),
+        bounds: bounds(24., 24., 48., 32.),
+        content_mask: ContentMask {
+            bounds: bounds(0., 0., 96., 64.),
+        },
+        blur_radius: ScaledPixels(4.),
+        opacity: 1.,
+        corner_radii: Default::default(),
+        shader: None,
+        uniforms: Default::default(),
+        time: 0.,
+        pointer: Default::default(),
+        pointer_active: false,
+    });
+    scene.finish();
+    let expected = renderer.render_rgba(&scene)?;
+    assert!(expected.chunks_exact(4).any(|pixel| pixel[0] > 100));
+    for _ in 0..3 {
+        let before = renderer.memory_stats();
+        assert!(before.path_texture_bytes > 0);
+        assert!(before.backdrop_texture_bytes > 0);
+        renderer.renderer.release_idle_resources();
+        let after = renderer.memory_stats();
+        assert_eq!(after.path_texture_bytes, 0);
+        assert_eq!(after.backdrop_texture_bytes, 0);
+        assert_eq!(renderer.render_rgba(&scene)?, expected);
+    }
     Ok(())
 }
 

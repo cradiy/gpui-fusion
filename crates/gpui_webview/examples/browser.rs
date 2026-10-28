@@ -1,19 +1,38 @@
+use clap::Parser;
 use gpui::{prelude::*, *};
 use gpui_webview::{Url, WebView, WebViewBackend, WebViewDialogKind, WebViewEvent, WebViewOptions};
+use uic::components::input::{Input, InputEvent, TextInput};
+
+#[path = "support/console.rs"]
+mod console;
+use console::PageConsole;
+
+#[derive(Parser)]
+struct Arguments {
+    /// Initial page URL. Opens the bundled page when omitted.
+    url: Option<Url>,
+}
 
 struct BrowserWindow {
     view: Entity<WebView>,
-    title: SharedString,
+    address: Entity<TextInput>,
+    current_url: Url,
+    address_error: Option<String>,
     home: Url,
+    console: Entity<PageConsole>,
+    console_window: Option<WindowHandle<PageConsole>>,
     _events: Subscription,
+    _address_events: Subscription,
 }
 impl BrowserWindow {
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let home = Url::from_file_path(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/examples/browser.html"
-        ))
-        .unwrap();
+    fn new(url: Option<Url>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let home = url.unwrap_or_else(|| {
+            Url::from_file_path(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/examples/browser.html"
+            ))
+            .unwrap()
+        });
         let view = cx.new(|cx| {
             WebView::new(
                 WebViewOptions::new(WebViewBackend::Servo, home.clone()),
@@ -21,11 +40,35 @@ impl BrowserWindow {
                 cx,
             )
         });
-        let events = cx.subscribe(&view, |this, _, event, cx| {
+        let console = cx.new(|_| PageConsole::default());
+        let address = cx.new(|cx| {
+            TextInput::new(cx)
+                .placeholder("Enter a URL")
+                .initial_value(home.as_str().to_owned())
+        });
+        let address_events = cx.subscribe_in(&address, window, |this, _, event, window, cx| {
+            if let InputEvent::Submit(_) = event {
+                this.navigate_address(window, cx);
+            }
+        });
+        let events = cx.subscribe_in(&view, window, |this, _, event, window, cx| {
             match event {
-                WebViewEvent::TitleChanged(Some(title)) => this.title = title.clone().into(),
+                WebViewEvent::TitleChanged(Some(title)) => window.set_window_title(title),
+                WebViewEvent::LoadStarted => this.address_error = None,
+                WebViewEvent::UrlChanged(url) if *url != this.current_url => {
+                    this.current_url = url.clone();
+                    this.address.update(cx, |address, cx| {
+                        address.set_value(url.as_str().to_owned(), cx);
+                    });
+                }
+                WebViewEvent::ConsoleMessage(message) => {
+                    eprintln!("[page {:?}] {}", message.level, message.message);
+                    this.console
+                        .update(cx, |console, cx| console.push(message, cx));
+                    return;
+                }
                 WebViewEvent::Failed(error) => {
-                    this.title = error.clone().into();
+                    this.address_error = Some(error.clone());
                     eprintln!("{error}");
                 }
                 WebViewEvent::DialogRequested(dialog) => {
@@ -56,10 +99,44 @@ impl BrowserWindow {
         });
         Self {
             view,
-            title: "Browser".into(),
+            address,
+            current_url: home.clone(),
+            address_error: None,
             home,
+            console,
+            console_window: None,
             _events: events,
+            _address_events: address_events,
         }
+    }
+
+    fn navigate_address(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let value = self.address.read(cx).value();
+        let value = value.trim();
+        if value.is_empty() {
+            return;
+        }
+        let address = if value.contains("://")
+            || value.starts_with("about:")
+            || value.starts_with("data:")
+            || value.starts_with("file:")
+        {
+            value.to_owned()
+        } else {
+            format!("https://{value}")
+        };
+        let Ok(url) = Url::parse(&address) else {
+            self.address_error = Some("Enter a valid URL".into());
+            cx.notify();
+            return;
+        };
+        self.address_error = None;
+        self.address.update(cx, |address, cx| {
+            address.set_value(url.as_str().to_owned(), cx)
+        });
+        self.view.update(cx, |view, cx| view.navigate(url, cx));
+        window.blur();
+        cx.notify();
     }
 }
 struct PageDialog(gpui_webview::WebViewDialog);
@@ -120,11 +197,11 @@ impl Render for BrowserWindow {
             .text_color(rgb(0xe2ebf4))
             .child(
                 div()
-                    .h(px(48.))
+                    .h(px(56.))
                     .flex_shrink_0()
                     .px_4()
                     .flex()
-                    .gap_4()
+                    .gap_3()
                     .items_center()
                     .child(
                         div()
@@ -163,13 +240,65 @@ impl Render for BrowserWindow {
                                 this.view.update(cx, |view, cx| view.navigate(home, cx));
                             })),
                     )
-                    .child(self.title.clone()),
+                    .child(
+                        div()
+                            .id("console")
+                            .cursor_pointer()
+                            .child("Console")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(handle) = this.console_window {
+                                    if handle
+                                        .update(cx, |_, window, _| window.activate_window())
+                                        .is_ok()
+                                    {
+                                        return;
+                                    }
+                                }
+                                let console = this.console.clone();
+                                this.console_window = cx
+                                    .open_window(
+                                        WindowOptions {
+                                            titlebar: Some(TitlebarOptions {
+                                                title: Some("Page console".into()),
+                                                ..Default::default()
+                                            }),
+                                            ..Default::default()
+                                        },
+                                        |_, _| console,
+                                    )
+                                    .ok();
+                            })),
+                    )
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Input::new(&self.address)
+                                .h(px(36.))
+                                .bg(rgb(0x182533))
+                                .text_color(rgb(0xe2ebf4))
+                                .border_color(rgb(0x405366)),
+                        ),
+                    )
+                    .child(div().id("go").cursor_pointer().child("Go").on_click(
+                        cx.listener(|this, _, window, cx| this.navigate_address(window, cx)),
+                    )),
             )
+            .when_some(self.address_error.clone(), |root, error| {
+                root.child(
+                    div()
+                        .px_4()
+                        .pb_2()
+                        .text_sm()
+                        .text_color(rgb(0xffa0a0))
+                        .child(error),
+                )
+            })
             .child(div().flex_1().min_h_0().child(self.view.clone()))
     }
 }
 fn main() {
-    gpui_platform::application().run(|cx| {
+    let arguments = Arguments::parse();
+    gpui_platform::application().run(move |cx| {
+        uic::init(cx);
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
                 cx.quit();
@@ -189,7 +318,7 @@ fn main() {
                 }),
                 ..Default::default()
             },
-            |window, cx| cx.new(|cx| BrowserWindow::new(window, cx)),
+            move |window, cx| cx.new(|cx| BrowserWindow::new(arguments.url, window, cx)),
         )
         .unwrap();
         cx.activate(true);

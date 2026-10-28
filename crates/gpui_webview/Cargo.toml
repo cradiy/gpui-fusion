@@ -28,9 +28,11 @@ futures.workspace = true
 url.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-servo = { git = "https://github.com/cradiy/servo", rev = "35441cb8cd306a0da5e01626685051976906ccde", default-features = false, features = [
+servo = { git = "https://github.com/cradiy/servo", branch = "gpui-servo", default-features = false, features = [
   "baked-in-resources",
   "js_jit",
+  "jemalloc",
+  "webcrypto",
 ], optional = true }
 dpi = { version = "0.1", optional = true }
 euclid = { version = "0.22", optional = true }
@@ -45,10 +47,16 @@ wayland-backend = { version = "0.3", features = [
 wayland-protocols = { version = "0.32", features = ["client"], optional = true }
 
 [dev-dependencies]
+uic = { path = "../../uic" }
+clap = { version = "4", features = ["derive"] }
 gpui_platform = { workspace = true, default-features = true }
 
 [[example]]
 name = "browser"
+required-features = ["servo"]
+
+[[example]]
+name = "lifecycle"
 required-features = ["servo"]
 
 [lints]

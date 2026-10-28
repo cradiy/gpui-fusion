@@ -48,6 +48,9 @@ const FILE_PICKER_PORTAL_MISSING: &str =
     "Couldn't open file picker due to missing xdg-desktop-portal implementation.";
 
 pub(crate) trait LinuxClient {
+    fn set_gpu_idle_timeout(&self, _timeout: Option<std::time::Duration>) -> bool {
+        false
+    }
     fn compositor_name(&self) -> &'static str;
     fn with_common<R>(&self, f: impl FnOnce(&mut LinuxCommon) -> R) -> R;
     fn keyboard_layout(&self) -> Box<dyn PlatformKeyboardLayout>;
@@ -290,6 +293,10 @@ pub(crate) struct LinuxPlatform<P> {
 }
 
 impl<P: LinuxClient + 'static> Platform for LinuxPlatform<P> {
+    fn set_gpu_idle_timeout(&self, timeout: Option<std::time::Duration>) -> bool {
+        self.inner.set_gpu_idle_timeout(timeout)
+    }
+
     fn background_executor(&self) -> BackgroundExecutor {
         self.inner
             .with_common(|common| common.background_executor.clone())

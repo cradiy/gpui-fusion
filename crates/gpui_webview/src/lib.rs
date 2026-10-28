@@ -38,7 +38,27 @@ impl WebViewOptions {
     }
 }
 
-/// Browser lifecycle and navigation notifications.
+/// Severity or operation associated with a page console message.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum WebViewConsoleLevel {
+    Log,
+    Debug,
+    Info,
+    Warn,
+    Error,
+    Trace,
+    Dir,
+}
+
+/// Text reported by the page console or an uncaught script error.
+#[derive(Clone, Debug)]
+pub struct WebViewConsoleMessage {
+    pub level: WebViewConsoleLevel,
+    pub message: String,
+}
+
+/// Browser lifecycle, navigation, and page notifications.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum WebViewEvent {
@@ -50,6 +70,7 @@ pub enum WebViewEvent {
     UrlChanged(Url),
     Failed(String),
     DialogRequested(WebViewDialog),
+    ConsoleMessage(WebViewConsoleMessage),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

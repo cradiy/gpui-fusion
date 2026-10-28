@@ -153,19 +153,48 @@ pub struct WgpuSurfaceConfig {
     pub preferred_present_mode: Option<wgpu::PresentMode>,
 }
 
+#[cfg(not(target_family = "wasm"))]
+type PipelineInitializer = Box<dyn FnOnce() -> wgpu::RenderPipeline + Send + Sync>;
+#[cfg(target_family = "wasm")]
+type PipelineInitializer = Box<dyn FnOnce() -> wgpu::RenderPipeline>;
+type LazyRenderPipeline = std::sync::LazyLock<wgpu::RenderPipeline, PipelineInitializer>;
+
 struct WgpuPipelines {
-    backdrop_blur: wgpu::RenderPipeline,
-    backdrop_composite: wgpu::RenderPipeline,
-    quads: wgpu::RenderPipeline,
-    shadows: wgpu::RenderPipeline,
-    path_rasterization: wgpu::RenderPipeline,
-    paths: wgpu::RenderPipeline,
-    underlines: wgpu::RenderPipeline,
-    mono_sprites: wgpu::RenderPipeline,
-    subpixel_sprites: Option<wgpu::RenderPipeline>,
-    poly_sprites: wgpu::RenderPipeline,
-    surfaces_rgba: wgpu::RenderPipeline,
-    surfaces_nv12: wgpu::RenderPipeline,
+    backdrop_blur: LazyRenderPipeline,
+    backdrop_composite: LazyRenderPipeline,
+    quads: LazyRenderPipeline,
+    shadows: LazyRenderPipeline,
+    path_rasterization: LazyRenderPipeline,
+    paths: LazyRenderPipeline,
+    underlines: LazyRenderPipeline,
+    mono_sprites: LazyRenderPipeline,
+    subpixel_sprites: Option<LazyRenderPipeline>,
+    poly_sprites: LazyRenderPipeline,
+    surfaces_rgba: LazyRenderPipeline,
+    surfaces_nv12: LazyRenderPipeline,
+}
+
+impl WgpuPipelines {
+    fn prepare(&self) {
+        for pipeline in [
+            &self.quads,
+            &self.shadows,
+            &self.path_rasterization,
+            &self.paths,
+            &self.underlines,
+            &self.mono_sprites,
+            &self.poly_sprites,
+            &self.surfaces_rgba,
+            &self.surfaces_nv12,
+            &self.backdrop_blur,
+            &self.backdrop_composite,
+        ]
+        .into_iter()
+        .chain(self.subpixel_sprites.iter())
+        {
+            std::sync::LazyLock::force(pipeline);
+        }
+    }
 }
 
 struct WgpuBindGroupLayouts {
@@ -252,6 +281,10 @@ impl WgpuResources {
         self.fluid = None;
         self.scene3d = None;
         self.ui_capture_indices.clear();
+        self.release_scratch_textures();
+    }
+
+    fn release_scratch_textures(&mut self) {
         self.path_intermediate_texture = None;
         self.path_intermediate_view = None;
         self.path_msaa_texture = None;
@@ -1382,25 +1415,7 @@ impl WgpuRenderer {
             label: Some("gpui_shaders"),
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(&base_shader_source)),
         });
-        let backdrop_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("gpui_backdrop_blur_shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(
-                gpui_render::BACKDROP_BLUR_WGSL,
-            )),
-        });
-
         let subpixel_shader_source = gpui_render::SUBPIXEL_WGSL;
-        let subpixel_shader_module = if dual_source_blending {
-            let combined = format!(
-                "enable dual_source_blending;\n{base_shader_source}\n{subpixel_shader_source}"
-            );
-            Some(device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("gpui_subpixel_shaders"),
-                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Owned(combined)),
-            }))
-        } else {
-            None
-        };
 
         let blend_mode = match alpha_mode {
             wgpu::CompositeAlphaMode::PreMultiplied => {
@@ -1415,15 +1430,16 @@ impl WgpuRenderer {
             write_mask: wgpu::ColorWrites::ALL,
         };
 
-        let create_pipeline = |name: &str,
-                               vs_entry: &str,
-                               fs_entry: &str,
+        let create_pipeline = |name: &'static str,
+                               vs_entry: &'static str,
+                               fs_entry: &'static str,
                                globals_layout: &wgpu::BindGroupLayout,
                                data_layout: &wgpu::BindGroupLayout,
                                topology: wgpu::PrimitiveTopology,
                                color_targets: &[Option<wgpu::ColorTargetState>],
                                sample_count: u32,
-                               module: &wgpu::ShaderModule| {
+                               module: &wgpu::ShaderModule|
+         -> LazyRenderPipeline {
             let mut groups = vec![Some(globals_layout), Some(data_layout)];
             if matches!(
                 fs_entry,
@@ -1437,39 +1453,64 @@ impl WgpuRenderer {
                 immediate_size: 0,
             });
 
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(name),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module,
-                    entry_point: Some(vs_entry),
-                    buffers: &[],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module,
-                    entry_point: Some(fs_entry),
-                    targets: color_targets,
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview_mask: None,
-                cache: None,
-            })
+            let device = device.clone();
+            let eager = matches!(name, "quads" | "shadows" | "mono_sprites");
+            let module = eager.then(|| module.clone());
+            let source = (!eager).then(|| match name {
+                "backdrop_blur" | "backdrop_composite" => {
+                    gpui_render::BACKDROP_BLUR_WGSL.to_owned()
+                }
+                "subpixel_sprites" => format!(
+                    "enable dual_source_blending;\n{base_shader_source}\n{subpixel_shader_source}"
+                ),
+                _ => base_shader_source.clone(),
+            });
+            let color_targets = color_targets.to_vec();
+            let pipeline: LazyRenderPipeline = std::sync::LazyLock::new(Box::new(move || {
+                let module = module.unwrap_or_else(|| {
+                    device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                        label: Some(name),
+                        source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Owned(source.unwrap())),
+                    })
+                });
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(name),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &module,
+                        entry_point: Some(vs_entry),
+                        buffers: &[],
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &module,
+                        entry_point: Some(fs_entry),
+                        targets: &color_targets,
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: None,
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        unclipped_depth: false,
+                        conservative: false,
+                    },
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState {
+                        count: sample_count,
+                        mask: !0,
+                        alpha_to_coverage_enabled: false,
+                    },
+                    multiview_mask: None,
+                    cache: None,
+                })
+            }));
+            if eager {
+                std::sync::LazyLock::force(&pipeline);
+            }
+            pipeline
         };
 
         let backdrop_blur = create_pipeline(
@@ -1485,7 +1526,7 @@ impl WgpuRenderer {
                 write_mask: wgpu::ColorWrites::ALL,
             })],
             1,
-            &backdrop_shader_module,
+            &shader_module,
         );
 
         let backdrop_composite = create_pipeline(
@@ -1497,7 +1538,7 @@ impl WgpuRenderer {
             wgpu::PrimitiveTopology::TriangleStrip,
             &[Some(color_target.clone())],
             1,
-            &backdrop_shader_module,
+            &shader_module,
         );
 
         let quads = || {
@@ -1603,9 +1644,18 @@ impl WgpuRenderer {
         // Bound compilation to two workers plus the calling thread.
         #[cfg(target_os = "windows")]
         let (quads, path_rasterization, mono_sprites) = std::thread::scope(|scope| {
-            let quads = scope.spawn(quads);
-            let paths = scope.spawn(path_rasterization);
+            let quads = scope.spawn(|| {
+                let pipeline = quads();
+                std::sync::LazyLock::force(&pipeline);
+                pipeline
+            });
+            let paths = scope.spawn(|| {
+                let pipeline = path_rasterization();
+                std::sync::LazyLock::force(&pipeline);
+                pipeline
+            });
             let sprites = mono_sprites();
+            std::sync::LazyLock::force(&sprites);
             (
                 quads.join().expect("quad pipeline compilation panicked"),
                 paths.join().expect("path pipeline compilation panicked"),
@@ -1616,7 +1666,7 @@ impl WgpuRenderer {
         let (quads, path_rasterization, mono_sprites) =
             (quads(), path_rasterization(), mono_sprites());
 
-        let subpixel_sprites = if let Some(subpixel_module) = &subpixel_shader_module {
+        let subpixel_sprites = if dual_source_blending {
             let subpixel_blend = wgpu::BlendState {
                 color: wgpu::BlendComponent {
                     src_factor: wgpu::BlendFactor::Src1,
@@ -1643,7 +1693,7 @@ impl WgpuRenderer {
                     write_mask: wgpu::ColorWrites::COLOR,
                 })],
                 1,
-                subpixel_module,
+                &shader_module,
             ))
         } else {
             None
@@ -5583,6 +5633,33 @@ impl WgpuRenderer {
         self.surface_configured = true;
 
         Ok(())
+    }
+
+    /// Releases reconstructible scratch targets and excess instance capacity without
+    /// changing the displayed frame. Keeps the device, pipelines, atlas and effect state.
+    /// The next draw recreates scratch resources as needed.
+    pub fn release_idle_resources(&mut self) {
+        let capacity = self
+            .recent_instance_peak
+            .get()
+            .max(256 * 1024)
+            .next_power_of_two();
+        let current_capacity = self.instance_buffer_capacity;
+        let Some(resources) = self.resources.as_mut() else {
+            return;
+        };
+        resources.release_scratch_textures();
+        if capacity < current_capacity {
+            resources.instance_buffer = resources.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("instance_buffer"),
+                size: capacity,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.instance_buffer_capacity = capacity;
+        }
+        self.recent_instance_peak.set(0);
+        self.frames_since_instance_trim = 0;
     }
 
     pub fn destroy(&mut self) {

@@ -355,6 +355,8 @@ pub(crate) struct WaylandClientState {
     globals: Globals,
     external_surface_role: Option<ExternalWaylandSurfaceRoleFactory>,
     pub gpu_context: GpuContext,
+    gpu_idle_timeout: Option<Duration>,
+    gpu_idle_task: Option<gpui::Task<()>>,
     pub compositor_gpu: Option<CompositorGpuHint>,
     seats: Seats,
     wl_seat: Option<wl_seat::WlSeat>,
@@ -1232,10 +1234,31 @@ impl WaylandClientStatePtr {
         {
             state.cursor_hidden_window = Some(window);
         }
+        state.schedule_gpu_idle_release(Rc::downgrade(&client));
     }
 }
 
 impl WaylandClientState {
+    fn schedule_gpu_idle_release(&mut self, client: Weak<RefCell<Self>>) {
+        self.gpu_idle_task.take();
+        let Some(timeout) = self.gpu_idle_timeout else {
+            return;
+        };
+        if !self.windows.is_empty() || self.gpu_context.borrow().is_none() {
+            return;
+        }
+        let timer = self.common.background_executor.timer(timeout);
+        self.gpu_idle_task = Some(self.common.foreground_executor.spawn(async move {
+            timer.await;
+            if let Some(client) = client.upgrade() {
+                let state = client.borrow();
+                if state.windows.is_empty() {
+                    state.gpu_context.borrow_mut().take();
+                }
+            }
+        }));
+    }
+
     fn output_for_display(&self, display_id: DisplayId) -> Option<wl_output::WlOutput> {
         let protocol_id: u64 = display_id.into();
         self.wl_outputs
@@ -1555,6 +1578,8 @@ impl WaylandClient {
             globals,
             external_surface_role,
             gpu_context,
+            gpu_idle_timeout: Some(Duration::from_secs(30)),
+            gpu_idle_task: None,
             compositor_gpu,
             wl_seat: seat,
             seats,
@@ -1649,6 +1674,13 @@ impl WaylandClient {
 }
 
 impl LinuxClient for WaylandClient {
+    fn set_gpu_idle_timeout(&self, timeout: Option<Duration>) -> bool {
+        let mut state = self.0.borrow_mut();
+        state.gpu_idle_timeout = timeout;
+        state.schedule_gpu_idle_release(Rc::downgrade(&self.0));
+        true
+    }
+
     fn keyboard_layout(&self) -> Box<dyn PlatformKeyboardLayout> {
         Box::new(self.0.borrow().keyboard_layout.clone())
     }
@@ -1740,7 +1772,7 @@ impl LinuxClient for WaylandClient {
             .and_then(|display_id| state.output_for_display(display_id));
 
         let appearance = state.common.appearance;
-        let compositor_gpu = state.compositor_gpu.take();
+        let compositor_gpu = state.compositor_gpu;
 
         let activation_target = matches!(
             params.kind,
@@ -1767,6 +1799,7 @@ impl LinuxClient for WaylandClient {
             state.consume_startup_activation_token(&window.0.surface());
         }
         state.windows.insert(surface_id, window.0.clone());
+        state.gpu_idle_task.take();
 
         Ok(Box::new(window))
     }

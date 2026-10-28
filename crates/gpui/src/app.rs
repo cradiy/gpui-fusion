@@ -1582,6 +1582,18 @@ impl App {
         self.platform.compositor_name()
     }
 
+    /// Sets how long shared GPU resources remain cached after the last window is destroyed.
+    ///
+    /// Linux Wayland defaults to 30 seconds. `None` retains the context indefinitely;
+    /// `Some(Duration::ZERO)` schedules release without an idle delay. Changing this
+    /// setting while idle restarts the timer. Opening a window cancels pending release.
+    /// Hidden windows still count as open. External GPU context owners can retain resources.
+    /// Opening a window after release must recreate the GPU context and its pipelines.
+    /// Returns false on platforms that do not support this policy.
+    pub fn set_gpu_idle_timeout(&self, timeout: Option<Duration>) -> bool {
+        self.platform.set_gpu_idle_timeout(timeout)
+    }
+
     /// Returns the file URL of the executable with the specified name in the application bundle
     pub fn path_for_auxiliary_executable(&self, name: &str) -> Result<PathBuf> {
         self.platform.path_for_auxiliary_executable(name)

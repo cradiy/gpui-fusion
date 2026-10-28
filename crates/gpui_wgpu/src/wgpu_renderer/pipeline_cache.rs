@@ -132,6 +132,16 @@ mod tests {
         let (layouts, same) = create(&cloned_context, 0);
         assert!(weak_layouts.ptr_eq(&Arc::downgrade(&layouts)));
         assert!(weak_opaque.ptr_eq(&Arc::downgrade(&same)));
+        assert!(std::sync::LazyLock::get(&same.surfaces_nv12).is_none());
+        let pipeline = std::sync::LazyLock::force(&same.surfaces_nv12);
+        let (_, shared) = create(&context, 0);
+        assert!(std::ptr::eq(
+            pipeline,
+            std::sync::LazyLock::force(&shared.surfaces_nv12)
+        ));
+        assert!(std::sync::LazyLock::get(&shared.backdrop_blur).is_none());
+        shared.prepare();
+        drop(shared);
         drop((layouts, same, cloned_context));
 
         let (_, active) = create(&context, 1);

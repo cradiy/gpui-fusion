@@ -187,6 +187,12 @@ pub trait Platform: 'static {
         Box::pin(gpui_notifications::NotificationCenter::new(options))
     }
     fn background_executor(&self) -> BackgroundExecutor;
+
+    /// Configures GPU resource retention after the last window is destroyed.
+    /// Returns false when the platform does not support this policy.
+    fn set_gpu_idle_timeout(&self, _timeout: Option<std::time::Duration>) -> bool {
+        false
+    }
     /// Platform file I/O and location discovery, independently of file dialogs.
     fn file_system(&self, app_id: &str) -> Result<gpui_io::FileSystem> {
         gpui_io::FileSystem::desktop(app_id, self.background_executor())

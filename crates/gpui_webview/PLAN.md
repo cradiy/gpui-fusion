@@ -25,9 +25,12 @@ Pointer events use GPUI window-relative logical coordinates. The backend subtrac
 - Linux Wayland native child surface with fractional-scale-aware render sizing.
 - Local-file and URL navigation, back, forward, and reload.
 - Readiness, loading, title, URL, and failure events.
+- Page console messages and uncaught script errors, with a separate console window in the browser example.
+- WebCrypto, Intersection Observer, and adopted stylesheets enabled in the Servo backend. The latter two use Servo's experimental preferences and require site-specific compatibility validation.
 - Mouse movement and buttons, wheel input, basic keyboard events and focus forwarding.
 - IME preedit, commit, cancellation, and field-bound candidate placement through GPUI's input handler.
 - Engine keyboard shortcuts and text clipboard access through GPUI.
+- Asynchronous text clipboard writes from focused pages with transient user activation. Each write consumes the activation. Asynchronous clipboard reads are not exposed; keyboard paste remains available through the native input path.
 - Application-owned JavaScript dialog requests with single-use acceptance, cancellation, and prompt text responses. Unhandled requests, navigation, and view closure cancel pending responses. The browser example displays alerts and confirmations in separate GPUI windows and cancels text prompts.
 - A browser example using the public component API.
 

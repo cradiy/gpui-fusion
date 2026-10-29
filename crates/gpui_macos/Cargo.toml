@@ -45,7 +45,7 @@ ctor.workspace = true
 derive_more.workspace = true
 dispatch2 = "0.3.1"
 etagere = "0.2"
-font-kit = { git = "https://github.com/cradiy/font-kit", rev = "e1cfe2425b17957dabba54787c42d7f6c6d6c012", optional = true }
+font-kit = { git = "https://github.com/cradiy/font-kit", rev = "ef41ce125c6d92ce7af6c153df42dc3de81c8437", optional = true }
 foreign-types = "0.5"
 futures.workspace = true
 gpui_util.workspace = true

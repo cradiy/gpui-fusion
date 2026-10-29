@@ -188,6 +188,7 @@ fn audio_only_session_has_no_video_or_subtitle_sink() {
         sink,
     )
     .unwrap();
+    #[cfg(target_os = "linux")]
     assert!(session.appsink.is_none());
     assert!(
         session

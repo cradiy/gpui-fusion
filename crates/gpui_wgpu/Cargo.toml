@@ -37,7 +37,7 @@ half = "2.7.1"
 wgpu = { workspace = true, features = ["naga-ir"] }
 
 # Optional: only needed on platforms with multiple font sources (e.g. Linux)
-font-kit = { git = "https://github.com/cradiy/font-kit", rev = "e1cfe2425b17957dabba54787c42d7f6c6d6c012", optional = true }
+font-kit = { git = "https://github.com/cradiy/font-kit", rev = "ef41ce125c6d92ce7af6c153df42dc3de81c8437", optional = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 pollster.workspace = true

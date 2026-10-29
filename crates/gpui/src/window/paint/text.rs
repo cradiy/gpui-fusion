@@ -241,6 +241,8 @@ impl Window {
                     Ok(Some((size, Cow::Owned(bytes))))
                 })?
                 .expect("Callback above only errors or returns Some");
+            let lifetime = self.glyph_cache.retain(&params, tile.bounds.size);
+            self.next_frame.scene.retain_atlas_tile(lifetime);
             let bounds = Bounds {
                 origin: integer_origin + raster_bounds.origin.map(Into::into),
                 size: tile.bounds.size.map(Into::into),
@@ -396,6 +398,8 @@ impl Window {
                 })?
                 .expect("Callback above only errors or returns Some");
 
+            let lifetime = self.glyph_cache.retain(&params, tile.bounds.size);
+            self.next_frame.scene.retain_atlas_tile(lifetime);
             let bounds = Bounds {
                 origin: integer_origin + raster_bounds.origin.map(Into::into),
                 size: tile.bounds.size.map(Into::into),

@@ -751,7 +751,7 @@ async fn evicted_animation_frame_stays_resident_through_scene_replay(executor: B
     let lifetime = frame.atlas_lifetime.as_ref().unwrap();
     let weak = Arc::downgrade(lifetime);
     let mut original = crate::Scene::default();
-    original.retain_image(lifetime.clone());
+    original.retain_atlas_tile(lifetime.clone());
     let mut replayed = crate::Scene::default();
     replayed.replay(0..original.len(), &original);
     drop(frame);

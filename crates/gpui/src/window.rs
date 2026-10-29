@@ -58,6 +58,7 @@ mod element_bounds;
 mod element_id;
 mod focus;
 mod frame;
+mod glyph_cache;
 mod handles;
 mod input;
 mod input_metrics;
@@ -598,6 +599,7 @@ pub struct Window {
     picture_in_picture_source: Option<ElementBounds>,
     display_id: Option<DisplayId>,
     sprite_atlas: Arc<dyn PlatformAtlas>,
+    glyph_cache: glyph_cache::GlyphCache,
     color_svg_renders: color_svg::ColorSvgRenders,
     text_system: Arc<WindowTextSystem>,
     text_rendering_mode: Rc<Cell<TextRenderingMode>>,
@@ -1271,6 +1273,7 @@ impl Window {
             picture_in_picture_source: None,
             display_id,
             sprite_atlas,
+            glyph_cache: glyph_cache::GlyphCache::default(),
             color_svg_renders: Default::default(),
             text_system,
             text_rendering_mode: cx.text_rendering_mode.clone(),

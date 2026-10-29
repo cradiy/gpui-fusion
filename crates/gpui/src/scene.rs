@@ -232,17 +232,19 @@ impl Scene {
                 PaintOperation::SetRasterScale(scale, region) => {
                     self.set_subtree_raster_capture(*scale, *region)
                 }
-                PaintOperation::RetainImage(lifetime) => self.retain_image(lifetime.clone()),
+                PaintOperation::RetainAtlasTile(lifetime) => {
+                    self.retain_atlas_tile(lifetime.clone())
+                }
             }
         }
     }
 
-    pub(crate) fn retain_image(&mut self, lifetime: Arc<()>) {
+    pub(crate) fn retain_atlas_tile(&mut self, lifetime: Arc<()>) {
         if let Some(pending) = self.pending_subtrees.last_mut() {
-            pending.scene.retain_image(lifetime.clone());
+            pending.scene.retain_atlas_tile(lifetime.clone());
         }
         self.paint_operations
-            .push(PaintOperation::RetainImage(lifetime));
+            .push(PaintOperation::RetainAtlasTile(lifetime));
     }
 
     pub fn finish(&mut self) {
@@ -513,7 +515,7 @@ pub(crate) enum PaintOperation {
     NextSubtreeInput,
     SetScene3d(Arc<crate::Scene3dFrame>),
     SetRasterScale(f32, Option<RasterCaptureRegion>),
-    RetainImage(Arc<()>),
+    RetainAtlasTile(Arc<()>),
 }
 
 #[derive(Clone)]
@@ -1581,7 +1583,7 @@ mod tests {
         let weak = Arc::downgrade(&lifetime);
         let mut original = Scene::default();
         original.start_subtree(subtree_composite());
-        original.retain_image(lifetime.clone());
+        original.retain_atlas_tile(lifetime.clone());
         insert_test_quad(&mut original);
         original.end_subtree();
         let retained_range = 0..original.len();

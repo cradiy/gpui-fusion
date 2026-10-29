@@ -349,6 +349,7 @@ impl Window {
         let previous_window_active = self.rendered_frame.window_active;
         mem::swap(&mut self.rendered_frame, &mut self.next_frame);
         self.next_frame.clear();
+        self.glyph_cache.finish_frame(self.sprite_atlas.as_ref());
         self.publish_autofill();
         self.sprite_atlas.collect_unused_images();
         let current_focus_path = self.rendered_frame.focus_path();

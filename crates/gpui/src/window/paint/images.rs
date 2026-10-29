@@ -262,7 +262,7 @@ impl Window {
         let key = if let Some(lifetime) = &data.atlas_lifetime {
             self.sprite_atlas
                 .retain_image(&params, Arc::downgrade(lifetime));
-            self.next_frame.scene.retain_image(lifetime.clone());
+            self.next_frame.scene.retain_atlas_tile(lifetime.clone());
             crate::AtlasKey::TransientImage(params)
         } else {
             params.into()

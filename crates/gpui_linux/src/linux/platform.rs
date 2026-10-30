@@ -293,6 +293,14 @@ pub(crate) struct LinuxPlatform<P> {
 }
 
 impl<P: LinuxClient + 'static> Platform for LinuxPlatform<P> {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    fn memory_reclaimer(&self) -> Option<fn()> {
+        Some(|| {
+            // SAFETY: glibc's malloc_trim is thread-safe and only releases unused pages.
+            unsafe { libc::malloc_trim(0) };
+        })
+    }
+
     fn set_gpu_idle_timeout(&self, timeout: Option<std::time::Duration>) -> bool {
         self.inner.set_gpu_idle_timeout(timeout)
     }
@@ -1413,12 +1421,11 @@ pub(super) fn compositor_gpu_hint_from_dev_t(dev: u64) -> Option<gpui_wgpu::Comp
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "wayland"))]
 mod tests {
     use super::*;
     use gpui::{Point, px};
 
-    #[cfg(feature = "wayland")]
     #[test]
     fn activation_history_restores_the_most_recent_surviving_window() {
         let mut history = ActivationHistory::default();
@@ -1463,7 +1470,6 @@ mod tests {
         ),);
     }
 
-    #[cfg(feature = "wayland")]
     mod read_fd_with_timeout {
         use super::super::{PIPE_READ_TIMEOUT, read_fd_with_timeout};
         use std::io::Write as _;

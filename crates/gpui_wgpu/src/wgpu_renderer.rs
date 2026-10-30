@@ -5659,6 +5659,9 @@ impl WgpuRenderer {
         }
         self.recent_instance_peak.set(0);
         self.frames_since_instance_trim = 0;
+        // Dropped targets may still be held by completed submissions. Retire
+        // them while idle, without waiting for outstanding GPU work.
+        let _ = resources.device.poll(wgpu::PollType::Poll);
     }
 
     pub fn destroy(&mut self) {

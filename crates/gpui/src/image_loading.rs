@@ -204,7 +204,7 @@ fn single_frame(
     }
     let mut frame = Frame::new(image.into_rgba8());
     convert_to_bgra(&mut frame);
-    Ok(SmallVec::from_elem(frame, 1))
+    Ok(SmallVec::from_buf([frame]))
 }
 
 fn collect_frames(

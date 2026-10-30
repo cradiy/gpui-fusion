@@ -188,6 +188,13 @@ pub trait Platform: 'static {
     }
     fn background_executor(&self) -> BackgroundExecutor;
 
+    /// Returns a function that releases unused allocator pages to the OS.
+    /// It must be safe to invoke from a background thread, including while other
+    /// threads allocate. Unsupported platforms return None.
+    fn memory_reclaimer(&self) -> Option<fn()> {
+        None
+    }
+
     /// Configures GPU resource retention after the last window is destroyed.
     /// Returns false when the platform does not support this policy.
     fn set_gpu_idle_timeout(&self, _timeout: Option<std::time::Duration>) -> bool {

@@ -268,6 +268,60 @@ fn subtree_sampling_preserves_premultiplied_interpolation_and_fractional_capture
 }
 
 #[test]
+#[ignore = "requires a Vulkan adapter with allocation reports"]
+#[cfg(target_os = "linux")]
+fn idle_release_retires_completed_path_allocations_and_preserves_the_presented_pixels()
+-> anyhow::Result<()> {
+    let context = WgpuContext::new_headless()?;
+    let mut renderer = renderer(&context)?;
+    let target = texture(&context, 64);
+    let mut builder = gpui::PathBuilder::fill();
+    builder.move_to(point(gpui::px(8.), gpui::px(8.)));
+    builder.line_to(point(gpui::px(56.), gpui::px(8.)));
+    builder.line_to(point(gpui::px(32.), gpui::px(56.)));
+    builder.close();
+    let mut path = builder.build()?.scale(1.);
+    path.color = gpui::rgb(0x6c91b3).into();
+    path.content_mask = ContentMask {
+        bounds: bounds(0., 0., 64., 64.),
+    };
+    let mut scene = Scene::default();
+    scene.insert_primitive(path);
+    scene.finish();
+    draw(&mut renderer, &scene, &target);
+    // This device has no concurrent submitters. Wait at the Vulkan level so
+    // WGPU's deferred resource cleanup remains unpolled.
+    let device = unsafe { context.device.as_hal::<wgpu_hal::api::Vulkan>() }
+        .ok_or_else(|| anyhow::anyhow!("GPU backend is not Vulkan"))?;
+    unsafe { device.raw_device().device_wait_idle()? };
+    drop(device);
+    let report = || {
+        context
+            .device
+            .generate_allocator_report()
+            .ok_or_else(|| anyhow::anyhow!("GPU backend does not report allocations"))
+    };
+    assert!(
+        report()?
+            .allocations
+            .iter()
+            .any(|allocation| allocation.name == "path_msaa")
+    );
+    renderer.release_idle_resources();
+    assert!(
+        !report()?.allocations.iter().any(|allocation| matches!(
+            allocation.name.as_str(),
+            "path_msaa" | "path_intermediate"
+        )),
+        "idle cleanup must retire completed resources without another frame or device poll"
+    );
+    let expected = pixels(&context, &target);
+    draw(&mut renderer, &scene, &target);
+    assert_eq!(pixels(&context, &target), expected);
+    Ok(())
+}
+
+#[test]
 #[ignore = "requires a GPU adapter"]
 fn ancestor_capture_reuses_nested_effect_pixels_and_invalidates_changed_content()
 -> anyhow::Result<()> {

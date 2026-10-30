@@ -1129,6 +1129,61 @@ mod tests {
     use crate::{PathPromptOptions, TestAppContext};
     use std::path::PathBuf;
 
+    #[test]
+    fn memory_release_coalesces_requests_and_rechecks_the_guard() {
+        use std::{
+            cell::Cell,
+            rc::Rc,
+            sync::atomic::{AtomicUsize, Ordering},
+            time::Duration,
+        };
+
+        static RELEASES: AtomicUsize = AtomicUsize::new(0);
+        fn reclaim() {
+            RELEASES.fetch_add(1, Ordering::SeqCst);
+        }
+
+        let cx = TestAppContext::single();
+        assert!(
+            !cx.update(|cx| cx.release_unused_memory_after(Duration::ZERO, |_| {
+                panic!("unsupported platforms must not invoke the guard")
+            }))
+        );
+        cx.test_platform.memory_reclaimer.set(Some(reclaim));
+
+        cx.update(|cx| {
+            cx.release_unused_memory_after(Duration::from_secs(4), |_| {
+                panic!("superseded requests must not invoke the guard")
+            });
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_secs(1));
+
+        let ready = Rc::new(Cell::new(true));
+        cx.update(|cx| {
+            let ready = ready.clone();
+            cx.release_unused_memory_after(Duration::from_secs(4), move |_| ready.get());
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_secs(3));
+        cx.run_until_parked();
+        assert_eq!(RELEASES.load(Ordering::SeqCst), 0);
+
+        ready.set(false);
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        assert_eq!(RELEASES.load(Ordering::SeqCst), 0);
+
+        ready.set(true);
+        cx.update(|cx| {
+            cx.release_unused_memory_after(Duration::from_secs(1), move |_| ready.get());
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        assert_eq!(RELEASES.load(Ordering::SeqCst), 1);
+    }
+
     #[gpui::test]
     async fn selected_file_handles_read_lazily_and_preserve_cancellation(cx: &mut TestAppContext) {
         let directory =

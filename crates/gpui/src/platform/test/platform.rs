@@ -11,7 +11,7 @@ use collections::{HashMap, VecDeque};
 use futures::channel::oneshot;
 use parking_lot::Mutex;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     path::{Path, PathBuf},
     rc::{Rc, Weak},
     sync::Arc,
@@ -21,6 +21,7 @@ use std::{
 pub(crate) struct TestPlatform {
     background_executor: BackgroundExecutor,
     foreground_executor: ForegroundExecutor,
+    pub(crate) memory_reclaimer: Cell<Option<fn()>>,
 
     pub(crate) active_window: RefCell<Option<TestWindow>>,
     active_display: Rc<dyn PlatformDisplay>,
@@ -124,6 +125,7 @@ impl TestPlatform {
         Rc::new_cyclic(|weak| TestPlatform {
             background_executor: executor,
             foreground_executor,
+            memory_reclaimer: Cell::new(None),
             prompts: Default::default(),
             screen_capture_sources: Default::default(),
             active_cursor: Default::default(),
@@ -286,6 +288,10 @@ impl TestPlatform {
 }
 
 impl Platform for TestPlatform {
+    fn memory_reclaimer(&self) -> Option<fn()> {
+        self.memory_reclaimer.get()
+    }
+
     fn background_executor(&self) -> BackgroundExecutor {
         self.background_executor.clone()
     }

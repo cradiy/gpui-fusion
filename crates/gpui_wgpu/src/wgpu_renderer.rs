@@ -175,6 +175,7 @@ struct WgpuPipelines {
 }
 
 impl WgpuPipelines {
+    #[cfg(not(target_family = "wasm"))]
     fn prepare(&self) {
         for pipeline in [
             &self.quads,
@@ -219,7 +220,7 @@ struct WgpuResources {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     surface: Option<wgpu::Surface<'static>>,
-    pipelines: Arc<WgpuPipelines>,
+    pipelines: pipeline_cache::PipelineBundle,
     effect_pipelines: HashMap<u64, Arc<wgpu::RenderPipeline>>,
     subtree_effect_pipelines:
         HashMap<(u64, wgpu::TextureFormat), Option<Arc<wgpu::RenderPipeline>>>,

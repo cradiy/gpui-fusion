@@ -5,6 +5,13 @@ use std::{
     sync::{Arc, Weak},
 };
 
+#[cfg(target_family = "wasm")]
+use std::rc::{Rc as Shared, Weak as WeakShared};
+#[cfg(not(target_family = "wasm"))]
+use std::sync::{Arc as Shared, Weak as WeakShared};
+
+pub(super) type PipelineBundle = Shared<WgpuPipelines>;
+
 mod effects;
 pub(super) use effects::EffectPipelineKind;
 
@@ -24,8 +31,8 @@ const RETAINED_PIPELINE_CAPACITY: usize = 4;
 pub(crate) struct PipelineCache {
     device: Weak<wgpu::Device>,
     layouts: Option<Arc<WgpuBindGroupLayouts>>,
-    pipelines: HashMap<PipelineKey, Weak<WgpuPipelines>>,
-    retained: VecDeque<(PipelineKey, Arc<WgpuPipelines>)>,
+    pipelines: HashMap<PipelineKey, WeakShared<WgpuPipelines>>,
+    retained: VecDeque<(PipelineKey, PipelineBundle)>,
     effects: effects::EffectPipelineCache,
 }
 
@@ -48,7 +55,7 @@ impl WgpuRenderer {
         alpha: wgpu::CompositeAlphaMode,
         samples: u32,
         dual_source: bool,
-    ) -> (Arc<WgpuBindGroupLayouts>, Arc<WgpuPipelines>) {
+    ) -> (Arc<WgpuBindGroupLayouts>, PipelineBundle) {
         let key = PipelineKey {
             format,
             alpha,
@@ -63,11 +70,11 @@ impl WgpuRenderer {
                 cache.layouts = Some(layouts.clone());
                 layouts
             });
-            let pipelines = cache.pipelines.get(&key).and_then(Weak::upgrade);
+            let pipelines = cache.pipelines.get(&key).and_then(WeakShared::upgrade);
             (layouts, pipelines)
         };
         let candidate = cached.unwrap_or_else(|| {
-            let pipelines = Arc::new(Self::create_pipelines(
+            let pipelines = Shared::new(Self::create_pipelines(
                 &context.device,
                 &layouts,
                 format,
@@ -82,9 +89,9 @@ impl WgpuRenderer {
         let pipelines = cache
             .pipelines
             .get(&key)
-            .and_then(Weak::upgrade)
+            .and_then(WeakShared::upgrade)
             .unwrap_or(candidate);
-        cache.pipelines.insert(key, Arc::downgrade(&pipelines));
+        cache.pipelines.insert(key, Shared::downgrade(&pipelines));
         if let Some(index) = cache.retained.iter().position(|(cached, _)| *cached == key) {
             cache.retained.remove(index);
         } else if cache.retained.len() == RETAINED_PIPELINE_CAPACITY {

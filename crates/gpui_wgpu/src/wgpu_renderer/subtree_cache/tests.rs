@@ -157,6 +157,186 @@ fn pixels(context: &WgpuContext, texture: &wgpu::Texture) -> Vec<u8> {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
+fn subtree_sampling_preserves_premultiplied_interpolation_and_fractional_capture_edges()
+-> anyhow::Result<()> {
+    let context = WgpuContext::new_headless()?;
+    let mut renderer = renderer(&context)?;
+    let target = texture(&context, 64);
+    let mut source = Scene::default();
+    for (x, color) in [(0., 0xff000080), (16., 0x0000ffff)] {
+        source.insert_primitive(Quad {
+            bounds: bounds(x, 0., if x == 0. { 16. } else { 48. }, 64.),
+            content_mask: ContentMask {
+                bounds: bounds(0., 0., 64., 64.),
+            },
+            background: rgba(color).into(),
+            ..Default::default()
+        });
+    }
+    source.finish();
+    let source = Rc::new(source);
+    for region in [bounds(0., 0., 64., 64.), bounds(7.25, 7.25, 17.5, 17.5)] {
+        for second in [false, true] {
+            for q in [
+                [-0.25, 16.],
+                [0., 16.],
+                [0.5, 16.],
+                [7.25, 7.25],
+                [8.125, 8.625],
+                [15.75, 16.],
+                [16.125, 16.75],
+                [24.75, 16.],
+                [63.75, 16.],
+                [65., 16.],
+            ] {
+                let mut sampled = layer(Scene::default(), 0.);
+                sampled.scene = source.clone();
+                sampled.composite.bounds = region;
+                sampled.composite.effect_bounds = region;
+                sampled.composite.content_mask.bounds = region;
+                sampled.composite.uniforms = gpui::EffectUniforms::default().with_slot(
+                    0,
+                    [
+                        (q[0] - region.origin.x.0) / region.size.width.0,
+                        (q[1] - region.origin.y.0) / region.size.height.0,
+                        0.,
+                        0.,
+                    ],
+                );
+                sampled.composite.shader = if second {
+                    sampled.second_scene = Some(source.clone());
+                    gpui::EffectShader::wgsl_two_images(
+                        "fn effect(input: EffectInput, params: EffectParams) -> vec4<f32> { return sample_effect_second_image(input, params.slots[0].xy); }",
+                    )
+                } else {
+                    gpui::EffectShader::wgsl_image(
+                        "fn effect(input: EffectInput, params: EffectParams) -> vec4<f32> { return sample_effect_image(input, params.slots[0].xy); }",
+                    )
+                };
+                let mut scene = Scene::default();
+                scene.insert_primitive(gpui::Primitive::SubtreeLayer(sampled));
+                scene.finish();
+                draw(&mut renderer, &scene, &target);
+                let output = pixels(&context, &target);
+                let pixel = q.map(|v| v - 0.5);
+                let low = pixel.map(|v| v.floor() as i32);
+                let fraction = pixel.map(|v| v - v.floor());
+                let mut expected = [0.; 4];
+                for y in 0..2 {
+                    for x in 0..2 {
+                        let p = [low[0] + x, low[1] + y];
+                        if p[0] < 0
+                            || p[1] < 0
+                            || p[0] >= 64
+                            || p[1] >= 64
+                            || p[0] as f32 + 0.5 < region.left().0
+                            || p[1] as f32 + 0.5 < region.top().0
+                            || p[0] as f32 + 0.5 >= region.right().0
+                            || p[1] as f32 + 0.5 >= region.bottom().0
+                        {
+                            continue;
+                        }
+                        let color = if p[0] < 16 {
+                            [128., 0., 0., 128.]
+                        } else {
+                            [0., 0., 255., 255.]
+                        };
+                        let weight = if x == 0 {
+                            1. - fraction[0]
+                        } else {
+                            fraction[0]
+                        } * if y == 0 {
+                            1. - fraction[1]
+                        } else {
+                            fraction[1]
+                        };
+                        for c in 0..4 {
+                            expected[c] += color[c] * weight;
+                        }
+                    }
+                }
+                for c in 0..4 {
+                    assert!(
+                        (f32::from(output[(16 * 64 + 16) * 4 + c]) - expected[c]).abs() <= 2.,
+                        "region={region:?}, second={second}, q={q:?}, channel={c}"
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn ancestor_capture_reuses_nested_effect_pixels_and_invalidates_changed_content()
+-> anyhow::Result<()> {
+    let context = WgpuContext::new_headless()?;
+    let mut renderer = renderer(&context)?;
+    let target = texture(&context, 64);
+    let make_scene = |color, wrapped: bool| {
+        let quad = |color| scene(color, 0., false, false).subtree_layers.pop().unwrap();
+        let mut mask = quad(color);
+        mask.second_scene = Some(quad(0xffffff99).scene);
+        mask.composite.shader = gpui::EffectShader::wgsl_two_images(
+            "fn effect(input: EffectInput, params: EffectParams) -> vec4<f32> { let color = sample_effect_image(input, input.uv); return vec4<f32>(color.rgb, color.a * sample_effect_second_image(input, input.uv).a); }",
+        );
+        let mut pair = Scene::default();
+        pair.insert_primitive(gpui::Primitive::SubtreeLayer(mask));
+        pair.finish();
+        let mut processed = layer(pair, 0.);
+        processed.intermediate_effects = vec![gpui::SubtreeEffectPass {
+            shader: processed.composite.shader.clone(),
+            uniforms: processed.composite.uniforms,
+            time: 0.,
+            images: Default::default(),
+            bloom: None,
+            feedback: None,
+            distance_field: None,
+            particles: None,
+            particle_transition: None,
+        }]
+        .into();
+        let mut source = Scene::default();
+        source.insert_primitive(gpui::Primitive::SubtreeLayer(processed));
+        source.finish();
+        if !wrapped {
+            return source;
+        }
+        let mut scene = Scene::default();
+        scene.insert_primitive(gpui::Primitive::SubtreeLayer(layer(source, 0.)));
+        scene.finish();
+        scene
+    };
+    draw(&mut renderer, &make_scene(0x2f9d7380, false), &target);
+    let reference = pixels(&context, &target);
+    assert_eq!(
+        draw(&mut renderer, &make_scene(0x2f9d7380, true), &target),
+        0
+    );
+    let source_texture = renderer.resources().subtree_textures[0].clone();
+    let output = pixels(&context, &target);
+    assert!(output.iter().any(|value| *value != 0));
+    assert!(
+        output
+            .iter()
+            .zip(reference)
+            .all(|(a, b)| a.abs_diff(b) <= 2)
+    );
+    assert!(draw(&mut renderer, &make_scene(0x2f9d7380, true), &target) > 0);
+    assert!(renderer.resources().ui_captures.is_empty());
+    assert_eq!(renderer.resources().subtree_textures[0], source_texture);
+    assert_eq!(pixels(&context, &target), output);
+    assert_eq!(
+        draw(&mut renderer, &make_scene(0xb34d2680, true), &target),
+        0
+    );
+    assert_ne!(pixels(&context, &target), output);
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
 fn raster_capture_preserves_offset_alpha_and_nested_density() -> anyhow::Result<()> {
     let context = WgpuContext::new_headless()?;
     let mut renderer = renderer(&context)?;

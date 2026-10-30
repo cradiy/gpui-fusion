@@ -63,6 +63,8 @@ pub(crate) struct Frame {
     pub(crate) cursor_styles: Vec<CursorStyleRequest>,
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) debug_bounds: FxHashMap<String, Bounds<Pixels>>,
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) debug_bound_records: Vec<(String, Bounds<Pixels>)>,
     #[cfg(any(feature = "inspector", debug_assertions))]
     pub(crate) next_inspector_instance_ids: FxHashMap<Rc<crate::InspectorElementPath>, usize>,
     #[cfg(any(feature = "inspector", debug_assertions))]
@@ -100,6 +102,8 @@ pub(crate) struct PrepaintStateIndex {
 
 #[derive(Clone, Default)]
 pub(crate) struct PaintIndex {
+    #[cfg(any(test, feature = "test-support"))]
+    debug_bound_records_index: usize,
     pub(super) a11y_index: usize,
     pub(super) scene_index: usize,
     pub(super) mouse_listeners_index: usize,
@@ -134,6 +138,8 @@ impl Frame {
 
             #[cfg(any(test, feature = "test-support"))]
             debug_bounds: FxHashMap::default(),
+            #[cfg(any(test, feature = "test-support"))]
+            debug_bound_records: Vec::new(),
 
             #[cfg(any(feature = "inspector", debug_assertions))]
             next_inspector_instance_ids: FxHashMap::default(),
@@ -170,6 +176,7 @@ impl Frame {
         #[cfg(any(test, feature = "test-support"))]
         {
             self.debug_bounds.clear();
+            self.debug_bound_records.clear();
         }
 
         #[cfg(any(feature = "inspector", debug_assertions))]
@@ -1050,6 +1057,8 @@ impl Window {
 
     pub(crate) fn paint_index(&self) -> PaintIndex {
         PaintIndex {
+            #[cfg(any(test, feature = "test-support"))]
+            debug_bound_records_index: self.next_frame.debug_bound_records.len(),
             a11y_index: self.a11y.paint_index(),
             scene_index: self.next_frame.scene.len(),
             mouse_listeners_index: self.next_frame.mouse_listeners.len(),
@@ -1063,6 +1072,17 @@ impl Window {
     }
 
     pub(crate) fn reuse_paint(&mut self, range: Range<PaintIndex>) {
+        #[cfg(any(test, feature = "test-support"))]
+        for (selector, bounds) in &self.rendered_frame.debug_bound_records
+            [range.start.debug_bound_records_index..range.end.debug_bound_records_index]
+        {
+            self.next_frame
+                .debug_bounds
+                .insert(selector.clone(), *bounds);
+            self.next_frame
+                .debug_bound_records
+                .push((selector.clone(), *bounds));
+        }
         self.next_frame.autofill.extend_from_slice(
             &self.rendered_frame.autofill[range.start.autofill_index..range.end.autofill_index],
         );

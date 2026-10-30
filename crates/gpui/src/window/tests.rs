@@ -1,5 +1,5 @@
 use super::animation_frame_interval;
-use crate::{AnimationFramePolicy, RequestFrameOptions, ThermalState};
+use crate::{AnimationFramePolicy, InteractiveElement as _, RequestFrameOptions, ThermalState};
 use crate::{
     AppContext as _, Bounds, Context, IntoElement, ParentElement as _, Pixels, Render, Styled as _,
     TestAppContext, Window, canvas, div, px, size,
@@ -404,11 +404,18 @@ impl Render for TextureContent {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         self.renders.set(self.renders.get() + 1);
         let bounds = self.bounds.clone();
-        canvas(
-            move |actual, _, _| bounds.set(actual),
-            |bounds, _, window, _| window.paint_quad(crate::fill(bounds, crate::rgb(0xff0000))),
-        )
-        .size_full()
+        div()
+            .debug_selector(|| "texture-content".into())
+            .size_full()
+            .child(
+                canvas(
+                    move |actual, _, _| bounds.set(actual),
+                    |bounds, _, window, _| {
+                        window.paint_quad(crate::fill(bounds, crate::rgb(0xff0000)))
+                    },
+                )
+                .size_full(),
+            )
     }
 }
 
@@ -476,6 +483,10 @@ fn ui_texture_density_invalidates_cached_paint_without_changing_layout(cx: &mut 
         cx.update_window(window.into(), |_, window, cx| {
             window.draw(cx).clear();
             let quad = window.rendered_frame.scene.quads.last().unwrap();
+            assert_eq!(
+                window.rendered_frame.debug_bounds.get("texture-content"),
+                Some(&bounds.get())
+            );
             assert_eq!(quad.bounds.size.width.0, 640. * density);
             assert_eq!(quad.bounds.size.height.0, 400. * density);
             assert_eq!(quad.content_mask.bounds.size.width.0, 640. * density);

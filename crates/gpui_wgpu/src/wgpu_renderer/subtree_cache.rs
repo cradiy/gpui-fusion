@@ -57,27 +57,34 @@ impl WgpuRenderer {
         retain: bool,
         parameters: GammaParams,
     ) {
-        // Siblings share a texture at their depth. Only a sole writer can leave
-        // reusable pixels there. Multipass and two-input layers also reuse other
-        // depths as scratch targets; conservatively bypass such frames entirely.
+        // Siblings share a texture at their depth. Multipass and two-input
+        // layers also overwrite the next depth, but leave ancestor sources intact.
         fn collect<'a>(
             scene: &'a Scene,
             depth: usize,
-            levels: &mut Vec<Vec<&'a SubtreeLayer>>,
+            levels: &mut Vec<(Vec<&'a SubtreeLayer>, bool)>,
         ) -> bool {
             for layer in &scene.subtree_layers {
-                if layer.scene3d.is_some()
-                    || layer.scene.raster_scale.is_some()
-                    || layer.second_scene.is_some()
-                    || !layer.intermediate_effects.is_empty()
-                {
+                if layer.scene3d.is_some() || layer.scene.raster_scale.is_some() {
                     return false;
                 }
                 if levels.len() <= depth {
-                    levels.resize_with(depth + 1, Vec::new);
+                    levels.resize_with(depth + 1, Default::default);
                 }
-                levels[depth].push(layer);
+                levels[depth].0.push(layer);
+                if layer.second_scene.is_some() || !layer.intermediate_effects.is_empty() {
+                    if levels.len() <= depth + 1 {
+                        levels.resize_with(depth + 2, Default::default);
+                    }
+                    levels[depth].1 = true;
+                    levels[depth + 1].1 = true;
+                }
                 if !collect(&layer.scene, depth + 1, levels) {
+                    return false;
+                }
+                if let Some(second) = &layer.second_scene
+                    && !collect(second, depth + 2, levels)
+                {
                     return false;
                 }
             }
@@ -87,7 +94,7 @@ impl WgpuRenderer {
         let supported = retain
             && !self.resources().subtree_cache.external_writes
             && collect(scene, 0, &mut levels)
-            && levels.iter().flatten().all(|layer| {
+            && levels.iter().flat_map(|(layers, _)| layers).all(|layer| {
                 self.resources()
                     .subtree_effect_pipelines
                     .get(&(
@@ -99,8 +106,8 @@ impl WgpuRenderer {
         let snapshots = supported.then(|| {
             levels
                 .iter()
-                .map(|layers| {
-                    if layers.len() != 1 {
+                .map(|(layers, overwritten)| {
+                    if *overwritten || layers.len() != 1 {
                         return None;
                     }
                     let layer = layers[0];

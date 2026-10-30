@@ -1096,10 +1096,8 @@ impl WgpuRenderer {
         subtree: bool,
         external_images: bool,
     ) -> anyhow::Result<wgpu::RenderPipeline> {
-        let source = if external_images {
-            gpui::compose_subtree_image_effect_wgsl(shader)
-        } else if subtree {
-            gpui::compose_subtree_effect_wgsl(shader)
+        let source = if external_images || subtree {
+            Self::filtered_subtree_source(shader, external_images)
         } else {
             gpui::compose_effect_shader_wgsl(shader)
         };

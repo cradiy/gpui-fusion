@@ -2532,6 +2532,10 @@ impl Interactivity {
                 if let Some(debug_selector) = &self.debug_selector {
                     window
                         .next_frame
+                        .debug_bound_records
+                        .push((debug_selector.clone(), bounds));
+                    window
+                        .next_frame
                         .debug_bounds
                         .insert(debug_selector.clone(), bounds);
                 }

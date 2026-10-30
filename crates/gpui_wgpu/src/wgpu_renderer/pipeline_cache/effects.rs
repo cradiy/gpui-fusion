@@ -34,6 +34,31 @@ pub(super) struct EffectPipelineCache {
 }
 
 impl WgpuRenderer {
+    pub(in super::super) fn filtered_subtree_source(
+        shader: &EffectShader,
+        external_images: bool,
+    ) -> String {
+        let mut source = if external_images {
+            gpui::compose_subtree_image_effect_wgsl(shader)
+        } else {
+            gpui::compose_subtree_effect_wgsl(shader)
+        };
+        source.push_str("\n@group(1) @binding(2) var s_subtree_image: sampler;\n");
+        let inputs = if external_images {
+            1
+        } else {
+            shader.image_count()
+        };
+        for name in ["", "second_"].into_iter().take(usize::from(inputs)) {
+            source = source.replace(
+                &format!("fn sample_effect_{name}image("),
+                &format!("fn sample_effect_{name}image_manual("),
+            );
+            source.push_str(&include_str!("subtree_sampling.wgsl").replace("NAME", name));
+        }
+        source
+    }
+
     /// Captures preparation work for this renderer's current device, format and alpha mode.
     /// The returned closure may run on a worker thread and populates the normal bounded cache.
     #[cfg(not(target_family = "wasm"))]

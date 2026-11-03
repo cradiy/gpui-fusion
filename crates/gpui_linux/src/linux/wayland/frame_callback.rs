@@ -11,9 +11,12 @@ impl<T> Default for PendingFrameCallback<T> {
 }
 
 impl<T: PartialEq> PendingFrameCallback<T> {
-    pub(super) fn request(&mut self, request: impl FnOnce() -> T) {
+    pub(super) fn request(&mut self, request: impl FnOnce() -> T) -> bool {
         if self.pending.is_none() {
             self.pending = Some(request());
+            true
+        } else {
+            false
         }
     }
 
@@ -41,11 +44,12 @@ mod tests {
         for refresh in 1..=64 {
             // A resize/recovery can draw immediately while the compositor's
             // callback for the previous frame is still outstanding.
-            for _ in 0..32 {
-                frame.request(|| {
+            for request in 0..32 {
+                let needs_commit = frame.request(|| {
                     issued += 1;
                     issued
                 });
+                assert_eq!(needs_commit, request == 0);
             }
             assert_eq!(issued, refresh);
             assert!(frame.complete(&refresh));
@@ -56,15 +60,15 @@ mod tests {
     #[test]
     fn callbacks_from_before_unmap_cannot_restart_or_replace_the_chain() {
         let mut frame = PendingFrameCallback::default();
-        frame.request(|| 1);
+        assert!(frame.request(|| 1));
         frame.clear();
         assert!(!frame.complete(&1));
 
-        frame.request(|| 2);
+        assert!(frame.request(|| 2));
         assert!(!frame.complete(&1));
-        frame.request(|| panic!("remap already has an outstanding callback"));
+        assert!(!frame.request(|| panic!("remap already has an outstanding callback")));
         assert!(frame.complete(&2));
-        frame.request(|| 3);
+        assert!(frame.request(|| 3));
         assert!(frame.complete(&3));
     }
 }

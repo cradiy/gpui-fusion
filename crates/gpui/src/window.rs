@@ -1029,10 +1029,8 @@ impl Window {
                     if let Some(last_frame) = last_frame_time.get()
                         && !animation_frame_is_due(now.duration_since(last_frame), min_interval)
                     {
-                        // Must still complete the frame on platforms that require it.
-                        // On Wayland, `surface.frame()` was already called to request the
-                        // next frame callback, so we must call `surface.commit()` (via
-                        // `complete_frame`) or the compositor won't send another callback.
+                        // Complete platform bookkeeping and request another opportunity
+                        // to run the pending animation callbacks.
                         handle
                             .update(&mut cx, |_, window, _| window.complete_frame())
                             .log_err();
@@ -1056,9 +1054,11 @@ impl Window {
                 // Keep presenting if input was recently arriving at a high rate (>= 60fps).
                 // Once high-rate input is detected, we sustain presentation for 1 second
                 // to prevent display underclocking during active input.
+                let high_rate_input =
+                    active.get() && input_rate_tracker.borrow_mut().is_high_rate();
                 let needs_present = request_frame_options.require_presentation
                     || needs_present.get()
-                    || (active.get() && input_rate_tracker.borrow_mut().is_high_rate());
+                    || high_rate_input;
 
                 if invalidator.is_dirty() || request_frame_options.force_render {
                     measure("frame duration", || {
@@ -1086,6 +1086,9 @@ impl Window {
                         window.complete_frame();
                     })
                     .log_err();
+                if high_rate_input {
+                    invalidator.request_frame();
+                }
             }
         }));
         platform_window.on_resize(Box::new({

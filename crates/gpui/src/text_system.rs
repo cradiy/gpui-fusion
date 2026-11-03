@@ -380,7 +380,7 @@ impl TextSystem {
             .or_default();
         let wrapper = wrappers
             .pop()
-            .unwrap_or_else(|| LineWrapper::new(font_id, font_size, self.clone()));
+            .unwrap_or_else(|| LineWrapper::new(font_id, font_size, Arc::downgrade(self)));
 
         LineWrapperHandle {
             wrapper: Some(wrapper),
@@ -1491,6 +1491,33 @@ mod tests {
         ) -> TextRenderingMode {
             TextRenderingMode::Grayscale
         }
+    }
+
+    #[test]
+    fn pooled_line_wrappers_release_text_system_after_last_handle() {
+        let platform = Arc::new(TestTextSystem::default());
+        let text_system = Arc::new(TextSystem::new(platform));
+        let weak = Arc::downgrade(&text_system);
+        let mut first = text_system.line_wrapper(font("Dummy"), px(16.));
+        let second = text_system.line_wrapper(font("Dummy"), px(16.));
+        let fragments = [LineFragment::text("copper silver gold")];
+        let expected = first.wrap_line(&fragments, px(48.)).collect::<Vec<_>>();
+        assert!(!expected.is_empty());
+        drop(first);
+        let mut reused = text_system.line_wrapper(font("Dummy"), px(16.));
+        assert_eq!(
+            reused.wrap_line(&fragments, px(48.)).collect::<Vec<_>>(),
+            expected
+        );
+        drop(text_system);
+        drop(second);
+        assert!(weak.upgrade().is_some());
+        assert_eq!(
+            reused.wrap_line(&fragments, px(48.)).collect::<Vec<_>>(),
+            expected
+        );
+        drop(reused);
+        assert!(weak.upgrade().is_none());
     }
 
     #[test]

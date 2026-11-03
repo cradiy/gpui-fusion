@@ -2,7 +2,7 @@ use super::line_breaks::LineBreaks;
 use crate::{FontId, Pixels, SharedString, TextRun, TextSystem, px};
 use collections::HashMap;
 use itertools::Itertools as _;
-use std::{borrow::Cow, iter, sync::Arc};
+use std::{borrow::Cow, iter, sync::Weak};
 
 /// Determines whether to truncate text from the start or end.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -17,7 +17,7 @@ pub enum TruncateFrom {
 
 /// The GPUI line wrapper, used to wrap lines of text to a given width.
 pub struct LineWrapper {
-    text_system: Arc<TextSystem>,
+    text_system: Weak<TextSystem>,
     pub(crate) font_id: FontId,
     pub(crate) font_size: Pixels,
     cached_ascii_char_widths: [Option<Pixels>; 128],
@@ -28,7 +28,7 @@ impl LineWrapper {
     /// The maximum indent that can be applied to a line.
     pub const MAX_INDENT: u32 = 256;
 
-    pub(crate) fn new(font_id: FontId, font_size: Pixels, text_system: Arc<TextSystem>) -> Self {
+    pub(crate) fn new(font_id: FontId, font_size: Pixels, text_system: Weak<TextSystem>) -> Self {
         Self {
             text_system,
             font_id,
@@ -455,6 +455,8 @@ impl LineWrapper {
             } else {
                 let width = self
                     .text_system
+                    .upgrade()
+                    .expect("line wrapper handle keeps its text system alive")
                     .layout_width(self.font_id, self.font_size, c);
                 self.cached_ascii_char_widths[c as usize] = Some(width);
                 width
@@ -464,6 +466,8 @@ impl LineWrapper {
         } else {
             let width = self
                 .text_system
+                .upgrade()
+                .expect("line wrapper handle keeps its text system alive")
                 .layout_width(self.font_id, self.font_size, c);
             self.cached_other_char_widths.insert(c, width);
             width
@@ -618,11 +622,10 @@ mod tests {
     #[cfg(target_os = "macos")]
     use crate::{TextRun, WindowTextSystem, WrapBoundary};
 
-    fn build_wrapper() -> LineWrapper {
+    fn build_wrapper() -> crate::LineWrapperHandle {
         let dispatcher = TestDispatcher::new(0);
         let cx = TestAppContext::build(dispatcher, None);
-        let id = cx.text_system().resolve_font(&font("Lilex"));
-        LineWrapper::new(id, px(16.), cx.text_system().clone())
+        cx.text_system().line_wrapper(font("Lilex"), px(16.))
     }
 
     fn generate_test_runs(input_run_len: &[usize]) -> Vec<TextRun> {

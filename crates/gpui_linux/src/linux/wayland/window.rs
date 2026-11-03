@@ -692,11 +692,11 @@ pub struct WaylandWindowStatePtr {
 }
 
 impl WaylandWindowState {
-    fn request_frame_callback(&mut self) {
+    fn request_frame_callback(&mut self) -> bool {
         let surface = &self.surface;
         let qh = &self.globals.qh;
         self.frame_callback
-            .request(|| surface.frame(qh, surface.id()).id());
+            .request(|| surface.frame(qh, surface.id()).id())
     }
 
     pub(crate) fn new(
@@ -1209,7 +1209,6 @@ impl WaylandWindowStatePtr {
         if !state.mapped {
             return;
         }
-        state.request_frame_callback();
         state.resize_throttle = false;
         let force_render = state.force_render_after_recovery;
         state.force_render_after_recovery = false;
@@ -1324,6 +1323,8 @@ impl WaylandWindowStatePtr {
                 state.acknowledged_first_configure = true;
                 drop(state);
                 self.frame();
+            } else if state.mapped && state.resize_throttle && state.request_frame_callback() {
+                state.surface.commit();
             }
         }
     }
@@ -2241,6 +2242,34 @@ impl PlatformWindow for WaylandWindow {
         self.0.callbacks.borrow_mut().request_frame = Some(callback);
     }
 
+    fn frame_requester(&self) -> Option<Rc<dyn Fn()>> {
+        let weak = Rc::downgrade(&self.0.state);
+        let executor = self.borrow().globals.executor.clone();
+        let queued = Rc::new(Cell::new(false));
+        Some(Rc::new(move || {
+            if queued.replace(true) {
+                return;
+            }
+            let weak = weak.clone();
+            let queued = queued.clone();
+            executor
+                .spawn(async move {
+                    queued.set(false);
+                    let Some(state) = weak.upgrade() else {
+                        return;
+                    };
+                    let mut state = state.borrow_mut();
+                    if state.mapped
+                        && state.acknowledged_first_configure
+                        && state.request_frame_callback()
+                    {
+                        state.surface.commit();
+                    }
+                })
+                .detach();
+        }))
+    }
+
     fn on_input(&self, callback: Box<dyn FnMut(PlatformInput) -> gpui::DispatchEventResult>) {
         self.0.callbacks.borrow_mut().input = Some(callback);
     }
@@ -2380,9 +2409,7 @@ impl PlatformWindow for WaylandWindow {
             return;
         }
 
-        // Work around a bug in old versions of wlroots where committing without a buffer attached
-        // can cause invalid synchronization that leads to graphical corruption.
-        if !state.renderer_presented {
+        if state.force_render_after_recovery && state.request_frame_callback() {
             state.surface.commit();
         }
 

@@ -129,6 +129,7 @@ fn take_startup_activation_token_from_environment() -> Option<String> {
 
 #[derive(Clone)]
 pub struct Globals {
+    pub gpu_lost_sender: calloop::channel::Sender<()>,
     pub qh: QueueHandle<WaylandClientStatePtr>,
     pub activation: Option<xdg_activation_v1::XdgActivationV1>,
     pub compositor: wl_compositor::WlCompositor,
@@ -159,9 +160,11 @@ impl Globals {
         executor: ForegroundExecutor,
         qh: QueueHandle<WaylandClientStatePtr>,
         seat: Option<wl_seat::WlSeat>,
+        gpu_lost_sender: calloop::channel::Sender<()>,
     ) -> Self {
         let dialog_v = XdgWmDialogV1::interface().version;
         Globals {
+            gpu_lost_sender,
             activation: globals.bind(&qh, 1..=1, ()).ok(),
             compositor: globals
                 .bind(
@@ -1483,6 +1486,26 @@ impl WaylandClient {
             .unwrap();
 
         let compositor_gpu = detect_compositor_gpu();
+        let (gpu_lost_sender, gpu_lost_receiver) = calloop::channel::channel();
+        handle
+            .insert_source(
+                gpu_lost_receiver,
+                |event, _, client: &mut WaylandClientStatePtr| {
+                    if let calloop::channel::Event::Msg(()) = event {
+                        let windows: Vec<_> = client
+                            .get_client()
+                            .borrow()
+                            .windows
+                            .values()
+                            .cloned()
+                            .collect();
+                        for window in windows {
+                            window.gpu_device_lost();
+                        }
+                    }
+                },
+            )
+            .unwrap();
         let gpu_context = Rc::new(RefCell::new(None));
 
         let seat = seats.selected().map(|(name, version)| {
@@ -1498,6 +1521,7 @@ impl WaylandClient {
             common.foreground_executor.clone(),
             qh.clone(),
             seat.clone(),
+            gpu_lost_sender,
         );
 
         #[allow(clippy::mutable_key_type)]

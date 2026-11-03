@@ -692,6 +692,13 @@ pub struct WaylandWindowStatePtr {
 }
 
 impl WaylandWindowState {
+    fn watch_device(renderer: &WgpuRenderer, globals: &Globals) {
+        let sender = globals.gpu_lost_sender.clone();
+        renderer.set_device_lost_waker(move || {
+            let _ = sender.send(());
+        });
+    }
+
     fn request_frame_callback(&mut self) -> bool {
         let surface = &self.surface;
         let qh = &self.globals.qh;
@@ -733,6 +740,8 @@ impl WaylandWindowState {
             };
             WgpuRenderer::new(gpu_context, &raw_window, config, compositor_gpu)?
         };
+
+        Self::watch_device(&renderer, &globals);
 
         if let WaylandSurfaceState::Xdg(ref xdg_state) = surface_state {
             if let Some(title) = options.titlebar.and_then(|titlebar| titlebar.title) {
@@ -1201,6 +1210,20 @@ impl WaylandWindowStatePtr {
         if !self.state.borrow_mut().frame_callback.complete(callback) {
             return;
         }
+        self.frame();
+    }
+
+    pub(super) fn gpu_device_lost(&self) {
+        let mut state = self.state.borrow_mut();
+        if !state.renderer.device_lost() {
+            return;
+        }
+        state.force_render_after_recovery = true;
+        state.frame_callback.clear();
+        if !state.mapped || !state.acknowledged_first_configure {
+            return;
+        }
+        drop(state);
         self.frame();
     }
 
@@ -2337,7 +2360,7 @@ impl PlatformWindow for WaylandWindow {
                     .cast::<std::ffi::c_void>(),
             };
             match state.renderer.recover(&raw_window) {
-                Ok(()) => {}
+                Ok(()) => WaylandWindowState::watch_device(&state.renderer, &state.globals),
                 Err(err) => {
                     log::warn!("GPU recovery failed, will retry on next frame: {err}");
                 }

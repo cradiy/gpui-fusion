@@ -1,6 +1,7 @@
 //! Markdown conversion into editable-by-the-producer rich-text node snapshots.
 //! Images occupy their own blocks. Standalone details/summary tags form collapsible
-//! blocks. Inline kbd, mark, u, and br tags are supported; other HTML is literal text.
+//! blocks. HTML comments are hidden. Inline kbd, mark, u, br, and img tags are
+//! supported; other HTML is literal text.
 use crate::{compose::*, *};
 use anyhow::{Result, bail};
 use pulldown_cmark::{Event, Options, Parser, Tag};
@@ -9,6 +10,7 @@ mod footnotes;
 mod front_matter;
 pub use front_matter::{FrontMatter, FrontMatterFormat, ParsedMarkdown, parse_with_metadata};
 mod headings;
+mod html;
 mod inline_html;
 mod stream;
 pub use stream::MarkdownStream;
@@ -33,6 +35,9 @@ struct Item {
 /// `open` attribute on `<details>` sets the initial expanded state.
 /// Attribute-free inline `kbd`, `mark`, and `u` pairs stay within a Markdown
 /// container. Unmatched tags remain literal. Inline `br` inserts a newline.
+/// HTML comments are excluded from the document. HTML `img` tags use `src`,
+/// `alt`, and `title` attributes and occupy image blocks. Other attributes are
+/// ignored; tags without a nonempty source remain literal text.
 /// Leading YAML or TOML front matter is excluded from the rendered body.
 /// Use `parse_with_metadata` to retain its raw contents and completion state.
 pub fn parse(source: &str) -> Result<Document> {
@@ -40,7 +45,7 @@ pub fn parse(source: &str) -> Result<Document> {
 }
 
 fn parse_body(source: &str) -> Result<Document> {
-    let mut items = inline_html::normalize(parse_items(source, 0, 0)?, 0)?;
+    let mut items = inline_html::normalize(html::images(parse_items(source, 0, 0)?, 0)?, 0)?;
     headings::assign(&mut items)?;
     Document::from_roots(footnotes::convert(items)?)
 }
@@ -99,7 +104,7 @@ fn parse_items(source: &str, depth: usize, base: usize) -> Result<Vec<Item>> {
             }),
         }
     }
-    details::normalize(stack.pop().unwrap().children, depth)
+    details::normalize(html::comments(stack.pop().unwrap().children, depth)?, depth)
 }
 
 fn plain(items: &[Item]) -> String {
@@ -319,7 +324,11 @@ fn blocks(items: &[Item]) -> Result<Vec<NodeTree>> {
                 }
                 Some(node(Table::new().columns(columns)).children(rows))
             }
-            Some(Tag::HtmlBlock) => Some(paragraph().children(inlines(&item.children)?)),
+            Some(Tag::HtmlBlock) => {
+                flush(&mut result, &mut pending);
+                result.extend(blocks(&item.children)?);
+                continue;
+            }
             _ if matches!(item.event, Some(Event::Rule)) => Some(node(Rule)),
             #[cfg(feature = "math")]
             _ if matches!(item.event, Some(Event::DisplayMath(_))) => {

@@ -9,7 +9,7 @@ readme = "README.md"
 
 [features]
 default = []
-markdown = ["dep:pulldown-cmark", "dep:percent-encoding"]
+markdown = ["dep:pulldown-cmark", "dep:percent-encoding", "dep:html5ever"]
 syntax-highlighting = ["dep:syntect"]
 syntax-extra = ["syntax-highlighting", "dep:two-face", "syntect/yaml-load"]
 mermaid = ["dep:mermaid-svg"]
@@ -23,6 +23,7 @@ mermaid-svg = { version = "0.7", optional = true }
 latex-rust = { version = "3.0.1", default-features = false, features = ["std"], optional = true }
 pulldown-cmark = { version = "0.13", default-features = false, optional = true }
 percent-encoding = { version = "2.3", optional = true }
+html5ever = { version = "0.40", optional = true }
 syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"], optional = true }
 two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"], optional = true }
 

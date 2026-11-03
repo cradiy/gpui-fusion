@@ -3,6 +3,82 @@ use crate::{
     TestAppContext, Window, canvas, deferred, div, fill, px, rgb,
 };
 
+#[crate::test]
+fn cached_reads_do_not_restore_released_entity_subscriptions(cx: &mut TestAppContext) {
+    use std::{cell::Cell, rc::Rc};
+
+    struct Reader {
+        optional: crate::WeakEntity<f32>,
+        live: Entity<f32>,
+        renders: Rc<Cell<usize>>,
+    }
+    impl Render for Reader {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            self.renders.set(self.renders.get() + 1);
+            let opacity = self.optional.upgrade().map_or(1., |value| *value.read(cx));
+            div()
+                .size_full()
+                .bg(rgb(0x457890))
+                .opacity(opacity * *self.live.read(cx))
+        }
+    }
+    struct Root(Entity<Reader>);
+    impl Render for Root {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            self.0
+                .clone()
+                .cached(crate::StyleRefinement::default().size(px(64.)))
+        }
+    }
+
+    let value = cx.new(|_| 0.5f32);
+    let released_id = value.entity_id();
+    let weak = value.downgrade();
+    let live = cx.new(|_| 1.0f32);
+    let renders = Rc::new(Cell::new(0));
+    let child = cx.new(|_| Reader {
+        optional: weak.clone(),
+        live: live.clone(),
+        renders: renders.clone(),
+    });
+    let handle = cx.add_window(|_, _| Root(child));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.draw(cx).clear();
+        assert!(cx.window_invalidators_by_entity.contains_key(&released_id));
+    })
+    .unwrap();
+    drop(value);
+    cx.update(|_| ());
+    assert!(weak.upgrade().is_none());
+    cx.update(|cx| assert!(!cx.window_invalidators_by_entity.contains_key(&released_id)));
+
+    let previous_renders = renders.get();
+    for _ in 0..3 {
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.invalidator.set_dirty(true);
+            window.draw(cx).clear();
+            assert_eq!(
+                renders.get(),
+                previous_renders,
+                "the child must reuse its cache"
+            );
+            assert!(!cx.window_invalidators_by_entity.contains_key(&released_id));
+            assert!(!cx.current_window_by_entity.contains_key(&released_id));
+            assert!(!cx.tracked_entities[&handle.window_id()].contains(&released_id));
+        })
+        .unwrap();
+    }
+    cx.update_window(handle.into(), |_, window, cx| {
+        assert!(!window.invalidator.is_dirty());
+        live.update(cx, |value, cx| {
+            *value = 0.25;
+            cx.notify();
+        });
+        assert!(window.invalidator.is_dirty());
+    })
+    .unwrap();
+}
+
 struct PaintReader {
     value: Entity<f32>,
     deferred: bool,

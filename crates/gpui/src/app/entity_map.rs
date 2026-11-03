@@ -172,9 +172,15 @@ impl EntityMap {
     }
 
     pub fn extend_accessed(&mut self, entities: &FxHashSet<EntityId>) {
+        let ref_counts = self.ref_counts.read();
         self.accessed_entities
             .get_mut()
-            .extend(entities.iter().copied());
+            .extend(entities.iter().copied().filter(|entity| {
+                ref_counts
+                    .counts
+                    .get(*entity)
+                    .is_some_and(|count| count.load(SeqCst) > 0)
+            }));
     }
 
     pub fn clear_accessed(&mut self) {

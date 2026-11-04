@@ -195,6 +195,14 @@ impl PlatformAtlas for WgpuAtlas {
         self.1.retain(key, lifetime);
     }
 
+    fn retain_svg(
+        &self,
+        key: &gpui::AtlasKey,
+        size: gpui::Size<gpui::DevicePixels>,
+    ) -> std::sync::Arc<()> {
+        self.1.retain_svg(key, size)
+    }
+
     fn collect_unused_images(&self) {
         self.1.collect(self);
     }

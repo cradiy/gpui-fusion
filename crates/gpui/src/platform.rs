@@ -1728,7 +1728,14 @@ pub trait PlatformAtlas {
     #[doc(hidden)]
     fn retain_image(&self, _key: &RenderImageParams, _lifetime: std::sync::Weak<()>) {}
 
-    /// Removes transient images whose decoded frames and recorded scenes have expired.
+    /// Retains an SVG tile in the bounded atlas cache and returns a scene ownership token.
+    /// Only `AtlasKey::Svg` and `AtlasKey::ColorSvg` are accepted.
+    #[doc(hidden)]
+    fn retain_svg(&self, _key: &AtlasKey, _size: Size<DevicePixels>) -> Arc<()> {
+        Arc::new(())
+    }
+
+    /// Collects expired image tiles and excess SVG tiles not held by recorded scenes.
     #[doc(hidden)]
     fn collect_unused_images(&self) {}
 }

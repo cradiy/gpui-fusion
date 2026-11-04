@@ -68,6 +68,18 @@ impl PlatformAtlas for MetalAtlas {
         }
     }
 
+    fn retain_svg(
+        &self,
+        key: &gpui::AtlasKey,
+        size: gpui::Size<gpui::DevicePixels>,
+    ) -> std::sync::Arc<()> {
+        if let Some(atlas) = &self.shared {
+            atlas.retain_svg(key, size)
+        } else {
+            self.image_lifetimes.retain_svg(key, size)
+        }
+    }
+
     fn collect_unused_images(&self) {
         if let Some(atlas) = &self.shared {
             atlas.collect_unused_images();

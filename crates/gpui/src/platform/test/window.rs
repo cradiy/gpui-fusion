@@ -357,18 +357,29 @@ pub(crate) struct TestAtlasState {
     tiles: HashMap<AtlasKey, AtlasTile>,
 }
 
-pub(crate) struct TestAtlas(Mutex<TestAtlasState>);
+pub(crate) struct TestAtlas(Mutex<TestAtlasState>, crate::AtlasImageLifetimes);
 
 impl TestAtlas {
     pub fn new() -> Self {
-        TestAtlas(Mutex::new(TestAtlasState {
-            next_id: 0,
-            tiles: HashMap::default(),
-        }))
+        TestAtlas(
+            Mutex::new(TestAtlasState {
+                next_id: 0,
+                tiles: HashMap::default(),
+            }),
+            Default::default(),
+        )
     }
 }
 
 impl PlatformAtlas for TestAtlas {
+    fn retain_svg(&self, key: &AtlasKey, size: Size<DevicePixels>) -> Arc<()> {
+        self.1.retain_svg(key, size)
+    }
+
+    fn collect_unused_images(&self) {
+        self.1.collect(self);
+    }
+
     fn get_or_insert_with<'a>(
         &self,
         key: &crate::AtlasKey,

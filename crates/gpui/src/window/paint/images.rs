@@ -45,6 +45,10 @@ impl Window {
         else {
             return Ok(());
         };
+        let lifetime = self
+            .sprite_atlas
+            .retain_svg(&params.into(), tile.bounds.size);
+        self.next_frame.scene.retain_atlas_tile(lifetime);
         let content_mask = self.snapped_content_mask();
         let svg_bounds = Bounds {
             origin: bounds.center()
@@ -202,6 +206,10 @@ impl Window {
             return Ok(());
         };
 
+        let lifetime = self
+            .sprite_atlas
+            .retain_svg(&params.into(), tile.bounds.size);
+        self.next_frame.scene.retain_atlas_tile(lifetime);
         self.next_frame.scene.insert_primitive(PolychromeSprite {
             order: 0,
             pad: 0,

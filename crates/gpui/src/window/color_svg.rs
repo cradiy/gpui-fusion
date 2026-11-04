@@ -2,7 +2,7 @@ use super::Window;
 use crate::{App, RenderColorSvgParams, Task};
 use collections::FxHashMap;
 use scheduler::Instant;
-use std::{borrow::Cow, time::Duration};
+use std::{borrow::Cow, sync::Arc, time::Duration};
 
 const MAX_CONCURRENT_RASTERS: usize = 2;
 const MAX_SYNC_PIXELS: i64 = 256 * 256;
@@ -11,6 +11,7 @@ const MAX_SYNC_PIXELS: i64 = 256 * 256;
 pub(super) struct ColorSvgRenders {
     pending: FxHashMap<RenderColorSvgParams, Task<()>>,
     failed: FxHashMap<RenderColorSvgParams, Instant>,
+    pub(super) ready: FxHashMap<RenderColorSvgParams, Arc<()>>,
 }
 
 pub(super) fn rasterize_in_background(params: &RenderColorSvgParams) -> bool {
@@ -59,7 +60,12 @@ impl Window {
                     Err(error) => Err(error),
                 };
                 match uploaded {
-                    Ok(Some(_)) => {}
+                    Ok(Some(tile)) => {
+                        let lifetime = window
+                            .sprite_atlas
+                            .retain_svg(&params.clone().into(), tile.bounds.size);
+                        window.color_svg_renders.ready.insert(params, lifetime);
+                    }
                     result => {
                         if let Err(error) = result {
                             log::error!("Failed to render colored SVG {}: {error:#}", params.path);
@@ -126,6 +132,48 @@ mod tests {
             .sprite_atlas
             .get_or_insert_with(&params.clone().into(), &mut || Ok(None))
             .unwrap()
+    }
+
+    #[crate::test]
+    fn completed_svg_upload_is_pinned_until_the_window_can_paint(cx: &mut TestAppContext) {
+        use std::{cell::Cell, rc::Rc};
+        struct PendingSvg {
+            params: RenderColorSvgParams,
+            observed: Rc<Cell<bool>>,
+        }
+        impl Render for PendingSvg {
+            fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                if window.color_svg_renders.ready.contains_key(&self.params) {
+                    window.sprite_atlas.collect_unused_images();
+                    assert!(
+                        cached(window, &self.params).is_some(),
+                        "collection before first paint must preserve the completed upload"
+                    );
+                    self.observed.set(true);
+                }
+                div()
+            }
+        }
+        let mut p = params(2304);
+        p.size = size(DevicePixels(2304), DevicePixels(2304));
+        let observed = Rc::new(Cell::new(false));
+        let window = cx.open_window(size(px(200.), px(200.)), |_, _| PendingSvg {
+            params: p.clone(),
+            observed: observed.clone(),
+        });
+        window.update(cx, |_, window, cx| {
+            window.request_color_svg_raster(p.clone(), Some(br#"<svg xmlns="http://www.w3.org/2000/svg" width="3" height="3"><circle cx="1.5" cy="1.5" r="1" fill="orange"/></svg>"#), cx);
+        }).unwrap();
+        cx.run_until_parked();
+        assert!(observed.get());
+        window
+            .update(cx, |_, window, _| {
+                assert!(
+                    cached(window, &p).is_none(),
+                    "an obsolete upload is reclaimable after the next frame"
+                );
+            })
+            .unwrap();
     }
 
     #[crate::test]

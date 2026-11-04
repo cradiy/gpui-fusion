@@ -65,6 +65,7 @@ mod input_metrics;
 mod paint;
 mod prompts;
 mod raster;
+mod scene_memory;
 #[cfg(test)]
 mod tests;
 
@@ -600,6 +601,8 @@ pub struct Window {
     display_id: Option<DisplayId>,
     sprite_atlas: Arc<dyn PlatformAtlas>,
     glyph_cache: glyph_cache::GlyphCache,
+    scene_reclaim_task: Option<Task<()>>,
+    last_scene_draw: Instant,
     color_svg_renders: color_svg::ColorSvgRenders,
     text_system: Arc<WindowTextSystem>,
     text_rendering_mode: Rc<Cell<TextRenderingMode>>,
@@ -1277,6 +1280,8 @@ impl Window {
             display_id,
             sprite_atlas,
             glyph_cache: glyph_cache::GlyphCache::default(),
+            scene_reclaim_task: None,
+            last_scene_draw: cx.background_executor().now(),
             color_svg_renders: Default::default(),
             text_system,
             text_rendering_mode: cx.text_rendering_mode.clone(),

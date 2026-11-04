@@ -356,6 +356,7 @@ impl Window {
         let previous_window_active = self.rendered_frame.window_active;
         mem::swap(&mut self.rendered_frame, &mut self.next_frame);
         self.next_frame.clear();
+        self.schedule_scene_memory_reclaim(cx);
         self.color_svg_renders.ready.clear();
         cx.prune_image_assets(false);
         self.glyph_cache.finish_frame(self.sprite_atlas.as_ref());

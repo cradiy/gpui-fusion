@@ -105,6 +105,26 @@ impl Arena {
         self.chunks.len() * self.chunk_size.get()
     }
 
+    pub(crate) fn used_capacity(&self) -> usize {
+        (self.current_chunk_index + 1) * self.chunk_size.get()
+    }
+
+    pub(crate) fn needs_idle_reclaim(&self, retained: usize) -> bool {
+        self.capacity()
+            .saturating_sub(retained.max(self.chunk_size.get() * 2))
+            >= 4 * 1024 * 1024
+    }
+
+    pub(crate) fn reclaim_idle_memory(&mut self, retained: usize) -> bool {
+        if !self.elements.is_empty() || !self.needs_idle_reclaim(retained) {
+            return false;
+        }
+        let chunks = retained.div_ceil(self.chunk_size.get()).max(2);
+        self.chunks.truncate(chunks);
+        self.recent_peak_chunks = self.recent_peak_chunks.min(chunks);
+        true
+    }
+
     pub fn clear(&mut self) {
         self.recent_peak_chunks = self.recent_peak_chunks.max(self.current_chunk_index + 1);
         self.recent_peak_elements = self.recent_peak_elements.max(self.elements.len());
@@ -262,6 +282,23 @@ mod tests {
             arena.capacity() >= peak,
             "the arena can grow again after trimming"
         );
+    }
+
+    #[test]
+    fn idle_reclaim_preserves_live_allocations() {
+        let mut arena = Arena::new(1024 * 1024);
+        let first = arena.alloc(|| [0x51u8; 1024]);
+        for _ in 0..8192 {
+            arena.alloc(|| [0u8; 1024]);
+        }
+        let peak = arena.capacity();
+        assert!(!arena.reclaim_idle_memory(0));
+        assert_eq!(first[1023], 0x51);
+        assert_eq!(arena.capacity(), peak);
+        arena.clear();
+        assert!(arena.reclaim_idle_memory(0));
+        assert!(arena.capacity() < peak / 2);
+        assert_eq!(*arena.alloc(|| 0x8734u32), 0x8734);
     }
 
     #[test]

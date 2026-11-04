@@ -750,6 +750,7 @@ pub struct App {
     /// Per-App element arena. This isolates element allocations between different
     /// App instances (important for tests where multiple Apps run concurrently).
     pub(crate) element_arena: RefCell<Arena>,
+    element_arena_memory: memory::ElementArenaMemory,
     /// Per-App event arena.
     pub(crate) event_arena: Arena,
 
@@ -895,6 +896,7 @@ impl App {
                 #[cfg(any(test, feature = "test-support", debug_assertions))]
                 name: None,
                 element_arena: RefCell::new(Arena::new(1024 * 1024)),
+                element_arena_memory: Default::default(),
                 event_arena: Arena::new(1024 * 1024),
 
                 #[cfg(any(test, feature = "leak-detection"))]
@@ -2006,6 +2008,7 @@ impl App {
                     });
 
                     drop(window);
+                    cx.forget_element_arena_usage(id);
                     cx.prune_image_assets(cx.windows.is_empty());
 
                     let quit_on_empty = match cx.quit_mode {

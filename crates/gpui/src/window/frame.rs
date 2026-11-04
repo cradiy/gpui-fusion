@@ -357,6 +357,7 @@ impl Window {
         mem::swap(&mut self.rendered_frame, &mut self.next_frame);
         self.next_frame.clear();
         self.schedule_scene_memory_reclaim(cx);
+        cx.record_element_arena_usage(self.handle.id);
         self.color_svg_renders.ready.clear();
         cx.prune_image_assets(false);
         self.glyph_cache.finish_frame(self.sprite_atlas.as_ref());

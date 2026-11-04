@@ -760,6 +760,8 @@ pub struct App {
     pub(crate) globals_by_type: TypeIdHashMap<Box<dyn Any>>,
 
     // assets
+    pub(crate) image_asset_access: FxHashMap<(TypeId, u64), u64>,
+    pub(crate) image_asset_clock: u64,
     pub(crate) loading_assets: FxHashMap<(TypeId, u64), Box<dyn Any>>,
     asset_source: Arc<dyn AssetSource>,
     pub(crate) svg_renderer: SvgRenderer,
@@ -839,6 +841,8 @@ impl App {
                 background_executor,
                 foreground_executor,
                 svg_renderer: SvgRenderer::new(asset_source.clone()),
+                image_asset_access: Default::default(),
+                image_asset_clock: 0,
                 loading_assets: Default::default(),
                 asset_source,
                 http_client,
@@ -2001,6 +2005,9 @@ impl App {
                         true
                     });
 
+                    drop(window);
+                    cx.prune_image_assets(cx.windows.is_empty());
+
                     let quit_on_empty = match cx.quit_mode {
                         QuitMode::Explicit => false,
                         QuitMode::LastWindowClosed => true,
@@ -2801,6 +2808,7 @@ impl App {
     pub fn remove_asset<A: Asset>(&mut self, source: &A::Source) {
         let asset_id = (TypeId::of::<A>(), hash(source));
         self.loading_assets.remove(&asset_id);
+        self.image_asset_access.remove(&asset_id);
     }
 
     /// Asynchronously load an asset, if the asset hasn't finished loading this will return None.

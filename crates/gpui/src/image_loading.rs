@@ -8,6 +8,8 @@ use smallvec::SmallVec;
 use std::{io::Cursor, sync::Arc};
 
 mod animation;
+mod cache;
+pub use cache::ImageCacheLimits;
 mod color_profile;
 mod playback;
 pub use animation::{ImageAnimation, ImageAnimationOptions, ImageLoopCount};
@@ -21,12 +23,16 @@ pub(crate) fn load_image(
     limits: ImageLoadLimits,
     options: ImageAnimationOptions,
 ) -> Result<Arc<RenderImage>, ImageCacheError> {
-    if matches!(format, Some(ImageFormat::Gif | ImageFormat::WebP)) {
+    let mut image = if matches!(format, Some(ImageFormat::Gif | ImageFormat::WebP)) {
         limits.check_input(bytes.len() as u64)?;
-        animation::load(Arc::from(bytes), format.unwrap(), limits, options)
+        animation::load(Arc::from(bytes), format.unwrap(), limits, options)?
     } else {
-        decode_image(bytes, format, svg_renderer, limits)
+        decode_image(bytes, format, svg_renderer, limits)?
+    };
+    if let Some(image) = Arc::get_mut(&mut image) {
+        image.atlas_lifetime.get_or_insert_with(|| Arc::new(()));
     }
+    Ok(image)
 }
 
 /// Per-image resource limits for GPUI's built-in image loaders.

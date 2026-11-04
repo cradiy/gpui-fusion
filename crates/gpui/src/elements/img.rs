@@ -686,12 +686,16 @@ impl ImageSource {
                 if let Some(cache) = cache {
                     cache.load(resource, window, cx)
                 } else {
+                    cx.track_image_asset::<ImgResourceLoader>(resource);
                     window.use_asset::<ImgResourceLoader>(resource, cx)
                 }
             }
             ImageSource::Custom(loading_fn) => loading_fn(window, cx),
             ImageSource::Render(data) => Some(Ok(data.to_owned())),
-            ImageSource::Image(data) => window.use_asset::<AssetLogger<ImageDecoder>>(data, cx),
+            ImageSource::Image(data) => {
+                cx.track_image_asset::<AssetLogger<ImageDecoder>>(data);
+                window.use_asset::<AssetLogger<ImageDecoder>>(data, cx)
+            }
         }
     }
 
@@ -706,12 +710,16 @@ impl ImageSource {
                 if let Some(cache) = cache {
                     cache.load(resource, window, cx)
                 } else {
+                    cx.track_image_asset::<ImgResourceLoader>(resource);
                     window.get_asset::<ImgResourceLoader>(resource, cx)
                 }
             }
             ImageSource::Custom(loading_fn) => loading_fn(window, cx),
             ImageSource::Render(data) => Some(Ok(data.to_owned())),
-            ImageSource::Image(data) => window.get_asset::<AssetLogger<ImageDecoder>>(data, cx),
+            ImageSource::Image(data) => {
+                cx.track_image_asset::<AssetLogger<ImageDecoder>>(data);
+                window.get_asset::<AssetLogger<ImageDecoder>>(data, cx)
+            }
         }
     }
 

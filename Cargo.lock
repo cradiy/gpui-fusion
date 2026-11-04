@@ -3971,6 +3971,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui_text"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cosmic-text",
+ "fontdb 0.23.0",
+ "harfrust 0.5.0",
+ "swash",
+ "unicode-bidi",
+ "unicode-script",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "gpui_tokio"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,19 @@
+[package]
+name = "gpui_text"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "MIT"
+authors = ["cradiy <cradiy.rs@gmail.com>"]
+
+[dependencies]
+anyhow.workspace = true
+fontdb = "0.23"
+harfrust = "0.5"
+swash = "0.2.6"
+unicode-bidi = "0.3"
+unicode-script = "0.5"
+unicode-segmentation.workspace = true
+
+[dev-dependencies]
+cosmic-text = "0.19"

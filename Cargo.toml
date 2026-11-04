@@ -28,6 +28,7 @@ members = [
   "crates/gpui_web",
   "crates/gpui_webview",
   "crates/gpui_wgpu",
+  "crates/gpui_text",
   "crates/gpui_render",
   "crates/gpui_richtext",
   "crates/scheduler",

@@ -25,6 +25,11 @@ pub struct LineWrapper {
 }
 
 impl LineWrapper {
+    pub(super) fn cached_bytes(&self) -> usize {
+        std::mem::size_of_val(self)
+            + self.cached_other_char_widths.capacity() * std::mem::size_of::<(char, Pixels)>()
+    }
+
     /// The maximum indent that can be applied to a line.
     pub const MAX_INDENT: u32 = 256;
 

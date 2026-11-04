@@ -56,7 +56,7 @@ pub struct TextSystem {
     font_cache: RwLock<FontCache>,
     font_metrics: RwLock<FxHashMap<FontId, FontMetrics>>,
     raster_bounds: RwLock<FxHashMap<RenderGlyphParams, Bounds<DevicePixels>>>,
-    wrapper_pool: Mutex<FxHashMap<FontIdWithSize, Vec<LineWrapper>>>,
+    wrapper_pool: Mutex<LineWrapperPool>,
     font_runs_pool: Mutex<Vec<Vec<FontRun>>>,
     fallback_font_stack: SmallVec<[Font; 2]>,
 }
@@ -373,14 +373,14 @@ impl TextSystem {
 
     /// Returns a handle to a line wrapper, for the given font and font size.
     pub fn line_wrapper(self: &Arc<Self>, font: Font, font_size: Pixels) -> LineWrapperHandle {
-        let lock = &mut self.wrapper_pool.lock();
         let font_id = self.resolve_font(&font);
-        let wrappers = lock
-            .entry(FontIdWithSize { font_id, font_size })
-            .or_default();
-        let wrapper = wrappers
-            .pop()
-            .unwrap_or_else(|| LineWrapper::new(font_id, font_size, Arc::downgrade(self)));
+        let wrapper = self
+            .wrapper_pool
+            .lock()
+            .take(&FontIdWithSize { font_id, font_size })
+            .unwrap_or_else(|| {
+                Box::new(LineWrapper::new(font_id, font_size, Arc::downgrade(self)))
+            });
 
         LineWrapperHandle {
             wrapper: Some(wrapper),
@@ -958,29 +958,66 @@ impl WindowTextSystem {
     }
 }
 
-#[derive(Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
 struct FontIdWithSize {
     font_id: FontId,
     font_size: Pixels,
 }
 
+#[derive(Default)]
+struct LineWrapperPool {
+    entries: FxHashMap<FontIdWithSize, (Box<LineWrapper>, u64)>,
+    cached_bytes: usize,
+    clock: u64,
+}
+
+impl LineWrapperPool {
+    const MAX_ENTRIES: usize = 256;
+    // Wrapper storage and character-width payload, excluding allocator and hash-table overhead.
+    const MAX_BYTES: usize = 1024 * 1024;
+
+    fn take(&mut self, key: &FontIdWithSize) -> Option<Box<LineWrapper>> {
+        let (wrapper, _) = self.entries.remove(key)?;
+        self.cached_bytes -= wrapper.cached_bytes();
+        Some(wrapper)
+    }
+
+    fn put(&mut self, wrapper: Box<LineWrapper>) {
+        let bytes = wrapper.cached_bytes();
+        if bytes > Self::MAX_BYTES {
+            return;
+        }
+        let key = FontIdWithSize {
+            font_id: wrapper.font_id,
+            font_size: wrapper.font_size,
+        };
+        drop(self.take(&key));
+        while self.entries.len() >= Self::MAX_ENTRIES || self.cached_bytes + bytes > Self::MAX_BYTES
+        {
+            let oldest = *self
+                .entries
+                .iter()
+                .min_by_key(|(_, (_, age))| age)
+                .unwrap()
+                .0;
+            drop(self.take(&oldest));
+        }
+        self.clock = self.clock.saturating_add(1);
+        self.cached_bytes += bytes;
+        self.entries.insert(key, (wrapper, self.clock));
+    }
+}
+
 /// A handle into the text system, which can be used to compute the wrapped layout of text
 pub struct LineWrapperHandle {
-    wrapper: Option<LineWrapper>,
+    wrapper: Option<Box<LineWrapper>>,
     text_system: Arc<TextSystem>,
 }
 
 impl Drop for LineWrapperHandle {
     fn drop(&mut self) {
-        let mut state = self.text_system.wrapper_pool.lock();
         let wrapper = self.wrapper.take().unwrap();
-        state
-            .get_mut(&FontIdWithSize {
-                font_id: wrapper.font_id,
-                font_size: wrapper.font_size,
-            })
-            .unwrap()
-            .push(wrapper);
+        self.text_system.wrapper_pool.lock().put(wrapper);
     }
 }
 
@@ -1375,6 +1412,7 @@ mod tests {
 
     #[derive(Default)]
     struct TestTextSystem {
+        layout_calls: AtomicUsize,
         rasterize_calls: AtomicUsize,
         font_lookups: AtomicUsize,
         deferred_font_loaded: AtomicBool,
@@ -1454,6 +1492,7 @@ mod tests {
         }
 
         fn layout_line(&self, text: &str, font_size: Pixels, _runs: &[FontRun]) -> LineLayout {
+            self.layout_calls.fetch_add(1, Ordering::Relaxed);
             let glyphs = text
                 .char_indices()
                 .enumerate()
@@ -1491,6 +1530,90 @@ mod tests {
         ) -> TextRenderingMode {
             TextRenderingMode::Grayscale
         }
+    }
+
+    #[test]
+    fn wrapper_pool_bounds_entries_keeps_hot_widths_and_accepts_outstanding_handles() {
+        let platform = Arc::new(TestTextSystem::default());
+        let system = Arc::new(TextSystem::new(platform.clone()));
+        let mut held = system.line_wrapper(font("Dummy"), px(15.));
+        let fragments = [LineFragment::text("violet amber indigo")];
+        let expected = held.wrap_line(&fragments, px(50.)).collect::<Vec<_>>();
+        for index in 0..512 {
+            drop(system.line_wrapper(font("Dummy"), px(32. + index as f32)));
+            let mut hot = system.line_wrapper(font("Dummy"), px(16.));
+            assert_eq!(
+                hot.wrap_line(&fragments, px(50.)).collect::<Vec<_>>(),
+                expected
+            );
+        }
+        let calls = platform.layout_calls.load(Ordering::Relaxed);
+        {
+            let mut hot = system.line_wrapper(font("Dummy"), px(16.));
+            assert_eq!(
+                hot.wrap_line(&fragments, px(50.)).collect::<Vec<_>>(),
+                expected
+            );
+        }
+        assert_eq!(platform.layout_calls.load(Ordering::Relaxed), calls);
+        assert_eq!(
+            held.wrap_line(&fragments, px(50.)).collect::<Vec<_>>(),
+            expected
+        );
+        drop(held);
+        let duplicate = system.line_wrapper(font("Dummy"), px(15.));
+        let other = system.line_wrapper(font("Dummy"), px(15.));
+        drop(duplicate);
+        drop(other);
+        let pool = system.wrapper_pool.lock();
+        assert!(pool.entries.len() <= LineWrapperPool::MAX_ENTRIES);
+        assert!(pool.entries.contains_key(&FontIdWithSize {
+            font_id: FontId(1),
+            font_size: px(15.)
+        }));
+        assert!(!pool.entries.contains_key(&FontIdWithSize {
+            font_id: FontId(1),
+            font_size: px(32.)
+        }));
+    }
+
+    #[test]
+    fn wrapper_pool_bounds_character_width_payload() {
+        let system = Arc::new(TextSystem::new(Arc::new(TestTextSystem::default())));
+        let text: String = (0x400..0x800).filter_map(char::from_u32).collect();
+        let fragments = [LineFragment::text(&text)];
+        for index in 0..160 {
+            let mut wrapper = system.line_wrapper(font("Dummy"), px(20. + index as f32));
+            assert!(wrapper.wrap_line(&fragments, px(80.)).count() > 0);
+        }
+        let pool = system.wrapper_pool.lock();
+        assert!(pool.entries.len() < 160);
+        assert!(pool.cached_bytes <= LineWrapperPool::MAX_BYTES);
+        assert_eq!(
+            pool.cached_bytes,
+            pool.entries
+                .values()
+                .map(|(wrapper, _)| wrapper.cached_bytes())
+                .sum::<usize>()
+        );
+        drop(pool);
+
+        let text: String = (0x1000..0x24000).filter_map(char::from_u32).collect();
+        let mut oversized = system.line_wrapper(font("Dummy"), px(300.));
+        assert!(
+            oversized
+                .wrap_line(&[LineFragment::text(&text)], px(80.))
+                .count()
+                > 0
+        );
+        assert!(oversized.cached_bytes() > LineWrapperPool::MAX_BYTES);
+        drop(oversized);
+        let pool = system.wrapper_pool.lock();
+        assert!(!pool.entries.contains_key(&FontIdWithSize {
+            font_id: FontId(1),
+            font_size: px(300.)
+        }));
+        assert!(pool.cached_bytes <= LineWrapperPool::MAX_BYTES);
     }
 
     #[test]

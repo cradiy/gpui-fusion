@@ -4,8 +4,9 @@ use std::{any::TypeId, sync::Arc};
 
 /// Retention budget for unused static images loaded by `img` without a custom cache.
 /// Install as an application global. Visible scenes and external image owners are
-/// protected even when they exceed the budget. Animations and custom caches are excluded.
-/// Unused entries are checked after drawing and discarded when the last window closes.
+/// protected even when they exceed the budget. Animations and custom caches are excluded
+/// from this budget. Unused entries are checked after drawing. Closing the last window
+/// also detaches all managed animation entries; external owners and decode tasks remain valid.
 #[derive(Clone, Copy, Debug)]
 pub struct ImageCacheLimits {
     /// Maximum decoded pixel bytes retained for unused images. Defaults to 32 MiB.
@@ -57,8 +58,13 @@ impl App {
             };
             let size = match result {
                 Ok(image) => {
-                    if image.animation().is_some()
-                        || Arc::strong_count(image) > 1
+                    if image.animation().is_some() {
+                        if discard_unused {
+                            unused.push((*key, *accessed, 0));
+                        }
+                        continue;
+                    }
+                    if Arc::strong_count(image) > 1
                         || image
                             .atlas_lifetime
                             .as_ref()
@@ -100,7 +106,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ImgResourceLoader, Resource};
+    use crate::{AppContext as _, ImgResourceLoader, Resource};
     use futures::FutureExt;
     use image::{DynamicImage, ImageFormat, RgbaImage};
     use std::{io::Cursor, path::PathBuf, sync::Weak};
@@ -118,6 +124,14 @@ mod tests {
             Default::default(),
         )
         .unwrap();
+        cache_image(cx, name, image)
+    }
+
+    fn cache_image(
+        cx: &mut App,
+        name: &str,
+        image: Arc<RenderImage>,
+    ) -> (Resource, Weak<RenderImage>) {
         let weak = Arc::downgrade(&image);
         let source = Resource::from(PathBuf::from(name));
         let task: ImageTask = Task::ready(Ok(image)).shared();
@@ -128,6 +142,118 @@ mod tests {
         );
         cx.track_image_asset::<ImgResourceLoader>(&source);
         (source, weak)
+    }
+
+    fn insert_animation(cx: &mut App) -> (Resource, Weak<RenderImage>) {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = image::codecs::gif::GifEncoder::new(&mut bytes);
+            encoder
+                .set_repeat(image::codecs::gif::Repeat::Infinite)
+                .unwrap();
+            for index in 0..3 {
+                encoder
+                    .encode_frame(image::Frame::from_parts(
+                        RgbaImage::from_pixel(9, 5, image::Rgba([20 + index * 5, 70, 140, 255])),
+                        0,
+                        0,
+                        image::Delay::from_numer_denom_ms(80, 1),
+                    ))
+                    .unwrap();
+            }
+        }
+        let image = super::super::load_image(
+            &bytes,
+            Some(ImageFormat::Gif),
+            &cx.svg_renderer(),
+            Default::default(),
+            Default::default(),
+        )
+        .unwrap();
+        cache_image(cx, "animated-cache.gif", image)
+    }
+
+    struct AnimationView(Resource);
+
+    impl crate::Render for AnimationView {
+        fn render(
+            &mut self,
+            _: &mut crate::Window,
+            _: &mut crate::Context<Self>,
+        ) -> impl crate::IntoElement {
+            use crate::{InteractiveElement as _, Styled as _};
+            crate::img(crate::ImageSource::Resource(self.0.clone()))
+                .id("animation")
+                .w(crate::px(36.))
+                .h(crate::px(20.))
+        }
+    }
+
+    #[crate::test]
+    fn animated_images_release_only_after_the_last_window_closes(cx: &mut crate::TestAppContext) {
+        let (resource, image) = cx.update(|cx| {
+            cx.set_global(ImageCacheLimits {
+                max_unused_bytes: 0,
+                max_unused_entries: 0,
+            });
+            insert_animation(cx)
+        });
+        let animation = Arc::downgrade(image.upgrade().unwrap().animation().unwrap());
+        let windows = [0, 1].map(|_| cx.add_window(|_, _| AnimationView(resource.clone())));
+        for window in windows {
+            cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear())
+                .unwrap();
+        }
+        windows[0]
+            .update(cx, |_, window, _| window.remove_window())
+            .unwrap();
+        cx.run_until_parked();
+        assert!(image.upgrade().is_some());
+        assert!(animation.upgrade().is_some());
+        windows[1]
+            .update(cx, |_, window, _| window.remove_window())
+            .unwrap();
+        cx.run_until_parked();
+        assert!(image.upgrade().is_none());
+        assert!(animation.upgrade().is_none());
+    }
+
+    #[crate::test(iterations = 20)]
+    fn closing_windows_preserves_external_animation_owners_and_decode_tasks(
+        cx: &mut crate::TestAppContext,
+    ) {
+        let (resource, weak) = cx.update(insert_animation);
+        let image = weak.upgrade().unwrap();
+        let source = image.animation().unwrap().clone();
+        let weak_source = Arc::downgrade(&source);
+        let frame = source.frame(2, &cx.background_executor);
+        drop(source);
+        let window = cx.add_window(|_, _| AnimationView(resource.clone()));
+        window
+            .update(cx, |_, window, _| window.remove_window())
+            .unwrap();
+        cx.update(|cx| {
+            assert!(
+                !cx.loading_assets
+                    .contains_key(&(TypeId::of::<ImgResourceLoader>(), hash(&resource)))
+            );
+        });
+        assert!(weak.upgrade().is_some());
+        drop(image);
+        cx.run_until_parked();
+        let frame = frame
+            .now_or_never()
+            .expect("decode finishes after cache detachment")
+            .unwrap();
+        assert!(
+            frame
+                .as_bytes(0)
+                .unwrap()
+                .chunks_exact(4)
+                .all(|pixel| pixel == [140, 70, 30, 255])
+        );
+        assert!(weak.upgrade().is_none());
+        assert!(weak_source.upgrade().is_none());
     }
 
     #[crate::test]
@@ -231,8 +357,7 @@ mod tests {
         cx: &mut crate::TestAppContext,
     ) {
         use crate::{
-            AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
-            Window, div, img,
+            Context, Entity, IntoElement, ParentElement as _, Render, Styled as _, Window, div, img,
         };
         use std::{cell::Cell, rc::Rc};
 

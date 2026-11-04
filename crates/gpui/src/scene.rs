@@ -218,7 +218,21 @@ impl Scene {
     }
 
     pub fn replay(&mut self, range: Range<usize>, prev_scene: &Scene) {
-        for operation in &prev_scene.paint_operations[range] {
+        let mut operations = &prev_scene.paint_operations[range];
+        while let Some(operation) = operations.first() {
+            if self.pending_subtrees.is_empty() && self.layer_stack.is_empty() {
+                let count = operations
+                    .iter()
+                    .take_while(|operation| {
+                        matches!(operation, PaintOperation::Primitive(Primitive::Quad(_)))
+                    })
+                    .count();
+                if count >= 4 {
+                    self.replay_quads(&operations[..count]);
+                    operations = &operations[count..];
+                    continue;
+                }
+            }
             match operation {
                 PaintOperation::Primitive(primitive) => self.insert_primitive(primitive.clone()),
                 PaintOperation::StartLayer(bounds) => self.push_layer(*bounds),
@@ -236,6 +250,40 @@ impl Scene {
                     self.retain_atlas_tile(lifetime.clone())
                 }
             }
+            operations = &operations[1..];
+        }
+    }
+
+    fn replay_quads(&mut self, operations: &[PaintOperation]) {
+        let mut bounds: Option<Bounds<ScaledPixels>> = None;
+        for operation in operations {
+            let PaintOperation::Primitive(Primitive::Quad(quad)) = operation else {
+                unreachable!();
+            };
+            let clipped = quad.bounds.intersect(&quad.content_mask.bounds);
+            if !clipped.is_empty() {
+                bounds = Some(bounds.map_or(clipped, |bounds| bounds.union(&clipped)));
+            }
+        }
+        let Some(bounds) = bounds else { return };
+        // Quads at the same order retain insertion order through sorting and batching.
+        // The union places the entire run after intersecting predecessors and before
+        // intersecting successors, including primitives of other types.
+        let order = self.primitive_bounds.insert(bounds);
+        self.quads.reserve(operations.len());
+        self.paint_operations.reserve(operations.len());
+        for operation in operations {
+            let PaintOperation::Primitive(Primitive::Quad(quad)) = operation else {
+                unreachable!();
+            };
+            if quad.bounds.intersect(&quad.content_mask.bounds).is_empty() {
+                continue;
+            }
+            let mut quad = quad.clone();
+            quad.order = order;
+            self.quads.push(quad.to_gpu(&mut self.gradients));
+            self.paint_operations
+                .push(PaintOperation::Primitive(Primitive::Quad(quad)));
         }
     }
 
@@ -1575,6 +1623,136 @@ mod tests {
             },
             ..Default::default()
         });
+    }
+
+    #[test]
+    fn quad_replay_preserves_clipped_compositing_order() {
+        use rand::{Rng, SeedableRng};
+
+        fn colors_at(scene: &Scene, point: Point<ScaledPixels>) -> Vec<Hsla> {
+            let mut colors = Vec::new();
+            for batch in scene.batches() {
+                match batch {
+                    PrimitiveBatch::Quads(range) => {
+                        for quad in &scene.quads[range] {
+                            if quad
+                                .bounds
+                                .intersect(&quad.content_mask.bounds)
+                                .contains(&point)
+                            {
+                                colors.push(quad.background.solid);
+                            }
+                        }
+                    }
+                    PrimitiveBatch::Underlines(range) => {
+                        for line in &scene.underlines[range] {
+                            if line
+                                .bounds
+                                .intersect(&line.content_mask.bounds)
+                                .contains(&point)
+                            {
+                                colors.push(line.color);
+                            }
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            colors
+        }
+
+        for seed in 0..200 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut source = Scene::default();
+            for i in 0..72 {
+                let bounds = Bounds {
+                    origin: point(
+                        ScaledPixels(rng.random_range(0.0..70.0)),
+                        ScaledPixels(rng.random_range(0.0..70.0)),
+                    ),
+                    size: Size {
+                        width: ScaledPixels(30.0),
+                        height: ScaledPixels(30.0),
+                    },
+                };
+                let mask = Bounds {
+                    origin: point(
+                        ScaledPixels(rng.random_range(0.0..40.0)),
+                        ScaledPixels(rng.random_range(0.0..40.0)),
+                    ),
+                    size: Size {
+                        width: ScaledPixels(60.0),
+                        height: ScaledPixels(60.0),
+                    },
+                };
+                let color = crate::hsla(i as f32 / 72.0, 0.7, 0.5, 0.35);
+                if i % 13 == 0 {
+                    source.insert_primitive(Underline {
+                        order: 0,
+                        pad: 0,
+                        bounds,
+                        content_mask: ContentMask { bounds: mask },
+                        color,
+                        thickness: ScaledPixels(30.0),
+                        wavy: false.into(),
+                    });
+                } else {
+                    source.insert_primitive(Quad {
+                        bounds,
+                        content_mask: ContentMask { bounds: mask },
+                        background: color.into(),
+                        ..Default::default()
+                    });
+                }
+            }
+            let mut reference = Scene::default();
+            let mut replayed = Scene::default();
+            if seed % 2 == 0 {
+                reference.push_layer(test_bounds());
+                replayed.push_layer(test_bounds());
+            }
+            // Partial replay spans and newly painted separators exercise both sides
+            // of each cached run and a second generation of cached commands.
+            for range in [0..19, 19..source.len()] {
+                for operation in &source.paint_operations[range.clone()] {
+                    let PaintOperation::Primitive(primitive) = operation else {
+                        unreachable!()
+                    };
+                    reference.insert_primitive(primitive.clone());
+                }
+                replayed.replay(range, &source);
+                insert_test_quad(&mut reference);
+                insert_test_quad(&mut replayed);
+            }
+            if seed % 2 == 0 {
+                reference.pop_layer();
+                replayed.pop_layer();
+            }
+            let mut next = Scene::default();
+            next.replay(0..replayed.len(), &replayed);
+            reference.finish();
+            replayed.finish();
+            next.finish();
+            for y in 0..20 {
+                for x in 0..20 {
+                    let point = point(
+                        ScaledPixels(x as f32 * 5.0 + 0.5),
+                        ScaledPixels(y as f32 * 5.0 + 0.5),
+                    );
+                    let expected = colors_at(&reference, point);
+                    assert_eq!(
+                        colors_at(&replayed, point),
+                        expected,
+                        "seed {seed} at {point:?}"
+                    );
+                    assert_eq!(
+                        colors_at(&next, point),
+                        expected,
+                        "second replay, seed {seed} at {point:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -39,7 +39,13 @@ impl Window {
     pub(super) fn schedule_scene_memory_reclaim(&mut self, cx: &App) {
         self.last_scene_draw = cx.background_executor().now();
         let live = &self.rendered_frame.scene;
-        if !needs_reclaim(live, live) && !needs_reclaim(&self.next_frame.scene, live) {
+        if !needs_reclaim(live, live)
+            && !needs_reclaim(&self.next_frame.scene, live)
+            && !self
+                .layout_engine
+                .as_ref()
+                .is_some_and(|engine| engine.needs_idle_reclaim())
+        {
             self.scene_reclaim_task = None;
             return;
         }
@@ -60,6 +66,9 @@ impl Window {
                         let operations = window.rendered_frame.scene.paint_operations.len();
                         reclaim(&mut window.rendered_frame.scene, quads, operations);
                         reclaim(&mut window.next_frame.scene, quads, operations);
+                        if let Some(engine) = window.layout_engine.as_mut() {
+                            engine.reclaim_idle_memory();
+                        }
                         window.scene_reclaim_task = None;
                         None
                     })
@@ -183,6 +192,75 @@ mod tests {
                     window.next_frame.scene.paint_operations.capacity()
                         >= window.rendered_frame.scene.paint_operations.len()
                 );
+            })
+            .unwrap();
+    }
+    struct LayoutContent(usize);
+
+    impl Render for LayoutContent {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .children((0..self.0).map(|_| div().absolute().size(px(1.))))
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(13.25))
+                        .top(px(17.5))
+                        .w(px(23.75))
+                        .h(px(31.25))
+                        .bg(rgb(0x638fa1)),
+                )
+        }
+    }
+
+    #[crate::test]
+    fn layout_only_peak_reclaims_and_rebuilds_with_identical_geometry(cx: &mut TestAppContext) {
+        let window = cx.add_window(|_, _| LayoutContent(5000));
+        let draw = |count, cx: &mut TestAppContext| {
+            window
+                .update(cx, |content, _, cx| {
+                    content.0 = count;
+                    cx.notify();
+                })
+                .unwrap();
+            cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear())
+                .unwrap();
+        };
+        draw(5000, cx);
+        let bounds = window
+            .update(cx, |_, window, _| {
+                assert!(!window.layout_engine.as_ref().unwrap().needs_idle_reclaim());
+                assert_eq!(window.rendered_frame.scene.quads.len(), 1);
+                window.rendered_frame.scene.quads[0].bounds
+            })
+            .unwrap();
+        draw(0, cx);
+        window
+            .update(cx, |_, window, _| {
+                assert!(window.scene_reclaim_task.is_some())
+            })
+            .unwrap();
+        draw(5000, cx);
+        window
+            .update(cx, |_, window, _| {
+                assert!(window.scene_reclaim_task.is_none())
+            })
+            .unwrap();
+        draw(0, cx);
+        cx.executor().advance_clock(Duration::from_secs(3));
+        cx.run_until_parked();
+        window
+            .update(cx, |_, window, _| {
+                assert!(window.scene_reclaim_task.is_none());
+                assert!(!window.layout_engine.as_ref().unwrap().needs_idle_reclaim());
+            })
+            .unwrap();
+        draw(5000, cx);
+        window
+            .update(cx, |_, window, _| {
+                assert_eq!(window.rendered_frame.scene.quads.len(), 1);
+                assert_eq!(window.rendered_frame.scene.quads[0].bounds, bounds);
             })
             .unwrap();
     }

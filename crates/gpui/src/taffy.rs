@@ -38,6 +38,8 @@ pub struct TaffyLayoutEngine {
     absolute_outer_origins: FxHashMap<LayoutId, Point<f32>>,
     computed_layouts: FxHashSet<LayoutId>,
     layout_bounds_scratch_space: Vec<LayoutId>,
+    peak_node_count: usize,
+    last_node_count: usize,
 }
 
 const EXPECT_MESSAGE: &str = "we should avoid taffy layout errors by construction if possible";
@@ -52,14 +54,45 @@ impl TaffyLayoutEngine {
             absolute_outer_origins: FxHashMap::default(),
             computed_layouts: FxHashSet::default(),
             layout_bounds_scratch_space: Vec::new(),
+            peak_node_count: 0,
+            last_node_count: 0,
         }
     }
 
     pub fn clear(&mut self) {
+        self.last_node_count = self.taffy.total_node_count();
+        self.peak_node_count = self.peak_node_count.max(self.last_node_count);
         self.taffy.clear();
         self.absolute_layout_bounds.clear();
         self.absolute_outer_origins.clear();
         self.computed_layouts.clear();
+    }
+
+    pub(crate) fn needs_idle_reclaim(&self) -> bool {
+        self.taffy.total_node_count() == 0
+            && self.peak_node_count >= 4096
+            && self.peak_node_count / 4 >= self.retained_node_count()
+    }
+
+    fn retained_node_count(&self) -> usize {
+        self.last_node_count
+            .checked_next_power_of_two()
+            .unwrap_or(usize::MAX)
+            .max(256)
+    }
+
+    pub(crate) fn reclaim_idle_memory(&mut self) {
+        if !self.needs_idle_reclaim() {
+            return;
+        }
+        let retained = self.retained_node_count();
+        self.taffy = TaffyTree::with_capacity(retained);
+        self.taffy.disable_rounding();
+        self.absolute_layout_bounds.shrink_to(retained);
+        self.absolute_outer_origins.shrink_to(retained);
+        self.computed_layouts.shrink_to(retained);
+        self.layout_bounds_scratch_space.shrink_to(retained);
+        self.peak_node_count = retained;
     }
 
     pub fn request_layout(

@@ -17,3 +17,4 @@ unicode-segmentation.workspace = true
 
 [dev-dependencies]
 cosmic-text = "0.19"
+tempfile.workspace = true

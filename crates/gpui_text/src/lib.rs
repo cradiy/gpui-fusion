@@ -1,7 +1,8 @@
 //! Single-line shaping with bounded font retention and grapheme-level fallback.
 //!
-//! Layouts own their selected fonts. Cache limits bound retained font bytes, not
-//! fonts pinned by live layouts, caller-supplied font data, or shaper metadata.
+//! Layouts own their selected fonts. Cache budgets count each shared byte buffer
+//! once. Live layouts and supplied database data can outlive cache entries;
+//! shaper metadata is not included in the byte budget.
 //! Fallback ranks nominal character coverage by style, stretch, and weight in
 //! database order. Language-specific preferences and emoji presentation matching
 //! are not implemented. Font variations and custom OpenType features are not
@@ -10,7 +11,12 @@
 use anyhow::{Context, Result, ensure};
 use fontdb::ID;
 use harfrust::{Direction, ShaperData, UnicodeBuffer};
-use std::{collections::HashMap, ops::Range, sync::Arc};
+use std::{
+    collections::HashMap,
+    ops::Range,
+    path::PathBuf,
+    sync::{Arc, Weak},
+};
 use unicode_bidi::BidiInfo;
 use unicode_script::{Script, UnicodeScript};
 use unicode_segmentation::UnicodeSegmentation;
@@ -43,10 +49,12 @@ pub struct TextSystem {
     font_bytes: usize,
     clock: u64,
     fallback: HashMap<(ID, String), ID>,
+    mapped_files: bool,
+    file_data: HashMap<PathBuf, Weak<dyn AsRef<[u8]> + Send + Sync>>,
 }
 
 struct FontData {
-    bytes: Vec<u8>,
+    bytes: Arc<dyn AsRef<[u8]> + Send + Sync>,
     index: u32,
     shaper: ShaperData,
     swash_offset: u32,
@@ -85,6 +93,7 @@ pub struct CacheUsage {
 }
 
 impl TextSystem {
+    /// Shares supplied byte buffers and copies unshared file-backed fonts on first use.
     pub fn new(db: Database, limits: CacheLimits) -> Self {
         Self {
             db,
@@ -93,6 +102,21 @@ impl TextSystem {
             font_bytes: 0,
             clock: 0,
             fallback: HashMap::new(),
+            mapped_files: false,
+            file_data: HashMap::new(),
+        }
+    }
+
+    /// Shares read-only file mappings instead of copying selected font files.
+    ///
+    /// # Safety
+    /// File-backed fonts in `db` must not be modified in place or truncated while
+    /// this system or any layout produced by it is alive. Replacing a file by
+    /// renaming a different file over its path does not modify an existing mapping.
+    pub unsafe fn new_with_mapped_fonts(db: Database, limits: CacheLimits) -> Self {
+        Self {
+            mapped_files: true,
+            ..Self::new(db, limits)
         }
     }
 
@@ -114,6 +138,7 @@ impl TextSystem {
         self.fonts.clear();
         self.font_bytes = 0;
         self.fallback.clear();
+        self.file_data.retain(|_, data| data.strong_count() > 0);
     }
 
     fn font(&mut self, id: ID) -> Result<Arc<FontData>> {
@@ -122,14 +147,33 @@ impl TextSystem {
             *stamp = self.clock;
             return Ok(font.clone());
         }
-        let (bytes, index) = self
-            .db
-            .with_face_data(id, |data, index| (data.to_vec(), index))
-            .context("Cannot read selected font")?;
-        let face = harfrust::FontRef::from_index(&bytes, index)?;
+        let (source, index) = self.db.face_source(id).context("Missing font face")?;
+        self.file_data.retain(|_, data| data.strong_count() > 0);
+        let bytes: Arc<dyn AsRef<[u8]> + Send + Sync> = match source {
+            fontdb::Source::Binary(data) | fontdb::Source::SharedFile(_, data) => data,
+            fontdb::Source::File(path) => {
+                if let Some(data) = self.file_data.get(&path).and_then(Weak::upgrade) {
+                    data
+                } else {
+                    let data = if self.mapped_files {
+                        // SAFETY: new_with_mapped_fonts requires file contents to remain
+                        // immutable for the lifetimes of the system and its layouts.
+                        let mapped = unsafe { self.db.make_shared_face_data(id) };
+                        self.db.make_face_data_unshared(id);
+                        mapped.context("Cannot map selected font")?.0
+                    } else {
+                        Arc::new(std::fs::read(&path).context("Cannot read selected font")?)
+                            as Arc<dyn AsRef<[u8]> + Send + Sync>
+                    };
+                    self.file_data.insert(path, Arc::downgrade(&data));
+                    data
+                }
+            }
+        };
+        let face = harfrust::FontRef::from_index(bytes.as_ref().as_ref(), index)?;
         let shaper = ShaperData::new(&face);
-        let swash =
-            swash::FontRef::from_index(&bytes, index as usize).context("Invalid raster font")?;
+        let swash = swash::FontRef::from_index(bytes.as_ref().as_ref(), index as usize)
+            .context("Invalid raster font")?;
         let (swash_offset, swash_key) = (swash.offset, swash.key);
         let font = Arc::new(FontData {
             bytes,
@@ -138,36 +182,58 @@ impl TextSystem {
             swash_offset,
             swash_key,
         });
-        let size = font.bytes.len();
+        let size = font.bytes.as_ref().as_ref().len();
         if size <= self.limits.font_bytes && self.limits.font_entries > 0 {
-            while self.fonts.len() >= self.limits.font_entries
-                || self.font_bytes > self.limits.font_bytes - size
-            {
+            loop {
+                let already_cached = self
+                    .fonts
+                    .values()
+                    .any(|(cached, _)| Arc::ptr_eq(&cached.bytes, &font.bytes));
+                let additional = if already_cached { 0 } else { size };
+                if self.fonts.len() < self.limits.font_entries
+                    && self.font_bytes <= self.limits.font_bytes - additional
+                {
+                    self.font_bytes += additional;
+                    break;
+                }
                 let oldest = *self
                     .fonts
                     .iter()
                     .min_by_key(|(_, (_, stamp))| stamp)
                     .unwrap()
                     .0;
-                self.font_bytes -= self.fonts.remove(&oldest).unwrap().0.bytes.len();
+                let removed = self.fonts.remove(&oldest).unwrap().0;
+                if !self
+                    .fonts
+                    .values()
+                    .any(|(cached, _)| Arc::ptr_eq(&cached.bytes, &removed.bytes))
+                {
+                    self.font_bytes -= removed.bytes.as_ref().as_ref().len();
+                }
             }
-            self.font_bytes += size;
             self.fonts.insert(id, (font.clone(), self.clock));
         }
         Ok(font)
     }
 
     fn supports(&self, id: ID, grapheme: &str) -> bool {
-        self.db
-            .with_face_data(id, |bytes, index| {
-                swash::FontRef::from_index(bytes, index as usize).is_some_and(|font| {
-                    let cmap = font.charmap();
-                    grapheme
-                        .chars()
-                        .all(|ch| is_ignorable(ch) || cmap.map(ch) != 0)
-                })
+        let supports = |bytes: &[u8], index| {
+            swash::FontRef::from_index(bytes, index as usize).is_some_and(|font| {
+                let cmap = font.charmap();
+                grapheme
+                    .chars()
+                    .all(|ch| is_ignorable(ch) || cmap.map(ch) != 0)
             })
-            .unwrap_or(false)
+        };
+        if let Some((font, _)) = self.fonts.get(&id) {
+            return supports(font.bytes.as_ref().as_ref(), font.index);
+        }
+        if let Some((fontdb::Source::File(path), index)) = self.db.face_source(id)
+            && let Some(bytes) = self.file_data.get(&path).and_then(Weak::upgrade)
+        {
+            return supports(bytes.as_ref().as_ref(), index);
+        }
+        self.db.with_face_data(id, supports).unwrap_or(false)
     }
 
     fn select(&mut self, primary: ID, grapheme: &str) -> ID {
@@ -280,7 +346,7 @@ impl TextSystem {
                         font
                     }
                 };
-                let face = harfrust::FontRef::from_index(&font.bytes, font.index)?;
+                let face = harfrust::FontRef::from_index(font.bytes.as_ref().as_ref(), font.index)?;
                 let shaper = font.shaper.shaper(&face).build();
                 let scale = size / shaper.units_per_em() as f32;
                 let mut buffer = UnicodeBuffer::new();
@@ -343,7 +409,7 @@ impl Rasterizer {
             "Font size must be positive and finite"
         );
         let font = swash::FontRef {
-            data: &run.font.bytes,
+            data: run.font.bytes.as_ref().as_ref(),
             offset: run.font.swash_offset,
             key: run.font.swash_key,
         };

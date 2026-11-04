@@ -3979,6 +3979,7 @@ dependencies = [
  "fontdb 0.23.0",
  "harfrust 0.5.0",
  "swash",
+ "tempfile",
  "unicode-bidi",
  "unicode-script",
  "unicode-segmentation",

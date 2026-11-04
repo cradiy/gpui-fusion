@@ -178,3 +178,122 @@ fn invalid_line_inputs_do_not_load_fonts() {
     }
     assert_eq!(system.cache_usage().font_entries, 0);
 }
+
+#[test]
+fn multiple_faces_share_source_bytes_and_budget() {
+    let mut db = database();
+    let mut alias = db.faces().next().unwrap().clone();
+    alias.families[0].0 = "Alternate registration".into();
+    db.push_face_info(alias);
+    let mut system = TextSystem::new(
+        db,
+        CacheLimits {
+            font_bytes: FONT.len(),
+            ..Default::default()
+        },
+    );
+    let first = system.shape("Amber", &query(), 18.).unwrap();
+    let second = system
+        .shape(
+            "Opal",
+            &Query {
+                families: &[Family::Name("Alternate registration")],
+                ..Default::default()
+            },
+            18.,
+        )
+        .unwrap();
+    assert_ne!(first.runs[0].font_id, second.runs[0].font_id);
+    assert!(Arc::ptr_eq(
+        &first.runs[0].font.bytes,
+        &second.runs[0].font.bytes
+    ));
+    assert_eq!(system.cache_usage().font_entries, 2);
+    assert_eq!(system.cache_usage().font_bytes, FONT.len());
+}
+
+#[test]
+fn copied_file_data_survives_source_changes() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("face.ttf");
+    std::fs::write(&path, FONT).unwrap();
+    let mut db = Database::new();
+    db.load_font_file(&path).unwrap();
+    let mut system = TextSystem::new(db, CacheLimits::default());
+    let line = system.shape("Peridot", &query(), 18.).unwrap();
+    let run = &line.runs[0];
+    let mut rasterizer = Rasterizer::default();
+    let before = rasterizer
+        .rasterize(run, run.glyphs[0].id, 18.)
+        .unwrap()
+        .unwrap();
+    std::fs::write(path, []).unwrap();
+    system.clear_caches();
+    let after = rasterizer
+        .rasterize(run, run.glyphs[0].id, 18.)
+        .unwrap()
+        .unwrap();
+    assert_eq!(before.data, after.data);
+    let another = system.shape("Jade", &query(), 18.).unwrap();
+    assert!(Arc::ptr_eq(&run.font.bytes, &another.runs[0].font.bytes));
+}
+
+#[cfg(unix)]
+#[test]
+fn mapped_file_is_shared_and_released_after_last_layout() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("face.ttf");
+    std::fs::write(&path, FONT).unwrap();
+    let mut db = Database::new();
+    db.load_font_file(&path).unwrap();
+    let mut alias = db.faces().next().unwrap().clone();
+    alias.families[0].0 = "Alternate registration".into();
+    db.push_face_info(alias);
+    // SAFETY: This test owns the file and never changes its contents.
+    let mut system = unsafe {
+        TextSystem::new_with_mapped_fonts(
+            db,
+            CacheLimits {
+                font_bytes: FONT.len(),
+                ..Default::default()
+            },
+        )
+    };
+    let first = system.shape("Garnet", &query(), 18.).unwrap();
+    let second = system
+        .shape(
+            "Topaz",
+            &Query {
+                families: &[Family::Name("Alternate registration")],
+                ..Default::default()
+            },
+            18.,
+        )
+        .unwrap();
+    assert!(Arc::ptr_eq(
+        &first.runs[0].font.bytes,
+        &second.runs[0].font.bytes
+    ));
+    assert_eq!(system.cache_usage().font_entries, 2);
+    assert_eq!(system.cache_usage().font_bytes, FONT.len());
+    let weak = Arc::downgrade(&first.runs[0].font.bytes);
+    system.clear_caches();
+    assert!(
+        system
+            .db
+            .faces()
+            .all(|face| matches!(face.source, fontdb::Source::File(_)))
+    );
+    std::fs::remove_file(path).unwrap();
+    let mut rasterizer = Rasterizer::default();
+    assert!(
+        rasterizer
+            .rasterize(&first.runs[0], first.runs[0].glyphs[0].id, 18.)
+            .unwrap()
+            .is_some()
+    );
+    drop(first);
+    assert!(weak.upgrade().is_some());
+    drop(second);
+    assert!(weak.upgrade().is_none());
+}

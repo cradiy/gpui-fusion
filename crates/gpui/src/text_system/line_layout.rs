@@ -939,6 +939,29 @@ pub(crate) struct LineLayoutIndex {
     wrapped_lines_by_hash_index: usize,
 }
 
+impl LineLayoutIndex {
+    pub(crate) fn rebased(&self, source: &Self, target: &Self) -> Option<Self> {
+        Some(Self {
+            lines_index: self
+                .lines_index
+                .checked_sub(source.lines_index)?
+                .checked_add(target.lines_index)?,
+            wrapped_lines_index: self
+                .wrapped_lines_index
+                .checked_sub(source.wrapped_lines_index)?
+                .checked_add(target.wrapped_lines_index)?,
+            lines_by_hash_index: self
+                .lines_by_hash_index
+                .checked_sub(source.lines_by_hash_index)?
+                .checked_add(target.lines_by_hash_index)?,
+            wrapped_lines_by_hash_index: self
+                .wrapped_lines_by_hash_index
+                .checked_sub(source.wrapped_lines_by_hash_index)?
+                .checked_add(target.wrapped_lines_by_hash_index)?,
+        })
+    }
+}
+
 impl LineLayoutCache {
     pub fn new(platform_text_system: Arc<dyn PlatformTextSystem>) -> Self {
         Self {

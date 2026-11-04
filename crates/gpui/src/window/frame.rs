@@ -44,6 +44,7 @@ pub(crate) struct DeferredDraw {
 }
 
 pub(crate) struct Frame {
+    pub(crate) generation: u64,
     pub(super) tracked_bounds: super::element_bounds::TrackedBounds,
     pub(crate) focus: Option<FocusId>,
     pub(crate) window_active: bool,
@@ -115,9 +116,111 @@ pub(crate) struct PaintIndex {
     pub(super) line_layout_index: LineLayoutIndex,
 }
 
+impl PrepaintStateIndex {
+    pub(crate) fn rebased(&self, source: &Self, target: &Self) -> Option<Self> {
+        let mut result = self.clone();
+        result.tracked_bounds_index = self
+            .tracked_bounds_index
+            .checked_sub(source.tracked_bounds_index)?
+            .checked_add(target.tracked_bounds_index)?;
+        result.a11y_index = self
+            .a11y_index
+            .checked_sub(source.a11y_index)?
+            .checked_add(target.a11y_index)?;
+        result.a11y_actions_index = self
+            .a11y_actions_index
+            .checked_sub(source.a11y_actions_index)?
+            .checked_add(target.a11y_actions_index)?;
+        result.hitboxes_index = self
+            .hitboxes_index
+            .checked_sub(source.hitboxes_index)?
+            .checked_add(target.hitboxes_index)?;
+        result.tooltips_index = self
+            .tooltips_index
+            .checked_sub(source.tooltips_index)?
+            .checked_add(target.tooltips_index)?;
+        result.deferred_draws_index = self
+            .deferred_draws_index
+            .checked_sub(source.deferred_draws_index)?
+            .checked_add(target.deferred_draws_index)?;
+        result.dispatch_tree_index = self
+            .dispatch_tree_index
+            .checked_sub(source.dispatch_tree_index)?
+            .checked_add(target.dispatch_tree_index)?;
+        result.accessed_element_states_index = self
+            .accessed_element_states_index
+            .checked_sub(source.accessed_element_states_index)?
+            .checked_add(target.accessed_element_states_index)?;
+        #[cfg(any(feature = "inspector", debug_assertions))]
+        {
+            if self.inspector_text_index.is_some() {
+                return None;
+            }
+            result.inspector_elements_index = self
+                .inspector_elements_index
+                .checked_sub(source.inspector_elements_index)?
+                .checked_add(target.inspector_elements_index)?;
+        }
+        result.line_layout_index = self
+            .line_layout_index
+            .rebased(&source.line_layout_index, &target.line_layout_index)?;
+        Some(result)
+    }
+}
+
+impl PaintIndex {
+    pub(crate) fn rebased(&self, source: &Self, target: &Self) -> Option<Self> {
+        let mut result = self.clone();
+        result.a11y_index = self
+            .a11y_index
+            .checked_sub(source.a11y_index)?
+            .checked_add(target.a11y_index)?;
+        result.scene_index = self
+            .scene_index
+            .checked_sub(source.scene_index)?
+            .checked_add(target.scene_index)?;
+        result.mouse_listeners_index = self
+            .mouse_listeners_index
+            .checked_sub(source.mouse_listeners_index)?
+            .checked_add(target.mouse_listeners_index)?;
+        result.input_handlers_index = self
+            .input_handlers_index
+            .checked_sub(source.input_handlers_index)?
+            .checked_add(target.input_handlers_index)?;
+        result.autofill_index = self
+            .autofill_index
+            .checked_sub(source.autofill_index)?
+            .checked_add(target.autofill_index)?;
+        result.cursor_styles_index = self
+            .cursor_styles_index
+            .checked_sub(source.cursor_styles_index)?
+            .checked_add(target.cursor_styles_index)?;
+        result.accessed_element_states_index = self
+            .accessed_element_states_index
+            .checked_sub(source.accessed_element_states_index)?
+            .checked_add(target.accessed_element_states_index)?;
+        result.tab_handle_index = self
+            .tab_handle_index
+            .checked_sub(source.tab_handle_index)?
+            .checked_add(target.tab_handle_index)?;
+        #[cfg(any(test, feature = "test-support"))]
+        {
+            result.debug_bound_records_index = self
+                .debug_bound_records_index
+                .checked_sub(source.debug_bound_records_index)?
+                .checked_add(target.debug_bound_records_index)?;
+        }
+        result.line_layout_index = self
+            .line_layout_index
+            .rebased(&source.line_layout_index, &target.line_layout_index)?;
+        Some(result)
+    }
+}
+
 impl Frame {
     pub(crate) fn new(dispatch_tree: DispatchTree) -> Self {
         Frame {
+            generation: 0,
             tracked_bounds: Default::default(),
             focus: None,
             window_active: false,
@@ -265,6 +368,7 @@ impl Window {
     /// The window's frame callback presents the new [`Scene`] separately.
     #[profiling::function]
     pub fn draw(&mut self, cx: &mut App) -> ArenaClearNeeded {
+        self.next_frame.generation = self.rendered_frame.generation.wrapping_add(1);
         let diagnostics_start = if !self.raster_budget_retrying {
             self.frame_diagnostics.as_mut().map(|tracker| {
                 tracker.current = crate::FrameDiagnostics {
@@ -894,6 +998,32 @@ impl Window {
     }
 
     pub(crate) fn reuse_prepaint(&mut self, range: Range<PrepaintStateIndex>) {
+        if self.next_frame.prepaint_transaction_depth == 0 {
+            let destination = self.prepaint_index();
+            for key in &self.rendered_frame.accessed_element_states
+                [range.start.accessed_element_states_index..range.end.accessed_element_states_index]
+            {
+                if let Some(state) = self
+                    .rendered_frame
+                    .element_states
+                    .get_mut(key)
+                    .and_then(|state| {
+                        state
+                            .inner
+                            .downcast_mut::<Option<crate::view::ViewElementState>>()
+                    })
+                    .and_then(Option::as_mut)
+                {
+                    state.rebase_prepaint(
+                        &range.start,
+                        &destination,
+                        self.rendered_frame.generation,
+                        self.next_frame.generation,
+                    );
+                }
+            }
+        }
+
         self.next_frame.tracked_bounds.reuse(
             &self.rendered_frame.tracked_bounds,
             range.start.tracked_bounds_index..range.end.tracked_bounds_index,
@@ -1017,6 +1147,24 @@ impl Window {
     }
 
     pub(crate) fn remap_reused_prepaint(&mut self, range: &Range<PrepaintStateIndex>) {
+        for key in &self.next_frame.accessed_element_states
+            [range.start.accessed_element_states_index..range.end.accessed_element_states_index]
+        {
+            if let Some(state) = self
+                .rendered_frame
+                .element_states
+                .get_mut(key)
+                .and_then(|state| {
+                    state
+                        .inner
+                        .downcast_mut::<Option<crate::view::ViewElementState>>()
+                })
+                .and_then(Option::as_mut)
+            {
+                state.invalidate_prepaint();
+            }
+        }
+
         for draw in &mut self.next_frame.deferred_draws
             [range.start.deferred_draws_index..range.end.deferred_draws_index]
         {
@@ -1076,6 +1224,30 @@ impl Window {
     }
 
     pub(crate) fn reuse_paint(&mut self, range: Range<PaintIndex>) {
+        let destination = self.paint_index();
+        for key in &self.rendered_frame.accessed_element_states
+            [range.start.accessed_element_states_index..range.end.accessed_element_states_index]
+        {
+            if let Some(state) = self
+                .rendered_frame
+                .element_states
+                .get_mut(key)
+                .and_then(|state| {
+                    state
+                        .inner
+                        .downcast_mut::<Option<crate::view::ViewElementState>>()
+                })
+                .and_then(Option::as_mut)
+            {
+                state.rebase_paint(
+                    &range.start,
+                    &destination,
+                    self.rendered_frame.generation,
+                    self.next_frame.generation,
+                );
+            }
+        }
+
         #[cfg(any(test, feature = "test-support"))]
         for (selector, bounds) in &self.rendered_frame.debug_bound_records
             [range.start.debug_bound_records_index..range.end.debug_bound_records_index]

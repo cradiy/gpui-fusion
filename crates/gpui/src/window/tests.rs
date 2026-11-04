@@ -524,3 +524,5 @@ fn thermal_frame_pacing_tolerates_vsync_jitter_without_unlocking_high_refresh() 
         assert_eq!(frames, expected_frames, "vsync period {period_us}");
     }
 }
+
+mod nested_cache;

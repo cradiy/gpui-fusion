@@ -7,7 +7,6 @@ use crate::{Empty, Window};
 use anyhow::Result;
 use collections::FxHashSet;
 use refineable::Refineable;
-use std::mem;
 use std::{any::TypeId, fmt, ops::Range};
 
 /// A dynamically-typed view handle that can be downcast to a specific `Entity<V>`.
@@ -298,11 +297,61 @@ impl<V: View> IntoElement for ViewElement<V> {
 }
 
 pub(crate) struct ViewElementState {
+    prepaint_generation: Option<u64>,
+    paint_generation: Option<u64>,
     prepaint_range: Range<PrepaintStateIndex>,
     paint_range: Range<PaintIndex>,
     cache_key: ViewElementCacheKey,
     accessed_entities: FxHashSet<EntityId>,
     remap_input: bool,
+}
+
+impl ViewElementState {
+    pub(crate) fn rebase_prepaint(
+        &mut self,
+        source: &PrepaintStateIndex,
+        target: &PrepaintStateIndex,
+        previous: u64,
+        next: u64,
+    ) {
+        if self.prepaint_generation != Some(previous) {
+            return;
+        }
+        match (
+            self.prepaint_range.start.rebased(source, target),
+            self.prepaint_range.end.rebased(source, target),
+        ) {
+            (Some(start), Some(end)) => {
+                self.prepaint_range = start..end;
+                self.prepaint_generation = Some(next);
+            }
+            _ => self.prepaint_generation = None,
+        }
+    }
+    pub(crate) fn rebase_paint(
+        &mut self,
+        source: &PaintIndex,
+        target: &PaintIndex,
+        previous: u64,
+        next: u64,
+    ) {
+        if self.paint_generation != Some(previous) {
+            return;
+        }
+        match (
+            self.paint_range.start.rebased(source, target),
+            self.paint_range.end.rebased(source, target),
+        ) {
+            (Some(start), Some(end)) => {
+                self.paint_range = start..end;
+                self.paint_generation = Some(next);
+            }
+            _ => self.paint_generation = None,
+        }
+    }
+    pub(crate) fn invalidate_prepaint(&mut self) {
+        self.prepaint_generation = None;
+    }
 }
 
 struct ViewElementCacheKey {
@@ -413,6 +462,10 @@ impl<V: View> Element for ViewElement<V> {
                         });
 
                         if let Some(mut element_state) = element_state
+                            && element_state.prepaint_generation
+                                == Some(window.rendered_frame.generation)
+                            && element_state.paint_generation
+                                == Some(window.rendered_frame.generation)
                             && element_state.cache_key.a11y == window.a11y.cache_key(window.focus)
                             && window.a11y.cache_reuse_allowed()
                             && element_state.cache_key.bounds == bounds
@@ -447,6 +500,7 @@ impl<V: View> Element for ViewElement<V> {
                                 .extend_accessed(&element_state.accessed_entities);
                             let prepaint_end = window.prepaint_index();
                             element_state.prepaint_range = prepaint_start..prepaint_end;
+                            element_state.prepaint_generation = Some(window.next_frame.generation);
                             element_state.remap_input =
                                 element_state.cache_key.pointer_mapping != window.pointer_mapping;
                             if element_state.remap_input {
@@ -459,7 +513,6 @@ impl<V: View> Element for ViewElement<V> {
                         }
 
                         window.record_view_cache_miss(cold, accessibility_changed, entity_id);
-                        let refreshing = mem::replace(&mut window.refreshing, true);
                         let prepaint_start = window.prepaint_index();
                         let (mut element, accessed_entities) = cx.detect_accessed_entities(|cx| {
                             let mut element = self
@@ -474,11 +527,12 @@ impl<V: View> Element for ViewElement<V> {
                         });
 
                         let prepaint_end = window.prepaint_index();
-                        window.refreshing = refreshing;
 
                         (
                             Some(element),
                             ViewElementState {
+                                prepaint_generation: Some(window.next_frame.generation),
+                                paint_generation: None,
                                 remap_input: false,
                                 accessed_entities,
                                 prepaint_range: prepaint_start..prepaint_end,
@@ -536,12 +590,10 @@ impl<V: View> Element for ViewElement<V> {
                             let opacity = window.element_opacity();
 
                             if let Some(element) = element {
-                                let refreshing = mem::replace(&mut window.refreshing, true);
                                 let ((), accessed) =
                                     cx.detect_accessed_entities(|cx| element.paint(window, cx));
                                 element_state.accessed_entities.extend(accessed);
                                 element_state.cache_key.opacity = opacity;
-                                window.refreshing = refreshing;
                             } else {
                                 window.reuse_paint(element_state.paint_range.clone());
                                 if element_state.cache_key.opacity.to_bits() != opacity.to_bits() {
@@ -551,6 +603,7 @@ impl<V: View> Element for ViewElement<V> {
 
                             let paint_end = window.paint_index();
                             element_state.paint_range = paint_start..paint_end;
+                            element_state.paint_generation = Some(window.next_frame.generation);
                             if element_state.remap_input {
                                 window.remap_reused_paint(&element_state.paint_range);
                             }

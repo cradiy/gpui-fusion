@@ -81,11 +81,11 @@ pub struct ViewCacheMisses {
     pub cold: u64,
     /// Accessibility activation, focus or automation requires a fresh tree.
     pub accessibility: u64,
-    /// A full-window or ancestor refresh requires repainting.
+    /// A full-window refresh requires repainting.
     pub refresh: u64,
     /// The view or a dependency was invalidated.
     pub dirty: u64,
-    /// Bounds, style, density, clipping or coordinate scope changed.
+    /// Cached ranges, bounds, style, density, clipping or coordinate scope changed.
     pub context: u64,
 }
 

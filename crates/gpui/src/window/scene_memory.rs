@@ -24,9 +24,13 @@ fn target_capacity<T>(values: &Vec<T>, live_len: usize) -> Option<usize> {
 fn needs_reclaim(scene: &Scene, live: &Scene) -> bool {
     target_capacity(&scene.quads, live.quads.len()).is_some()
         || target_capacity(&scene.paint_operations, live.paint_operations.len()).is_some()
+        || scene
+            .primitive_bounds
+            .needs_idle_reclaim(live.primitive_bounds.node_count())
 }
 
-fn reclaim(scene: &mut Scene, live_quads: usize, live_operations: usize) {
+fn reclaim(scene: &mut Scene, live_quads: usize, live_operations: usize, live_nodes: usize) {
+    scene.primitive_bounds.reclaim_idle_memory(live_nodes);
     if let Some(target) = target_capacity(&scene.quads, live_quads) {
         scene.quads.shrink_to(target);
     }
@@ -64,8 +68,9 @@ impl Window {
                         }
                         let quads = window.rendered_frame.scene.quads.len();
                         let operations = window.rendered_frame.scene.paint_operations.len();
-                        reclaim(&mut window.rendered_frame.scene, quads, operations);
-                        reclaim(&mut window.next_frame.scene, quads, operations);
+                        let nodes = window.rendered_frame.scene.primitive_bounds.node_count();
+                        reclaim(&mut window.rendered_frame.scene, quads, operations, nodes);
+                        reclaim(&mut window.next_frame.scene, quads, operations, nodes);
                         if let Some(engine) = window.layout_engine.as_mut() {
                             engine.reclaim_idle_memory();
                         }
@@ -129,14 +134,21 @@ mod tests {
 
     #[crate::test]
     fn idle_reclaim_waits_for_quiet_and_preserves_scene_replay(cx: &mut TestAppContext) {
-        let window = cx.add_window(|_, _| Content(18000));
-        draw(window, 18000, cx);
-        draw(window, 18000, cx);
+        let window = cx.add_window(|_, _| Content(40000));
+        draw(window, 40000, cx);
+        draw(window, 40000, cx);
         draw(window, 8, cx);
         draw(window, 8, cx);
         let before = window
             .update(cx, |_, window, _| {
                 assert!(window.scene_reclaim_task.is_some());
+                assert!(
+                    window
+                        .rendered_frame
+                        .scene
+                        .primitive_bounds
+                        .needs_idle_reclaim(0)
+                );
                 window.rendered_frame.scene.paint_operations.capacity()
             })
             .unwrap();
@@ -158,11 +170,13 @@ mod tests {
                 let scene = &window.rendered_frame.scene;
                 assert!(scene.paint_operations.capacity() < before / 2);
                 assert_eq!(scene.quads.len(), 8);
+                assert!(!scene.primitive_bounds.needs_idle_reclaim(0));
                 let mut replay = Scene::default();
                 replay.replay(0..scene.len(), scene);
                 assert_eq!(replay.quads.len(), scene.quads.len());
                 for (actual, expected) in replay.quads.iter().zip(&scene.quads) {
                     assert_eq!(actual.bounds, expected.bounds);
+                    assert_eq!(actual.order, expected.order);
                 }
                 assert!(window.next_frame.scene.paint_operations.capacity() < before / 2);
             })
@@ -171,23 +185,23 @@ mod tests {
 
     #[crate::test]
     fn returning_to_large_scene_cancels_pending_reclaim(cx: &mut TestAppContext) {
-        let window = cx.add_window(|_, _| Content(18000));
-        draw(window, 18000, cx);
-        draw(window, 18000, cx);
+        let window = cx.add_window(|_, _| Content(40000));
+        draw(window, 40000, cx);
+        draw(window, 40000, cx);
         draw(window, 0, cx);
         window
             .update(cx, |_, window, _| {
                 assert!(window.scene_reclaim_task.is_some())
             })
             .unwrap();
-        draw(window, 18000, cx);
+        draw(window, 40000, cx);
         cx.executor().advance_clock(Duration::from_secs(3));
         cx.run_until_parked();
         window
             .update(cx, |_, window, _| {
                 assert!(window.scene_reclaim_task.is_none());
-                assert_eq!(window.rendered_frame.scene.quads.len(), 18000);
-                assert!(window.next_frame.scene.quads.capacity() >= 18000);
+                assert_eq!(window.rendered_frame.scene.quads.len(), 40000);
+                assert!(window.next_frame.scene.quads.capacity() >= 40000);
                 assert!(
                     window.next_frame.scene.paint_operations.capacity()
                         >= window.rendered_frame.scene.paint_operations.len()

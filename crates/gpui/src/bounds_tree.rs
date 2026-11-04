@@ -113,6 +113,38 @@ where
         self.search_stack.clear();
     }
 
+    pub(crate) fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
+    fn idle_capacity_target(&self, live_nodes: usize) -> Option<usize> {
+        let stride = std::mem::size_of::<Node<U>>();
+        let target = live_nodes
+            .max(self.nodes.len())
+            .checked_next_power_of_two()
+            .unwrap_or(usize::MAX)
+            .max(64 * 1024 / stride);
+        (self
+            .nodes
+            .capacity()
+            .saturating_sub(target)
+            .saturating_mul(stride)
+            >= 4 * 1024 * 1024)
+            .then_some(target)
+    }
+
+    pub(crate) fn needs_idle_reclaim(&self, live_nodes: usize) -> bool {
+        self.idle_capacity_target(live_nodes).is_some()
+    }
+
+    pub(crate) fn reclaim_idle_memory(&mut self, live_nodes: usize) {
+        if let Some(target) = self.idle_capacity_target(live_nodes) {
+            self.search_stack.clear();
+            self.insert_path.clear();
+            self.nodes.shrink_to(target);
+        }
+    }
+
     /// Inserts bounds into the tree and returns its assigned ordering.
     ///
     /// The ordering is one greater than the maximum ordering of any
@@ -376,6 +408,55 @@ mod tests {
     use super::*;
     use crate::{Bounds, Point, Size};
     use rand::{Rng, SeedableRng};
+
+    #[test]
+    fn idle_reclaim_preserves_overlap_order_and_live_working_set() {
+        let mut tree = BoundsTree::<f32>::default();
+        for index in 0..40000 {
+            tree.insert(Bounds::new(
+                Point {
+                    x: (index % 250) as f32 * 3.,
+                    y: (index / 250) as f32 * 3.,
+                },
+                Size {
+                    width: 2.,
+                    height: 2.,
+                },
+            ));
+        }
+        let peak = tree.nodes.capacity();
+        tree.reclaim_idle_memory(tree.node_count());
+        assert_eq!(tree.nodes.capacity(), peak);
+        tree.clear();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1729);
+        let mut reference: Vec<(Bounds<f32>, u32)> = Vec::new();
+        for index in 0..500 {
+            if index == 200 {
+                assert!(tree.needs_idle_reclaim(tree.node_count()));
+                tree.reclaim_idle_memory(tree.node_count());
+                assert!(tree.nodes.capacity() < peak / 2);
+            }
+            let bounds = Bounds::new(
+                Point {
+                    x: rng.random_range(-300.0..300.0),
+                    y: rng.random_range(-300.0..300.0),
+                },
+                Size {
+                    width: rng.random_range(1.0..80.0),
+                    height: rng.random_range(1.0..80.0),
+                },
+            );
+            let expected = reference
+                .iter()
+                .filter(|(old, _)| old.intersects(&bounds))
+                .map(|(_, order)| *order)
+                .max()
+                .unwrap_or(0)
+                + 1;
+            assert_eq!(tree.insert(bounds), expected);
+            reference.push((bounds, expected));
+        }
+    }
 
     #[test]
     fn test_insert() {

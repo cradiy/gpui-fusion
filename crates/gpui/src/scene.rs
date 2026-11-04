@@ -50,7 +50,7 @@ pub struct Scene {
     pub raster_scale: Option<f32>,
     pub(crate) raster_region: Option<RasterCaptureRegion>,
     pub(crate) paint_operations: Vec<PaintOperation>,
-    primitive_bounds: BoundsTree<ScaledPixels>,
+    pub(crate) primitive_bounds: BoundsTree<ScaledPixels>,
     layer_stack: Vec<DrawOrder>,
     pub backdrop_blurs: Vec<BackdropBlur>,
     pub shadows: Vec<Shadow>,

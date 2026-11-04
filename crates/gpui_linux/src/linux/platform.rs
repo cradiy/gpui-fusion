@@ -292,13 +292,16 @@ pub(crate) struct LinuxPlatform<P> {
     pub(crate) inner: P,
 }
 
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+pub(crate) fn release_unused_memory() {
+    // SAFETY: glibc's malloc_trim is thread-safe and only releases unused pages.
+    unsafe { libc::malloc_trim(0) };
+}
+
 impl<P: LinuxClient + 'static> Platform for LinuxPlatform<P> {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     fn memory_reclaimer(&self) -> Option<fn()> {
-        Some(|| {
-            // SAFETY: glibc's malloc_trim is thread-safe and only releases unused pages.
-            unsafe { libc::malloc_trim(0) };
-        })
+        Some(release_unused_memory)
     }
 
     fn set_gpu_idle_timeout(&self, timeout: Option<std::time::Duration>) -> bool {

@@ -1256,7 +1256,18 @@ impl WaylandClientState {
             if let Some(client) = client.upgrade() {
                 let state = client.borrow();
                 if state.windows.is_empty() {
-                    state.gpu_context.borrow_mut().take();
+                    let context = state.gpu_context.borrow_mut().take();
+                    if context.is_some() {
+                        drop(context);
+                        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+                        state
+                            .common
+                            .background_executor
+                            .spawn(async {
+                                crate::linux::platform::release_unused_memory();
+                            })
+                            .detach();
+                    }
                 }
             }
         }));

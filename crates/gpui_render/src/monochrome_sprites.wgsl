@@ -2,7 +2,7 @@
 
 struct MonochromeSprite {
     order: u32,
-    pad: u32,
+    is_glyph: u32,
     bounds: Bounds,
     content_mask: Bounds,
     background: Background,
@@ -56,12 +56,15 @@ fn fs_mono_sprite(input: MonoSpriteVarying) -> @location(0) vec4<f32> {
         ),
     );
     let sample = textureSample(t_sprite, s_sprite, input.tile_position).r;
-    let alpha_corrected = apply_contrast_and_gamma_correction(sample, color.rgb, gamma_params.grayscale_enhanced_contrast, gamma_params.gamma_ratios);
+    var coverage = sample;
+    if (sprite.is_glyph != 0u) {
+        coverage = apply_contrast_and_gamma_correction(sample, color.rgb, gamma_params.grayscale_enhanced_contrast, gamma_params.gamma_ratios);
+    }
 
     // Alpha clip after using the derivatives.
     if (any(input.clip_distances < vec4<f32>(0.0))) {
         return vec4<f32>(0.0);
     }
 
-    return blend_color(color, alpha_corrected);
+    return blend_color(color, coverage);
 }

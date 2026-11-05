@@ -351,7 +351,7 @@ mod tests {
             let mut scene = Scene::default();
             scene.insert_primitive(gpui::MonochromeSprite {
                 order: 0,
-                pad: 0,
+                is_glyph: true.into(),
                 bounds: bounds(),
                 content_mask: ContentMask { bounds: bounds() },
                 background: rgba(0xabcdef80).into(),

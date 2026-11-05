@@ -122,7 +122,7 @@ fn shared_monochrome_coverage_opacity_and_transformed_clip() -> anyhow::Result<(
     let mut scene = Scene::default();
     scene.insert_primitive(MonochromeSprite {
         order: 0,
-        pad: 0,
+        is_glyph: true.into(),
         bounds: bounds(0., 0., 30., 12.),
         content_mask: ContentMask {
             bounds: bounds(8., 8., 54., 24.),
@@ -223,6 +223,72 @@ fn scratch_targets_rebuild_after_idle_release() -> anyhow::Result<()> {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
+fn geometric_mask_coverage_matches_uncorrected_alpha_at_fractional_scales() -> anyhow::Result<()> {
+    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(96), DevicePixels(96)))?;
+    let tile = glyph_tile(&renderer, false, &[128, 128, 128])?;
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        for (foreground, background) in [(0x203048ff, 0xf0e8d8ff), (0xf0e8d8ff, 0x203048ff)] {
+            let viewport = bounds(0., 0., 96., 96.);
+            // Align the center sample with the center of the one-texel-high mask.
+            let region = bounds(
+                12. * scale + 0.5,
+                10. * scale + 0.5,
+                24. * scale,
+                20. * scale,
+            );
+            let build = |mask: bool| {
+                let mut scene = Scene::default();
+                scene.insert_primitive(gpui::Quad {
+                    bounds: viewport,
+                    content_mask: ContentMask { bounds: viewport },
+                    background: rgba(background).into(),
+                    ..Default::default()
+                });
+                if mask {
+                    scene.insert_primitive(MonochromeSprite {
+                        order: 0,
+                        is_glyph: false.into(),
+                        bounds: region,
+                        content_mask: ContentMask { bounds: viewport },
+                        background: rgba(foreground).into(),
+                        background_bounds: region,
+                        tile,
+                        transformation: Default::default(),
+                    });
+                } else {
+                    scene.insert_primitive(gpui::Quad {
+                        bounds: region,
+                        content_mask: ContentMask { bounds: viewport },
+                        background: gpui::Background::from(rgba(foreground)).opacity(128. / 255.),
+                        ..Default::default()
+                    });
+                }
+                scene.finish();
+                scene
+            };
+            let expected = renderer.render_rgba(&build(false))?;
+            let source = build(true);
+            let mut replayed = Scene::default();
+            replayed.replay(0..source.len(), &source);
+            replayed.finish();
+            let actual = renderer.render_rgba(&replayed)?;
+            let offset = ((20. * scale) as usize * 96 + (24. * scale) as usize) * 4;
+            for (actual, expected) in actual[offset..offset + 4]
+                .iter()
+                .zip(&expected[offset..offset + 4])
+            {
+                assert!(
+                    actual.abs_diff(*expected) <= 1,
+                    "scale {scale}, foreground {foreground:x}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
 fn monochrome_external_gradient_updates_without_replacing_glyph() -> anyhow::Result<()> {
     let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(80), DevicePixels(48)))?;
     let tile = glyph_tile(&renderer, false, &[255, 255, 255])?;
@@ -243,7 +309,7 @@ fn monochrome_external_gradient_updates_without_replacing_glyph() -> anyhow::Res
         scene.clear();
         scene.insert_primitive(MonochromeSprite {
             order: 0,
-            pad: 0,
+            is_glyph: true.into(),
             bounds,
             content_mask: ContentMask { bounds },
             background: background.clone(),

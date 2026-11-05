@@ -107,7 +107,7 @@ impl Window {
 
         self.next_frame.scene.insert_primitive(MonochromeSprite {
             order: 0,
-            pad: 0,
+            is_glyph: false.into(),
             bounds: final_bounds,
             content_mask,
             background,

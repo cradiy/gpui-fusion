@@ -159,7 +159,7 @@ fn primitive_shaders_match_host_layout_and_resource_contract() {
             size_of::<gpui::MonochromeSprite<gpui::GpuBackground>>(),
             vec![
                 offset_of!(gpui::MonochromeSprite<gpui::GpuBackground>, order),
-                offset_of!(gpui::MonochromeSprite<gpui::GpuBackground>, pad),
+                offset_of!(gpui::MonochromeSprite<gpui::GpuBackground>, is_glyph),
                 offset_of!(gpui::MonochromeSprite<gpui::GpuBackground>, bounds),
                 offset_of!(gpui::MonochromeSprite<gpui::GpuBackground>, content_mask),
                 offset_of!(gpui::MonochromeSprite<gpui::GpuBackground>, background),

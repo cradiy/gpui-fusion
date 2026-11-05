@@ -1325,7 +1325,8 @@ impl Default for TransformationMatrix {
 #[expect(missing_docs)]
 pub struct MonochromeSprite<B = Background> {
     pub order: DrawOrder,
-    pub pad: u32,
+    /// Whether the mask contains font coverage requiring text gamma and contrast correction.
+    pub is_glyph: PaddedBool32,
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
     pub background: B,
@@ -2083,7 +2084,7 @@ impl MonochromeSprite {
     fn to_gpu(&self, gradients: &mut GradientBuffer) -> MonochromeSprite<GpuBackground> {
         MonochromeSprite {
             order: self.order,
-            pad: self.pad,
+            is_glyph: self.is_glyph,
             bounds: self.bounds,
             content_mask: self.content_mask,
             background: gradients.background(&self.background),

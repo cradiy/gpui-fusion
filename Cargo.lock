@@ -6139,9 +6139,9 @@ dependencies = [
 
 [[package]]
 name = "mozjs"
-version = "0.26.9"
+version = "0.26.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4aacb6f380367d4f6d331dcea3dcae40e04c4052d4e9ed5cd24af62843020d72"
+checksum = "b246cd4d322eb2d95c2b33b7e7a8c4c4a56a7cbd3b0a1e70218c9ea176a1beae"
 dependencies = [
  "bindgen",
  "cc",
@@ -6154,9 +6154,9 @@ dependencies = [
 
 [[package]]
 name = "mozjs_collator_glue"
-version = "153.4.0"
+version = "153.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa27e6309c3350d72532aaa125e9cc9895ff14247d75f16fded2b8b430b5c144"
+checksum = "35033c6b0805271adbed9b50047bf07efb5e999c1a8a86753af79b742b02f8dd"
 dependencies = [
  "arraystring",
  "arrayvec",
@@ -6169,9 +6169,9 @@ dependencies = [
 
 [[package]]
 name = "mozjs_icu_collator"
-version = "153.4.0"
+version = "153.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f670d18f02ffd5b7ad8f4b7470f33d84937bac528c1eca33fc5ddf7282bd244"
+checksum = "00b76d0de5caa407560685c101a9823a58902008b3d9e6c062c4315c66917945"
 dependencies = [
  "displaydoc",
  "icu_locale",
@@ -6190,15 +6190,15 @@ dependencies = [
 
 [[package]]
 name = "mozjs_icu_collator_data"
-version = "153.4.0"
+version = "153.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7880095e89f8e29bc40ca905fa649462be93b9b732e8af759e65e13b9d7bd824"
+checksum = "905f380c3d72b517739a618d84d2d196a55fb0d8cdf76dd96f21d074650140ce"
 
 [[package]]
 name = "mozjs_icu_collections"
-version = "153.4.0"
+version = "153.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef0a6c26642b58dec22c91310777063693168dcd7b398299ab229b5c5bced741"
+checksum = "04e3240b3156db0f1b0acda72cd79b53eebbbd032300519b450bc9be51648c2b"
 dependencies = [
  "displaydoc",
  "icu_casemap",
@@ -6211,9 +6211,9 @@ dependencies = [
 
 [[package]]
 name = "mozjs_icu_normalizer"
-version = "153.4.0"
+version = "153.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bd461855a67e695fe96705258a83a23f6c6178a5eb201c0852e52cafabed380"
+checksum = "f4c5c74ab2d167ca63b41b7e8b6fce2ecc047e8342a90208c422c73d6bc9a099"
 dependencies = [
  "displaydoc",
  "icu_properties",
@@ -6229,15 +6229,15 @@ dependencies = [
 
 [[package]]
 name = "mozjs_icu_normalizer_data"
-version = "153.4.0"
+version = "153.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04f63b94dde6b7333933c1d541d22cd1478a9d0abdd83b387a01ac420cdc23e4"
+checksum = "366ea39d07901d23c51a0b149bf332afa8c4dc84ab7619b2d899bfe01b3e3dbc"
 
 [[package]]
 name = "mozjs_locale_glue"
-version = "153.4.0"
+version = "153.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a89cd38403297581629a88fa18858fe5a66d6330ced0ac5ae9bb978e45f8110"
+checksum = "e239a7291a90e08c8d93a02fe54fb904e906d434859f762b7d1634f7f0152ad1"
 dependencies = [
  "cbindgen",
  "icu_locale",
@@ -6245,9 +6245,9 @@ dependencies = [
 
 [[package]]
 name = "mozjs_normalizer_glue"
-version = "153.4.0"
+version = "153.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4a72e85a7a59b74f9d5f0ef2e84561de9b60b72011e603e2adba9fbc8734a0e"
+checksum = "a692f74e0255a0e0223e29f847ee8fd3a5bd846dbc64c6dd2cdb7b94435bf1eb"
 dependencies = [
  "cbindgen",
  "encoding_rs",
@@ -6258,9 +6258,9 @@ dependencies = [
 
 [[package]]
 name = "mozjs_properties_glue"
-version = "153.4.0"
+version = "153.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "665004aa26f9f54cfc0e77068922bda7c2780d6eab6960ab8a79b7841d67c36f"
+checksum = "e7e0d6dd3ea602e1c749f3c046e68d3cd84dfab0c1a5270bccba014259478d6e"
 dependencies = [
  "cbindgen",
  "icu_casemap",
@@ -6270,9 +6270,9 @@ dependencies = [
 
 [[package]]
 name = "mozjs_sys"
-version = "153.4.0-1"
+version = "153.6.0-1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9491fea40e8544d6697f9f4d1d2565f26e6d58b7af7f993610a384cf8f31062e"
+checksum = "199dc451e15dc64f4c879abccb1c9956504dfebdc9f2ab0ecded313d481c949a"
 dependencies = [
  "bindgen",
  "cc",
@@ -6293,9 +6293,9 @@ dependencies = [
 
 [[package]]
 name = "mozjs_unicode_bidi_ffi"
-version = "153.4.0"
+version = "153.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb27b4c58ea6fcdee8a83fcd75e39b69b12afdfff77d131f9780b974abedb336"
+checksum = "37b4e0d187cf9d048329996116e68172b99702ec6af6ad1e3a067d4cf8a89202"
 dependencies = [
  "cbindgen",
  "icu_properties",
@@ -6304,18 +6304,18 @@ dependencies = [
 
 [[package]]
 name = "mozjs_utf16_iter"
-version = "153.4.0"
+version = "153.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "957b668eb3be4d74acdada353e8d5ee5ef87f01bc1e970e3c5733bf36b6f4af0"
+checksum = "c0f5cccbc6429d442b3b7be04093b49509f188e514780a34ef3704f601e731be"
 dependencies = [
  "mozjs_icu_collections",
 ]
 
 [[package]]
 name = "mozjs_utf8_iter"
-version = "153.4.0"
+version = "153.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a16a6e8bb44b47da3e43d996b0800cd623001db3abcbc8509c4fa1a2b5cb72c1"
+checksum = "fd4ba02f48ea0cd8e2279a2d66e89dc367b4448561f4c6e44e75f85ac465099f"
 dependencies = [
  "mozjs_icu_collections",
 ]
@@ -8916,7 +8916,7 @@ dependencies = [
 [[package]]
 name = "selectors"
 version = "0.41.0"
-source = "git+https://github.com/cradiy/stylo?rev=036760987b3a9aba4ef465764ad9dac3a384dc60#036760987b3a9aba4ef465764ad9dac3a384dc60"
+source = "git+https://github.com/cradiy/stylo?rev=ed22b3a87b95df0d7eb23e2a47502b344581b79e#ed22b3a87b95df0d7eb23e2a47502b344581b79e"
 dependencies = [
  "bitflags 2.13.2",
  "cssparser",
@@ -9100,7 +9100,7 @@ dependencies = [
 [[package]]
 name = "servo"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "accesskit 0.24.1",
  "bitflags 2.13.2",
@@ -9160,7 +9160,7 @@ dependencies = [
 [[package]]
 name = "servo-allocator"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "libc",
  "tikv-jemalloc-sys",
@@ -9171,7 +9171,7 @@ dependencies = [
 [[package]]
 name = "servo-background-hang-monitor"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "backtrace",
  "crossbeam-channel",
@@ -9186,7 +9186,7 @@ dependencies = [
 [[package]]
 name = "servo-background-hang-monitor-api"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "serde",
  "servo-base",
@@ -9195,7 +9195,7 @@ dependencies = [
 [[package]]
 name = "servo-base"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "accesskit 0.24.1",
  "crossbeam-channel",
@@ -9222,7 +9222,7 @@ dependencies = [
 [[package]]
 name = "servo-canvas"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "bytemuck",
  "crossbeam-channel",
@@ -9248,7 +9248,7 @@ dependencies = [
 [[package]]
 name = "servo-canvas-traits"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "crossbeam-channel",
  "euclid",
@@ -9271,7 +9271,7 @@ dependencies = [
 [[package]]
 name = "servo-config"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "num_enum",
  "serde",
@@ -9284,7 +9284,7 @@ dependencies = [
 [[package]]
 name = "servo-config-macro"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9295,7 +9295,7 @@ dependencies = [
 [[package]]
 name = "servo-constellation"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "accesskit 0.24.1",
  "backtrace",
@@ -9338,7 +9338,7 @@ dependencies = [
 [[package]]
 name = "servo-constellation-traits"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "accesskit 0.24.1",
  "base64 0.23.1",
@@ -9372,7 +9372,7 @@ dependencies = [
 [[package]]
 name = "servo-default-resources"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "servo-embedder-traits",
 ]
@@ -9380,7 +9380,7 @@ dependencies = [
 [[package]]
 name = "servo-deny-public-fields"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "proc-macro2",
  "syn 2.0.117",
@@ -9390,7 +9390,7 @@ dependencies = [
 [[package]]
 name = "servo-dom-struct"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -9401,7 +9401,7 @@ dependencies = [
 [[package]]
 name = "servo-embedder-traits"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "accesskit 0.24.1",
  "bitflags 2.13.2",
@@ -9435,7 +9435,7 @@ dependencies = [
 [[package]]
 name = "servo-fonts"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "app_units",
  "atomic_refcell",
@@ -9494,7 +9494,7 @@ dependencies = [
 [[package]]
 name = "servo-fonts-traits"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "atomic_refcell",
  "dwrote",
@@ -9519,7 +9519,7 @@ dependencies = [
 [[package]]
 name = "servo-geometry"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "app_units",
  "euclid",
@@ -9532,7 +9532,7 @@ dependencies = [
 [[package]]
 name = "servo-hyper-serde"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "cookie 0.18.2",
  "headers",
@@ -9546,7 +9546,7 @@ dependencies = [
 [[package]]
 name = "servo-jstraceable-derive"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "proc-macro2",
  "syn 2.0.117",
@@ -9556,7 +9556,7 @@ dependencies = [
 [[package]]
 name = "servo-layout"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "accesskit 0.24.1",
  "app_units",
@@ -9619,7 +9619,7 @@ dependencies = [
 [[package]]
 name = "servo-layout-api"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "accesskit 0.24.1",
  "app_units",
@@ -9654,7 +9654,7 @@ dependencies = [
 [[package]]
 name = "servo-malloc-size-of"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "app_units",
  "atomic_refcell",
@@ -9704,7 +9704,7 @@ dependencies = [
 [[package]]
 name = "servo-media"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "servo-base",
  "servo-media-audio",
@@ -9717,7 +9717,7 @@ dependencies = [
 [[package]]
 name = "servo-media-audio"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "byte-slice-cast",
  "euclid",
@@ -9744,7 +9744,7 @@ dependencies = [
 [[package]]
 name = "servo-media-derive"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9754,7 +9754,7 @@ dependencies = [
 [[package]]
 name = "servo-media-dummy"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "servo-base",
  "servo-media",
@@ -9768,7 +9768,7 @@ dependencies = [
 [[package]]
 name = "servo-media-ohos"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "crossbeam-channel",
  "libc",
@@ -9791,7 +9791,7 @@ dependencies = [
 [[package]]
 name = "servo-media-player"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "malloc_size_of_derive",
  "serde",
@@ -9804,7 +9804,7 @@ dependencies = [
 [[package]]
 name = "servo-media-streams"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "malloc_size_of_derive",
  "servo-malloc-size-of",
@@ -9814,7 +9814,7 @@ dependencies = [
 [[package]]
 name = "servo-media-thread"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "euclid",
  "ipc-channel",
@@ -9833,7 +9833,7 @@ dependencies = [
 [[package]]
 name = "servo-media-traits"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "malloc_size_of_derive",
  "servo-malloc-size-of",
@@ -9842,7 +9842,7 @@ dependencies = [
 [[package]]
 name = "servo-media-webrtc"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "log",
  "malloc_size_of_derive",
@@ -9854,7 +9854,7 @@ dependencies = [
 [[package]]
 name = "servo-metrics"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "malloc_size_of_derive",
  "servo-base",
@@ -9869,7 +9869,7 @@ dependencies = [
 [[package]]
 name = "servo-net"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "async-compression",
  "async-recursion",
@@ -9950,7 +9950,7 @@ dependencies = [
 [[package]]
 name = "servo-net-traits"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "bytes",
  "content-security-policy",
@@ -9995,7 +9995,7 @@ dependencies = [
 [[package]]
 name = "servo-paint"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "bitflags 2.13.2",
  "crossbeam-channel",
@@ -10030,7 +10030,7 @@ dependencies = [
 [[package]]
 name = "servo-paint-api"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "bitflags 2.13.2",
  "crossbeam-channel",
@@ -10064,7 +10064,7 @@ dependencies = [
 [[package]]
 name = "servo-pixels"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "euclid",
  "image",
@@ -10079,7 +10079,7 @@ dependencies = [
 [[package]]
 name = "servo-profile"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "libc",
  "log",
@@ -10097,7 +10097,7 @@ dependencies = [
 [[package]]
 name = "servo-profile-traits"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "crossbeam-channel",
  "ipc-channel",
@@ -10113,7 +10113,7 @@ dependencies = [
 [[package]]
 name = "servo-script"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "accesskit 0.24.1",
  "app_units",
@@ -10223,7 +10223,7 @@ dependencies = [
 [[package]]
 name = "servo-script-bindings"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "atomic_refcell",
  "bitflags 2.13.2",
@@ -10256,11 +10256,13 @@ dependencies = [
  "servo-url",
  "servo_arc",
  "smallvec",
+ "string_cache",
  "strum",
  "stylo",
  "stylo_atoms",
  "stylo_static_prefs",
  "tendril",
+ "web_atoms",
  "xml5ever",
  "zeroize",
 ]
@@ -10268,7 +10270,7 @@ dependencies = [
 [[package]]
 name = "servo-script-traits"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "accesskit 0.24.1",
  "bitflags 2.13.2",
@@ -10302,7 +10304,7 @@ dependencies = [
 [[package]]
 name = "servo-script-webcrypto"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "aes 0.9.1",
  "aes-gcm",
@@ -10361,7 +10363,7 @@ dependencies = [
 [[package]]
 name = "servo-storage"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "libc",
  "log",
@@ -10386,7 +10388,7 @@ dependencies = [
 [[package]]
 name = "servo-storage-traits"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "malloc_size_of_derive",
  "serde",
@@ -10400,7 +10402,7 @@ dependencies = [
 [[package]]
 name = "servo-timers"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "crossbeam-channel",
  "malloc_size_of_derive",
@@ -10410,7 +10412,7 @@ dependencies = [
 [[package]]
 name = "servo-tracing"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10420,7 +10422,7 @@ dependencies = [
 [[package]]
 name = "servo-url"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "encoding_rs",
  "malloc_size_of_derive",
@@ -10434,7 +10436,7 @@ dependencies = [
 [[package]]
 name = "servo-wakelock"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "serde",
  "servo-embedder-traits",
@@ -10443,7 +10445,7 @@ dependencies = [
 [[package]]
 name = "servo-webvtt"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "html5ever",
  "markup5ever",
@@ -10453,7 +10455,7 @@ dependencies = [
 [[package]]
 name = "servo-webxr-api"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "euclid",
  "ipc-channel",
@@ -10469,7 +10471,7 @@ dependencies = [
 [[package]]
 name = "servo-xpath"
 version = "0.7.0"
-source = "git+https://github.com/cradiy/servo?branch=gpui-servo#ecae8656658fd3daa56ea44ef3756aa8ba2a7b60"
+source = "git+https://github.com/cradiy/servo?branch=gpui-servo#daaba70a35c6332c2e9ff23d216ecdef494dcba5"
 dependencies = [
  "log",
  "malloc_size_of_derive",
@@ -10480,7 +10482,7 @@ dependencies = [
 [[package]]
 name = "servo_arc"
 version = "0.5.0"
-source = "git+https://github.com/cradiy/stylo?rev=036760987b3a9aba4ef465764ad9dac3a384dc60#036760987b3a9aba4ef465764ad9dac3a384dc60"
+source = "git+https://github.com/cradiy/stylo?rev=ed22b3a87b95df0d7eb23e2a47502b344581b79e#ed22b3a87b95df0d7eb23e2a47502b344581b79e"
 dependencies = [
  "serde",
  "stable_deref_trait",
@@ -10938,7 +10940,7 @@ dependencies = [
 [[package]]
 name = "stylo"
 version = "0.22.0"
-source = "git+https://github.com/cradiy/stylo?rev=036760987b3a9aba4ef465764ad9dac3a384dc60#036760987b3a9aba4ef465764ad9dac3a384dc60"
+source = "git+https://github.com/cradiy/stylo?rev=ed22b3a87b95df0d7eb23e2a47502b344581b79e#ed22b3a87b95df0d7eb23e2a47502b344581b79e"
 dependencies = [
  "app_units",
  "arrayvec",
@@ -10996,7 +10998,7 @@ dependencies = [
 [[package]]
 name = "stylo_atoms"
 version = "0.22.0"
-source = "git+https://github.com/cradiy/stylo?rev=036760987b3a9aba4ef465764ad9dac3a384dc60#036760987b3a9aba4ef465764ad9dac3a384dc60"
+source = "git+https://github.com/cradiy/stylo?rev=ed22b3a87b95df0d7eb23e2a47502b344581b79e#ed22b3a87b95df0d7eb23e2a47502b344581b79e"
 dependencies = [
  "string_cache",
  "string_cache_codegen",
@@ -11005,7 +11007,7 @@ dependencies = [
 [[package]]
 name = "stylo_derive"
 version = "0.22.0"
-source = "git+https://github.com/cradiy/stylo?rev=036760987b3a9aba4ef465764ad9dac3a384dc60#036760987b3a9aba4ef465764ad9dac3a384dc60"
+source = "git+https://github.com/cradiy/stylo?rev=ed22b3a87b95df0d7eb23e2a47502b344581b79e#ed22b3a87b95df0d7eb23e2a47502b344581b79e"
 dependencies = [
  "darling 0.20.11",
  "proc-macro2",
@@ -11017,7 +11019,7 @@ dependencies = [
 [[package]]
 name = "stylo_dom"
 version = "0.22.0"
-source = "git+https://github.com/cradiy/stylo?rev=036760987b3a9aba4ef465764ad9dac3a384dc60#036760987b3a9aba4ef465764ad9dac3a384dc60"
+source = "git+https://github.com/cradiy/stylo?rev=ed22b3a87b95df0d7eb23e2a47502b344581b79e#ed22b3a87b95df0d7eb23e2a47502b344581b79e"
 dependencies = [
  "bitflags 2.13.2",
  "stylo_malloc_size_of",
@@ -11026,7 +11028,7 @@ dependencies = [
 [[package]]
 name = "stylo_malloc_size_of"
 version = "0.22.0"
-source = "git+https://github.com/cradiy/stylo?rev=036760987b3a9aba4ef465764ad9dac3a384dc60#036760987b3a9aba4ef465764ad9dac3a384dc60"
+source = "git+https://github.com/cradiy/stylo?rev=ed22b3a87b95df0d7eb23e2a47502b344581b79e#ed22b3a87b95df0d7eb23e2a47502b344581b79e"
 dependencies = [
  "app_units",
  "cssparser",
@@ -11045,7 +11047,7 @@ dependencies = [
 [[package]]
 name = "stylo_static_prefs"
 version = "0.22.0"
-source = "git+https://github.com/cradiy/stylo?rev=036760987b3a9aba4ef465764ad9dac3a384dc60#036760987b3a9aba4ef465764ad9dac3a384dc60"
+source = "git+https://github.com/cradiy/stylo?rev=ed22b3a87b95df0d7eb23e2a47502b344581b79e#ed22b3a87b95df0d7eb23e2a47502b344581b79e"
 dependencies = [
  "toml 1.1.3+spec-1.1.0",
 ]
@@ -11053,7 +11055,7 @@ dependencies = [
 [[package]]
 name = "stylo_traits"
 version = "0.22.0"
-source = "git+https://github.com/cradiy/stylo?rev=036760987b3a9aba4ef465764ad9dac3a384dc60#036760987b3a9aba4ef465764ad9dac3a384dc60"
+source = "git+https://github.com/cradiy/stylo?rev=ed22b3a87b95df0d7eb23e2a47502b344581b79e#ed22b3a87b95df0d7eb23e2a47502b344581b79e"
 dependencies = [
  "app_units",
  "bitflags 2.13.2",
@@ -11559,9 +11561,9 @@ dependencies = [
 
 [[package]]
 name = "taffy"
-version = "0.15.0"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c8480887e8803986d96a7173729565520d4bbb721ad6b7ad6941a22897207aa"
+checksum = "31f7bd2d97198df05186f93a3a3c306845f40e8b3c22bf9279cdd7e5cf5fea7d"
 dependencies = [
  "serde",
  "slotmap",
@@ -11841,7 +11843,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 [[package]]
 name = "to_shmem"
 version = "0.6.0"
-source = "git+https://github.com/cradiy/stylo?rev=036760987b3a9aba4ef465764ad9dac3a384dc60#036760987b3a9aba4ef465764ad9dac3a384dc60"
+source = "git+https://github.com/cradiy/stylo?rev=ed22b3a87b95df0d7eb23e2a47502b344581b79e#ed22b3a87b95df0d7eb23e2a47502b344581b79e"
 dependencies = [
  "cssparser",
  "hashbrown 0.17.1",
@@ -11855,7 +11857,7 @@ dependencies = [
 [[package]]
 name = "to_shmem_derive"
 version = "0.2.0"
-source = "git+https://github.com/cradiy/stylo?rev=036760987b3a9aba4ef465764ad9dac3a384dc60#036760987b3a9aba4ef465764ad9dac3a384dc60"
+source = "git+https://github.com/cradiy/stylo?rev=ed22b3a87b95df0d7eb23e2a47502b344581b79e#ed22b3a87b95df0d7eb23e2a47502b344581b79e"
 dependencies = [
  "darling 0.20.11",
  "proc-macro2",
@@ -13039,9 +13041,9 @@ dependencies = [
 
 [[package]]
 name = "webrender"
-version = "0.70.0"
+version = "0.70.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ede9dbc3cfb3e2c073a68e20f8fd54d9f6be8587be1c7c948e1ac51112421ef6"
+checksum = "b90e7e9f5be8b8e81a292dc5617bcb06661f5b110891499ff793ca55e364e0ca"
 dependencies = [
  "allocator-api2",
  "bincode",
@@ -13931,9 +13933,9 @@ dependencies = [
 
 [[package]]
 name = "wr_glyph_rasterizer"
-version = "0.70.0"
+version = "0.70.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcda26d8788ba57a04cd75ae4a2c6da3aa8e5ab16ed1cfd5db09d0fbc04df2fb"
+checksum = "ab2dca02e2202d7472f6aa3ea67ef55bacd1aabdb71e2b0cd642b053a99545a9"
 dependencies = [
  "core-foundation 0.9.4",
  "core-graphics 0.23.2",

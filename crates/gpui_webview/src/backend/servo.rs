@@ -9,37 +9,33 @@ use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
-    sync::{Arc, Mutex, Weak},
+    sync::Arc,
+    time::Duration,
 };
 
-type WakeTargets = Arc<Mutex<Vec<Weak<async_channel::Sender<()>>>>>;
 #[derive(Clone)]
-struct RuntimeWaker(WakeTargets);
+struct RuntimeWaker(Arc<async_channel::Sender<()>>);
 impl EventLoopWaker for RuntimeWaker {
     fn clone_box(&self) -> Box<dyn EventLoopWaker> {
         Box::new(self.clone())
     }
     fn wake(&self) {
-        self.0.lock().unwrap().retain(|target| {
-            let Some(target) = target.upgrade() else {
-                return false;
-            };
-            let _ = target.try_send(());
-            true
-        });
+        let _ = self.0.try_send(());
     }
 }
 
 struct Runtime {
     servo: ::servo::Servo,
-    wakes: WakeTargets,
+    wake: Arc<async_channel::Sender<()>>,
+    views: Rc<Cell<usize>>,
 }
 impl Global for Runtime {}
 impl Runtime {
-    fn acquire(cx: &mut App, signals: &Signals) -> ::servo::Servo {
+    fn acquire(cx: &mut App) -> (::servo::Servo, RuntimeLease) {
         if !cx.has_global::<Self>() {
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-            let wakes = Arc::new(Mutex::new(Vec::new()));
+            let (sender, receiver) = async_channel::bounded(1);
+            let wake = Arc::new(sender);
             let servo = ::servo::ServoBuilder::default()
                 .preferences(::servo::Preferences {
                     dom_web_animations_enabled: true,
@@ -53,17 +49,51 @@ impl Runtime {
                     session_history_max_length: 0,
                     ..Default::default()
                 })
-                .event_loop_waker(Box::new(RuntimeWaker(wakes.clone())))
+                .event_loop_waker(Box::new(RuntimeWaker(wake.clone())))
                 .build();
-            cx.set_global(Self { servo, wakes });
+            cx.set_global(Self {
+                servo,
+                wake,
+                views: Rc::new(Cell::new(0)),
+            });
+            cx.spawn(async move |cx| {
+                while receiver.recv().await.is_ok() {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(1))
+                        .await;
+                    while receiver.try_recv().is_ok() {}
+                    cx.update(|cx| cx.global::<Runtime>().servo.spin_event_loop());
+                }
+            })
+            .detach();
         }
         let runtime = cx.global::<Self>();
-        runtime
-            .wakes
-            .lock()
-            .unwrap()
-            .push(Arc::downgrade(&signals.wake));
-        runtime.servo.clone()
+        runtime.views.set(runtime.views.get() + 1);
+        (
+            runtime.servo.clone(),
+            RuntimeLease {
+                servo: runtime.servo.clone(),
+                wake: runtime.wake.clone(),
+                views: runtime.views.clone(),
+            },
+        )
+    }
+}
+
+struct RuntimeLease {
+    servo: ::servo::Servo,
+    wake: Arc<async_channel::Sender<()>>,
+    views: Rc<Cell<usize>>,
+}
+
+impl Drop for RuntimeLease {
+    fn drop(&mut self) {
+        let remaining = self.views.get() - 1;
+        self.views.set(remaining);
+        if remaining == 0 {
+            self.servo.network_manager().request_cache_clear();
+        }
+        let _ = self.wake.try_send(());
     }
 }
 
@@ -263,7 +293,7 @@ impl ::servo::ClipboardDelegate for Signals {
 pub(super) struct ServoBackend {
     dialogs: Rc<RefCell<Vec<(::servo::EmbedderControlId, DialogCancellation)>>>,
     webview: ::servo::WebView,
-    servo: ::servo::Servo,
+    runtime: RuntimeLease,
     context: Rc<::servo::WindowRenderingContext>,
     child: ChildSurface,
     signals: Rc<Signals>,
@@ -292,7 +322,7 @@ impl ServoBackend {
         context
             .make_current()
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-        let servo = Runtime::acquire(cx, &signals);
+        let (servo, runtime) = Runtime::acquire(cx);
         let dialogs = Rc::new(RefCell::new(Vec::new()));
         let builder = match new_window {
             Some(crate::new_window::NewWindow::Servo(request)) => request.builder(context.clone()),
@@ -311,7 +341,7 @@ impl ServoBackend {
         Ok(Self {
             dialogs,
             webview,
-            servo,
+            runtime,
             context,
             child,
             signals,
@@ -386,7 +416,7 @@ impl Engine for ServoBackend {
         Ok(())
     }
     fn poll(&mut self) {
-        self.servo.spin_event_loop();
+        let _ = self.runtime.wake.try_send(());
         if self.signals.ime.borrow().is_none()
             || self.composition_revision != Some(self.signals.ime_revision.get())
         {

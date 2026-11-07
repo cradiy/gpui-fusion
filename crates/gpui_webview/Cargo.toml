@@ -9,6 +9,7 @@ readme = "README.md"
 
 [features]
 default = []
+servo-webgl = ["servo", "servo/webgl"]
 servo = [
   "dep:servo",
   "dep:dpi",

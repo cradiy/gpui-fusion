@@ -24,10 +24,16 @@ impl EventLoopWaker for RuntimeWaker {
     }
 }
 
+#[derive(Default)]
+struct ViewActivity {
+    count: Cell<usize>,
+    generation: Cell<u64>,
+}
+
 struct Runtime {
     servo: ::servo::Servo,
     wake: Arc<async_channel::Sender<()>>,
-    views: Rc<Cell<usize>>,
+    views: Rc<ViewActivity>,
 }
 impl Global for Runtime {}
 impl Runtime {
@@ -54,21 +60,37 @@ impl Runtime {
             cx.set_global(Self {
                 servo,
                 wake,
-                views: Rc::new(Cell::new(0)),
+                views: Rc::default(),
             });
             cx.spawn(async move |cx| {
+                let mut last_reclaim_generation = None;
                 while receiver.recv().await.is_ok() {
                     cx.background_executor()
                         .timer(Duration::from_millis(1))
                         .await;
                     while receiver.try_recv().is_ok() {}
-                    cx.update(|cx| cx.global::<Runtime>().servo.spin_event_loop());
+                    cx.update(|cx| {
+                        let runtime = cx.global::<Runtime>();
+                        runtime.servo.spin_event_loop();
+                        let views = runtime.views.clone();
+                        let generation = views.generation.get();
+                        if views.count.get() == 0 && last_reclaim_generation != Some(generation) {
+                            last_reclaim_generation = Some(generation);
+                            cx.release_unused_memory_after(Duration::from_secs(2), move |_| {
+                                views.count.get() == 0 && views.generation.get() == generation
+                            });
+                        }
+                    });
                 }
             })
             .detach();
         }
         let runtime = cx.global::<Self>();
-        runtime.views.set(runtime.views.get() + 1);
+        runtime.views.count.set(runtime.views.count.get() + 1);
+        runtime
+            .views
+            .generation
+            .set(runtime.views.generation.get().wrapping_add(1));
         (
             runtime.servo.clone(),
             RuntimeLease {
@@ -83,13 +105,13 @@ impl Runtime {
 struct RuntimeLease {
     servo: ::servo::Servo,
     wake: Arc<async_channel::Sender<()>>,
-    views: Rc<Cell<usize>>,
+    views: Rc<ViewActivity>,
 }
 
 impl Drop for RuntimeLease {
     fn drop(&mut self) {
-        let remaining = self.views.get() - 1;
-        self.views.set(remaining);
+        let remaining = self.views.count.get() - 1;
+        self.views.count.set(remaining);
         if remaining == 0 {
             self.servo.network_manager().request_cache_clear();
         }

@@ -7,6 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use anyhow::Context as _;
 use collections::{FxHashMap, HashMap};
 use futures::channel::oneshot::Receiver;
 
@@ -1939,6 +1940,33 @@ impl PlatformWindow for WaylandWindow {
         }
 
         if mapped {
+            let raw_window = RawWindow {
+                window: state.surface.id().as_ptr().cast::<std::ffi::c_void>(),
+                display: state
+                    .surface
+                    .backend()
+                    .upgrade()
+                    .unwrap()
+                    .display_ptr()
+                    .cast::<std::ffi::c_void>(),
+            };
+            let client = state.client.get_client();
+            let instance = client
+                .borrow()
+                .gpu_context
+                .borrow()
+                .as_ref()
+                .context("GPU context unavailable during surface remap")?
+                .instance
+                .clone();
+            let config = WgpuSurfaceConfig {
+                size: state.bounds.size.to_device_pixels(state.scale),
+                transparent: state.is_transparent(),
+                preferred_present_mode: None,
+            };
+            state
+                .renderer
+                .replace_surface(&raw_window, config, &instance)?;
             state.mapped = true;
             let external = matches!(state.surface_state, WaylandSurfaceState::External(_));
             state.acknowledged_first_configure = external;
@@ -1964,6 +1992,9 @@ impl PlatformWindow for WaylandWindow {
                     .detach();
             }
         } else {
+            // Retire WSI frame callbacks before unmapping. The compositor need
+            // not complete callbacks for a hidden surface.
+            state.renderer.unconfigure_surface();
             state.surface.attach(None, 0, 0);
             state.surface.commit();
             // A callback requested before unmap may arrive after remapping.

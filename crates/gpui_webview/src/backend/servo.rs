@@ -52,6 +52,7 @@ impl Runtime {
                     dom_adoptedstylesheet_enabled: true,
                     dom_visual_viewport_enabled: true,
                     layout_css_masking_enabled: true,
+                    layout_css_container_queries_enabled: true,
                     session_history_max_length: 0,
                     ..Default::default()
                 })
@@ -156,7 +157,7 @@ impl WebViewDelegate for ServoDelegate {
     ) {
         use crate::WebViewConsoleLevel as Level;
         let level = match level {
-            ::servo::ConsoleLogLevel::Log => Level::Log,
+            ::servo::ConsoleLogLevel::Log | ::servo::ConsoleLogLevel::Table => Level::Log,
             ::servo::ConsoleLogLevel::Debug => Level::Debug,
             ::servo::ConsoleLogLevel::Info => Level::Info,
             ::servo::ConsoleLogLevel::Warn => Level::Warn,
@@ -284,6 +285,27 @@ impl WebViewDelegate for ServoDelegate {
             ::servo::Cursor::Crosshair => CursorStyle::Crosshair,
             ::servo::Cursor::Grab => CursorStyle::OpenHand,
             ::servo::Cursor::Grabbing => CursorStyle::ClosedHand,
+            ::servo::Cursor::VerticalText => CursorStyle::IBeamCursorForVerticalLayout,
+            ::servo::Cursor::ContextMenu => CursorStyle::ContextualMenu,
+            ::servo::Cursor::Alias => CursorStyle::DragLink,
+            ::servo::Cursor::Copy => CursorStyle::DragCopy,
+            ::servo::Cursor::NoDrop | ::servo::Cursor::NotAllowed => {
+                CursorStyle::OperationNotAllowed
+            }
+            ::servo::Cursor::EResize => CursorStyle::ResizeRight,
+            ::servo::Cursor::WResize => CursorStyle::ResizeLeft,
+            ::servo::Cursor::NResize => CursorStyle::ResizeUp,
+            ::servo::Cursor::SResize => CursorStyle::ResizeDown,
+            ::servo::Cursor::EwResize => CursorStyle::ResizeLeftRight,
+            ::servo::Cursor::NsResize => CursorStyle::ResizeUpDown,
+            ::servo::Cursor::NwResize | ::servo::Cursor::SeResize | ::servo::Cursor::NwseResize => {
+                CursorStyle::ResizeUpLeftDownRight
+            }
+            ::servo::Cursor::NeResize | ::servo::Cursor::SwResize | ::servo::Cursor::NeswResize => {
+                CursorStyle::ResizeUpRightDownLeft
+            }
+            ::servo::Cursor::ColResize => CursorStyle::ResizeColumn,
+            ::servo::Cursor::RowResize => CursorStyle::ResizeRow,
             _ => CursorStyle::Arrow,
         };
         if self.cursor.replace(cursor) != cursor {
@@ -504,7 +526,11 @@ impl Engine for ServoBackend {
                     self.point(position),
                 ))
             }
-            Input::Scroll { position, delta } => InputEvent::Wheel(::servo::WheelEvent::new(
+            Input::Scroll {
+                position,
+                delta,
+                modifiers,
+            } => InputEvent::Wheel(::servo::WheelEvent::new(
                 ::servo::WheelDelta {
                     x: f32::from(delta.x) as f64,
                     y: f32::from(delta.y) as f64,
@@ -512,6 +538,14 @@ impl Engine for ServoBackend {
                     mode: ::servo::WheelMode::DeltaPixel,
                 },
                 self.point(position),
+                {
+                    let mut result = ::servo::Modifiers::empty();
+                    result.set(::servo::Modifiers::CONTROL, modifiers.control);
+                    result.set(::servo::Modifiers::SHIFT, modifiers.shift);
+                    result.set(::servo::Modifiers::ALT, modifiers.alt);
+                    result.set(::servo::Modifiers::META, modifiers.platform);
+                    result
+                },
             )),
             Input::Key {
                 keystroke,

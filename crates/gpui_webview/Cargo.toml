@@ -29,11 +29,11 @@ futures.workspace = true
 url.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-servo = { git = "https://github.com/cradiy/servo", branch = "gpui-servo", default-features = false, features = [
+servo = { git = "https://github.com/cradiy/servo", rev = "840967aa0dded919a7e272cf2879d9186259fd48", default-features = false, features = [
   "baked-in-resources",
   "js_jit",
   "jemalloc",
-  "webcrypto",
+  "subtlecrypto",
 ], optional = true }
 dpi = { version = "0.1", optional = true }
 euclid = { version = "0.22", optional = true }

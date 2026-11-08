@@ -60,6 +60,7 @@ pub(crate) enum Input {
     Scroll {
         position: Point<Pixels>,
         delta: Point<Pixels>,
+        modifiers: gpui::Modifiers,
     },
     Key {
         keystroke: Keystroke,

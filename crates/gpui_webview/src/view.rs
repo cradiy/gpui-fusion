@@ -377,6 +377,7 @@ impl Render for WebView {
                     Input::Scroll {
                         position: e.position,
                         delta: e.delta.pixel_delta(px(24.)),
+                        modifiers: e.modifiers,
                     },
                     cx,
                 )

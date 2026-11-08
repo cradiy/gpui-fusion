@@ -1,5 +1,7 @@
 #[cfg(feature = "wayland")]
 mod clipboard;
+#[cfg(feature = "wayland")]
+mod desktop_font;
 mod dispatcher;
 mod headless;
 mod keyboard;

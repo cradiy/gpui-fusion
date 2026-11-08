@@ -185,7 +185,11 @@ impl LinuxCommon {
         let (tray_sender, tray_receiver) = calloop::channel::channel();
 
         #[cfg(feature = "wayland")]
-        let text_system = Arc::new(crate::linux::CosmicTextSystem::new("IBM Plex Sans"));
+        let text_system = Arc::new(crate::linux::CosmicTextSystem::new(
+            super::desktop_font::family()
+                .as_deref()
+                .unwrap_or("IBM Plex Sans"),
+        ));
         #[cfg(not(feature = "wayland"))]
         let text_system = Arc::new(gpui::NoopTextSystem::new());
 

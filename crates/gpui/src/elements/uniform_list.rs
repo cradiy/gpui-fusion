@@ -70,6 +70,7 @@ pub struct UniformList {
 
 /// Frame state used by the [UniformList].
 pub struct UniformListFrameState {
+    item_size: Size<Pixels>,
     items: SmallVec<[AnyElement; 32]>,
     decorations: SmallVec<[AnyElement; 2]>,
 }
@@ -322,6 +323,7 @@ impl Element for UniformList {
         (
             layout_id,
             UniformListFrameState {
+                item_size,
                 items: SmallVec::new(),
                 decorations: SmallVec::new(),
             },
@@ -356,7 +358,7 @@ impl Element for UniformList {
             ListHorizontalSizingBehavior::Unconstrained
         );
 
-        let longest_item_size = self.measure_item(None, window, cx);
+        let longest_item_size = frame_state.item_size;
         let content_width = if can_scroll_horizontally {
             padded_bounds.size.width.max(longest_item_size.width)
         } else {
@@ -720,6 +722,62 @@ impl InteractiveElement for UniformList {
 #[cfg(test)]
 mod test {
     use crate::TestAppContext;
+
+    #[gpui::test]
+    fn item_measurement_is_shared_within_each_frame(cx: &mut TestAppContext) {
+        use crate::{
+            AnyElement, Context, ListSizingBehavior, ScrollStrategy, UniformListScrollHandle,
+            Window, div, point, prelude::*, px, size, uniform_list,
+        };
+        use std::{cell::Cell, rc::Rc};
+
+        struct Rows(Option<AnyElement>);
+        impl Render for Rows {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                self.0.take().unwrap()
+            }
+        }
+
+        let cx = cx.add_empty_window();
+        let handle = UniformListScrollHandle::new();
+        let measurements = Rc::new(Cell::new(0));
+        for sizing in [ListSizingBehavior::Infer, ListSizingBehavior::Auto] {
+            for (count, row_height, viewport_height) in [
+                (1000, 24., 240.),
+                (800, 36., 180.),
+                (0, 36., 180.),
+                (500, 20., 200.),
+            ] {
+                measurements.set(0);
+                handle.scroll_to_item(100, ScrollStrategy::Top);
+                let calls = measurements.clone();
+                cx.draw(
+                    point(px(0.), px(0.)),
+                    size(px(400.), px(viewport_height)),
+                    |_, cx| {
+                        let element = uniform_list("measured-rows", count, move |range, _, _| {
+                            if range == (0..1) {
+                                calls.set(calls.get() + 1);
+                            }
+                            range.map(|_| div().h(px(row_height)).w(px(200.))).collect()
+                        })
+                        .with_sizing_behavior(sizing)
+                        .track_scroll(&handle)
+                        .size_full()
+                        .into_any_element();
+                        cx.new(|_| Rows(Some(element))).into_any_element()
+                    },
+                );
+                let state = handle.0.borrow();
+                let measured = state.last_item_size.unwrap();
+                assert_eq!(measured.contents.height, px(row_height * count as f32));
+                if count != 0 {
+                    assert_eq!(measured.item.height, px(viewport_height));
+                }
+                assert_eq!(measurements.get(), usize::from(count != 0));
+            }
+        }
+    }
 
     #[gpui::test]
     fn test_scroll_strategy_nearest(cx: &mut TestAppContext) {

@@ -116,11 +116,11 @@ pub fn guess_compositor() -> &'static str {
     }
 
     #[cfg(feature = "wayland")]
-    let wayland_display = std::env::var_os("WAYLAND_DISPLAY");
+    let use_wayland = ["WAYLAND_SOCKET", "WAYLAND_DISPLAY"]
+        .into_iter()
+        .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()));
     #[cfg(not(feature = "wayland"))]
-    let wayland_display: Option<std::ffi::OsString> = None;
-
-    let use_wayland = wayland_display.is_some_and(|display| !display.is_empty());
+    let use_wayland = false;
 
     if use_wayland { "Wayland" } else { "Headless" }
 }
@@ -3359,6 +3359,51 @@ mod inset_tests {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[cfg(feature = "wayland")]
+    #[test]
+    fn compositor_selection_uses_wayland_environment() {
+        const EXPECTED: &str = "GPUI_TEST_EXPECTED_COMPOSITOR";
+        if let Ok(expected) = std::env::var(EXPECTED) {
+            assert_eq!(guess_compositor(), expected);
+            return;
+        }
+
+        for (display, socket, headless, expected) in [
+            (None, Some("17"), None, "Wayland"),
+            (Some("wayland-test"), None, None, "Wayland"),
+            (None, None, None, "Headless"),
+            (Some(""), Some(""), None, "Headless"),
+            (Some("wayland-test"), Some("17"), Some(""), "Headless"),
+        ] {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "platform::tests::compositor_selection_uses_wayland_environment",
+                    "--nocapture",
+                ])
+                .env(EXPECTED, expected);
+            for (name, value) in [
+                ("WAYLAND_DISPLAY", display),
+                ("WAYLAND_SOCKET", socket),
+                ("ZED_HEADLESS", headless),
+            ] {
+                if let Some(value) = value {
+                    command.env(name, value);
+                } else {
+                    command.env_remove(name);
+                }
+            }
+            let output = command.output().unwrap();
+            assert!(
+                output.status.success(),
+                "display={display:?}, socket={socket:?}, headless={headless:?}:\n{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+        }
+    }
 
     #[test]
     fn test_window_button_layout_parse_standard() {

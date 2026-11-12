@@ -29,7 +29,7 @@ windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32
 windows = { version = "0.61", features = ["Win32_System_Com", "Win32_UI_Shell"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-trash = { version = "5.2.9", default-features = false, features = ["chrono"] }
+trash = { version = "5.3.0", default-features = false, features = ["chrono", "freedesktop"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

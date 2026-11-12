@@ -28,10 +28,10 @@ use wayland_protocols::{
     wp::fractional_scale::v1::client::wp_fractional_scale_v1,
     xdg::dialog::v1::client::xdg_dialog_v1::XdgDialogV1,
 };
-use wayland_protocols_plasma::blur::client::org_kde_kwin_blur;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1;
 
 use crate::linux::wayland::{
+    background_effect::SurfaceBlur,
     display::WaylandDisplay,
     external_surface::ExternalWaylandSurfaceRoleFactory,
     frame_callback::PendingFrameCallback,
@@ -221,7 +221,7 @@ pub struct WaylandWindowState {
     pub surface: wl_surface::WlSurface,
     app_id: Option<String>,
     appearance: WindowAppearance,
-    blur: Option<org_kde_kwin_blur::OrgKdeKwinBlur>,
+    blur: SurfaceBlur,
     viewport: Option<wp_viewport::WpViewport>,
     fractional_scale: Option<wp_fractional_scale_v1::WpFractionalScaleV1>,
     // An Enter can arrive before that output's first complete property batch.
@@ -769,7 +769,7 @@ impl WaylandWindowState {
             children: FxHashMap::default(),
             surface,
             app_id: options.app_id,
-            blur: None,
+            blur: SurfaceBlur::default(),
             viewport,
             fractional_scale: None,
             globals,
@@ -808,6 +808,32 @@ impl WaylandWindowState {
             accesskit_adapter: None,
             mapped: true,
         })
+    }
+
+    fn update_background_blur(&mut self) -> bool {
+        let size = if self.presented_destination.width > 0 && self.presented_destination.height > 0
+        {
+            self.presented_destination.map(|value| px(value as f32))
+        } else {
+            self.bounds.size
+        };
+        self.update_background_blur_for_size(size)
+    }
+
+    fn update_background_blur_for_size(&mut self, size: Size<Pixels>) -> bool {
+        let bounds = inset_by_tiling(
+            Bounds::new(Point::default(), size),
+            self.inset(),
+            self.tiling,
+        );
+        self.blur.update(
+            &self.surface,
+            &self.globals.compositor,
+            &self.globals.qh,
+            &self.globals.blur.borrow(),
+            self.mapped && self.background_appearance == WindowBackgroundAppearance::Blurred,
+            bounds,
+        )
     }
 
     pub fn is_transparent(&self) -> bool {
@@ -859,10 +885,8 @@ impl Drop for WaylandWindow {
 
         state.renderer.destroy();
 
-        // Destroy blur first, this has no dependencies.
-        if let Some(blur) = &state.blur {
-            blur.release();
-        }
+        let surface = state.surface.clone();
+        state.blur.clear(&surface);
 
         // Decorations must be destroyed before the xdg state.
         // See https://wayland.app/protocols/xdg-decoration-unstable-v1#zxdg_toplevel_decoration_v1
@@ -1716,6 +1740,13 @@ impl WaylandWindowStatePtr {
         }
     }
 
+    pub fn background_effects_changed(&self) {
+        let mut state = self.state.borrow_mut();
+        if state.update_background_blur() && state.mapped {
+            state.surface.commit();
+        }
+    }
+
     pub fn resize(&self, size: Size<Pixels>) {
         self.set_size_and_scale(Some(size), None);
     }
@@ -1992,6 +2023,8 @@ impl PlatformWindow for WaylandWindow {
                     .detach();
             }
         } else {
+            let surface = state.surface.clone();
+            state.blur.clear(&surface);
             // Retire WSI frame callbacks before unmapping. The compositor need
             // not complete callbacks for a hidden surface.
             state.renderer.unconfigure_surface();
@@ -2408,6 +2441,8 @@ impl PlatformWindow for WaylandWindow {
         if let Some(viewport) = &state.viewport {
             viewport.set_destination(destination.width, destination.height);
         }
+        let size = state.bounds.size;
+        state.update_background_blur_for_size(size);
         state.renderer_presented = state.renderer.draw(scene);
         if state.renderer_presented {
             state.presented_destination = destination;
@@ -2441,13 +2476,16 @@ impl PlatformWindow for WaylandWindow {
                     }
                 }));
             }
-        } else if let Some(viewport) = &state.viewport {
-            // Texture acquisition can fail without presenting. Cancel the
-            // pending destination before any unrelated surface commit.
-            viewport.set_destination(
-                state.presented_destination.width,
-                state.presented_destination.height,
-            );
+        } else {
+            // Cancel state for a buffer that was not presented before another
+            // surface-only commit can apply it to the previous buffer.
+            if let Some(viewport) = &state.viewport {
+                viewport.set_destination(
+                    state.presented_destination.width,
+                    state.presented_destination.height,
+                );
+            }
+            state.update_background_blur();
         }
 
         if state.renderer.needs_redraw() {
@@ -2531,6 +2569,13 @@ impl PlatformWindow for WaylandWindow {
                     layer.layer_surface.version(),
                 ),
             );
+            state.surface.commit();
+        }
+    }
+
+    fn set_background_blur_region(&self, region: Option<&[Bounds<Pixels>]>) {
+        let mut state = self.borrow_mut();
+        if state.blur.set_region(region) && state.update_background_blur() && state.mapped {
             state.surface.commit();
         }
     }
@@ -2720,20 +2765,8 @@ fn update_window(mut state: RefMut<WaylandWindowState>) {
         state.surface.set_opaque_region(None);
     }
 
-    if let Some(ref blur_manager) = state.globals.blur_manager {
-        if state.background_appearance == WindowBackgroundAppearance::Blurred {
-            if state.blur.is_none() {
-                let blur = blur_manager.create(&state.surface, &state.globals.qh, ());
-                state.blur = Some(blur);
-            }
-            state.blur.as_ref().unwrap().commit();
-        } else {
-            // It probably doesn't hurt to clear the blur for opaque windows
-            blur_manager.unset(&state.surface);
-            if let Some(b) = state.blur.take() {
-                b.release()
-            }
-        }
+    if state.update_background_blur() && state.mapped {
+        state.surface.commit();
     }
 
     region.destroy();

@@ -1514,6 +1514,19 @@ impl Window {
         self.platform_window.set_input_region(region);
     }
 
+    /// Sets the region of a Wayland window requesting compositor background blur.
+    /// Requires `WindowBackgroundAppearance::Blurred` and compositor support.
+    ///
+    /// Coordinates are logical, relative to the window surface. `Some(rects)`
+    /// blurs their union; `Some(&[])` disables blur. `None` restores the default
+    /// content region, excluding client decoration insets. The region persists
+    /// across hiding and showing and is independent of the input region.
+    /// Changes apply on the next surface commit; mapped windows commit immediately.
+    /// Other platforms ignore this request. The compositor controls blur strength.
+    pub fn set_background_blur_region(&self, region: Option<&[Bounds<Pixels>]>) {
+        self.platform_window.set_background_blur_region(region);
+    }
+
     /// Sets keyboard focus behavior for a Wayland layer-shell window.
     ///
     /// Applies immediately when mapped and persists across hiding and showing.

@@ -1281,6 +1281,8 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     #[cfg(all(target_os = "linux", feature = "wayland"))]
     fn set_keyboard_interactivity(&self, _mode: layer_shell::KeyboardInteractivity) {}
     fn set_input_region(&self, _region: Option<&[Bounds<Pixels>]>) {}
+    /// Restricts compositor background blur to a surface-local region on Wayland.
+    fn set_background_blur_region(&self, _region: Option<&[Bounds<Pixels>]>) {}
     fn window_decorations(&self) -> Decorations {
         Decorations::Server
     }

@@ -1,3 +1,4 @@
+mod background_effect;
 mod client;
 mod clipboard;
 pub(crate) mod color_picker;

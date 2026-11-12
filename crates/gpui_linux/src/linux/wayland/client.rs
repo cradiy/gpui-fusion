@@ -38,6 +38,9 @@ use wayland_client::{
         wl_shm_pool, wl_surface,
     },
 };
+use wayland_protocols::ext::background_effect::v1::client::{
+    ext_background_effect_manager_v1, ext_background_effect_surface_v1,
+};
 use wayland_protocols::wp::pointer_gestures::zv1::client::{
     zwp_pointer_gesture_pinch_v1, zwp_pointer_gestures_v1,
 };
@@ -77,6 +80,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_l
 use xkbcommon::xkb;
 
 use super::{
+    background_effect::{BackgroundEffectManager, BlurGlobals},
     display::WaylandDisplay,
     keyboard::{load_keymap, translate_key, update_modifiers},
     text_input::{InputContext, MAX_SURROUNDING_BYTES, Preedit, TextInputState},
@@ -145,7 +149,7 @@ pub struct Globals {
         Option<wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1>,
     pub decoration_manager: Option<zxdg_decoration_manager_v1::ZxdgDecorationManagerV1>,
     pub layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
-    pub blur_manager: Option<org_kde_kwin_blur_manager::OrgKdeKwinBlurManager>,
+    pub(super) blur: Rc<RefCell<BlurGlobals>>,
     pub text_input_manager: Option<zwp_text_input_manager_v3::ZwpTextInputManagerV3>,
     pub gesture_manager: Option<zwp_pointer_gestures_v1::ZwpPointerGesturesV1>,
     pub dialog: Option<xdg_wm_dialog_v1::XdgWmDialogV1>,
@@ -163,6 +167,21 @@ impl Globals {
         gpu_lost_sender: calloop::channel::Sender<()>,
     ) -> Self {
         let dialog_v = XdgWmDialogV1::interface().version;
+        let standard = globals.contents().with_list(|list| {
+            list.iter()
+                .find(|global| global.interface == ext_background_effect_manager_v1::ExtBackgroundEffectManagerV1::interface().name)
+                .map(|global| BackgroundEffectManager {
+                    name: global.name,
+                    proxy: globals.registry().bind(global.name, 1, &qh, ()),
+                    blur: false,
+                })
+        });
+        let blur = Rc::new(RefCell::new(BlurGlobals {
+            standard,
+            kde: globals
+                .bind::<org_kde_kwin_blur_manager::OrgKdeKwinBlurManager, _, _>(&qh, 1..=1, ())
+                .ok(),
+        }));
         Globals {
             gpu_lost_sender,
             activation: globals.bind(&qh, 1..=1, ()).ok(),
@@ -190,7 +209,7 @@ impl Globals {
             fractional_scale_manager: globals.bind(&qh, 1..=1, ()).ok(),
             decoration_manager: globals.bind(&qh, 1..=1, ()).ok(),
             layer_shell: globals.bind(&qh, 1..=5, ()).ok(),
-            blur_manager: globals.bind(&qh, 1..=1, ()).ok(),
+            blur,
             text_input_manager: globals.bind(&qh, 1..=1, ()).ok(),
             gesture_manager: globals.bind(&qh, 1..=3, ()).ok(),
             dialog: globals.bind(&qh, dialog_v..=dialog_v, ()).ok(),
@@ -2141,6 +2160,22 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for WaylandClientStat
                 interface,
                 version,
             } => match &interface[..] {
+                "ext_background_effect_manager_v1" => {
+                    let mut blur = state.globals.blur.borrow_mut();
+                    if blur.standard.is_none() {
+                        blur.standard = Some(BackgroundEffectManager {
+                            name,
+                            proxy: registry.bind(name, 1, qh, ()),
+                            blur: false,
+                        });
+                    }
+                    drop(blur);
+                    let windows = state.windows.values().cloned().collect::<Vec<_>>();
+                    drop(state);
+                    for window in windows {
+                        window.background_effects_changed();
+                    }
+                }
                 "wl_seat" => {
                     if state.seats.add(name, version) {
                         state.bind_selected_seat(registry, qh);
@@ -2167,6 +2202,27 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for WaylandClientStat
                 _ => {}
             },
             wl_registry::Event::GlobalRemove { name } => {
+                let removed = {
+                    let mut blur = state.globals.blur.borrow_mut();
+                    if blur
+                        .standard
+                        .as_ref()
+                        .is_some_and(|manager| manager.name == name)
+                    {
+                        blur.standard.take().unwrap().proxy.destroy();
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if removed {
+                    let windows = state.windows.values().cloned().collect::<Vec<_>>();
+                    drop(state);
+                    for window in windows {
+                        window.background_effects_changed();
+                    }
+                    return;
+                }
                 if state.seats.remove(name) {
                     let cleanup = state.release_seat();
                     state.bind_selected_seat(registry, qh);
@@ -2219,6 +2275,39 @@ delegate_noop!(WaylandClientStatePtr: ignore xdg_positioner::XdgPositioner);
 delegate_noop!(WaylandClientStatePtr: ignore org_kde_kwin_blur_manager::OrgKdeKwinBlurManager);
 delegate_noop!(WaylandClientStatePtr: ignore zwp_text_input_manager_v3::ZwpTextInputManagerV3);
 delegate_noop!(WaylandClientStatePtr: ignore org_kde_kwin_blur::OrgKdeKwinBlur);
+delegate_noop!(WaylandClientStatePtr: ignore ext_background_effect_surface_v1::ExtBackgroundEffectSurfaceV1);
+
+impl Dispatch<ext_background_effect_manager_v1::ExtBackgroundEffectManagerV1, ()>
+    for WaylandClientStatePtr
+{
+    fn event(
+        this: &mut Self,
+        proxy: &ext_background_effect_manager_v1::ExtBackgroundEffectManagerV1,
+        event: ext_background_effect_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let ext_background_effect_manager_v1::Event::Capabilities { flags } = event else {
+            return;
+        };
+        let client = this.get_client();
+        let state = client.borrow();
+        if !state
+            .globals
+            .blur
+            .borrow_mut()
+            .set_capabilities(proxy, flags)
+        {
+            return;
+        }
+        let windows = state.windows.values().cloned().collect::<Vec<_>>();
+        drop(state);
+        for window in windows {
+            window.background_effects_changed();
+        }
+    }
+}
 delegate_noop!(WaylandClientStatePtr: ignore wp_viewporter::WpViewporter);
 delegate_noop!(WaylandClientStatePtr: ignore wp_viewport::WpViewport);
 

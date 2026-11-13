@@ -1359,12 +1359,16 @@ impl WaylandWindowStatePtr {
             .map(|v| f32::from(v) as i32)
             .map_size(|v| if v <= 0 { 1 } else { v });
 
-            state.surface_state.set_geometry(
-                window_geometry.origin.x,
-                window_geometry.origin.y,
-                window_geometry.size.width,
-                window_geometry.size.height,
-            );
+            // Layer configure sizes are allocations, not new client requests. An
+            // older configure must not overwrite a resize already in flight.
+            if !matches!(state.surface_state, WaylandSurfaceState::LayerShell(_)) {
+                state.surface_state.set_geometry(
+                    window_geometry.origin.x,
+                    window_geometry.origin.y,
+                    window_geometry.size.width,
+                    window_geometry.size.height,
+                );
+            }
 
             let request_frame_callback = !state.acknowledged_first_configure;
             if request_frame_callback {

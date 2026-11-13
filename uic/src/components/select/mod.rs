@@ -525,7 +525,7 @@ fn panel(
                 Role::ListBoxOption
             })
             .when(multiple, |row| row.aria_toggled(flags.selected.into()))
-            .aria_label(option.label.clone())
+            .aria_label(option.label)
             .aria_selected(flags.selected)
             .aria_disabled(flags.disabled)
             .when(flags.highlighted, |row| row.aria_active_descendant())

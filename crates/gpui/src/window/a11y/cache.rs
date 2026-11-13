@@ -287,10 +287,13 @@ impl A11y {
     pub(crate) fn cache_reuse_allowed(&self) -> bool {
         // Automation also collects semantic click closures outside the AccessKit tree.
         #[cfg(feature = "automation")]
-        if self.automation_enabled {
-            return false;
+        {
+            !self.automation_enabled
         }
-        true
+        #[cfg(not(feature = "automation"))]
+        {
+            true
+        }
     }
 
     pub(crate) fn set_node_mapping(&mut self, id: NodeId, mapping: PointerMapping) {

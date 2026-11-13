@@ -241,7 +241,7 @@ impl RenderOnce for Autocomplete {
                             div()
                                 .id(option.id.clone())
                                 .role(Role::ListBoxOption)
-                                .aria_label(option.label.clone())
+                                .aria_label(option.label)
                                 .aria_disabled(flags.disabled)
                                 .aria_selected(flags.highlighted)
                                 .when(flags.highlighted, |row| row.aria_active_descendant())

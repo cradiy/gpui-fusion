@@ -16,3 +16,6 @@ uic = { path = "../../../../uic" }
 
 [target.'cfg(target_os = "android")'.dependencies]
 gpui_android.workspace = true
+
+[lints]
+workspace = true

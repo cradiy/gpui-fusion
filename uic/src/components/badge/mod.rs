@@ -189,7 +189,7 @@ impl RenderOnce for Badge {
                 let capture = state.read(cx).capture();
                 let dragging = state.read(cx).is_dragging();
                 let threshold = self.dismiss_threshold;
-                let interaction_state = state.clone();
+                let interaction_state = state;
                 indicator = indicator
                     .cursor(if dragging {
                         CursorStyle::ClosedHand

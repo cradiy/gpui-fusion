@@ -21,3 +21,6 @@ all = ["lucide-common", "lucide-media", "lucide-files", "lucide-editing", "lucid
 anyhow.workspace = true
 gpui.workspace = true
 gpui_icons_macros.workspace = true
+
+[lints]
+workspace = true

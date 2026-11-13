@@ -113,7 +113,7 @@ impl Render for RangeControlsExample {
                             .child(
                                 Progress::indeterminate("loading-progress")
                                     .label("Background task")
-                                    .appearance(progress_appearance.clone())
+                                    .appearance(progress_appearance)
                                     .h(px(5.))
                                     .bg(rgba(0xffffff12)),
                             ),

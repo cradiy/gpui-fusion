@@ -15,3 +15,6 @@ gpui_media_backend.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 gpui_android.workspace = true
+
+[lints]
+workspace = true

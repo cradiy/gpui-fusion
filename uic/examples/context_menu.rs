@@ -31,7 +31,7 @@ impl ContextMenuExample {
         let light_entity = entity.clone();
         let plain_entity = entity.clone();
         let rename_entity = entity.clone();
-        let archive_entity = entity.clone();
+        let archive_entity = entity;
 
         context_menu_style::menu(material)
             .action_with_shortcut("Open", "Enter", |_, _| {})
@@ -71,7 +71,7 @@ impl ContextMenuExample {
 impl Render for ContextMenuExample {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entity = cx.entity();
-        let menu_entity = entity.clone();
+        let menu_entity = entity;
         let context_menu_layer = context_menu::layer(cx);
 
         div()

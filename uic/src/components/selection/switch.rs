@@ -299,7 +299,7 @@ fn switch_track(
             let hover_off_background = hover_off_background.clone();
             layer.group_hover(group_name, move |style| {
                 style
-                    .bg(hover_off_background.clone())
+                    .bg(hover_off_background)
                     // This transparent border is a paint-time hover marker. The layer has no
                     // border width, so it does not alter the switch's geometry or appearance.
                     .border_color(transparent_black())

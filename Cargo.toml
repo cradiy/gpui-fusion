@@ -61,13 +61,10 @@ collections = { path = "crates/collections", version = "0.1.0" }
 derive_refineable = { path = "crates/refineable/derive_refineable" }
 gpui = { path = "crates/gpui", default-features = false }
 gpui_android = { path = "crates/gpui_android" }
-gpui_inspector = { path = "crates/gpui_inspector" }
 gpui_io = { path = "crates/gpui_io" }
 gpui_icons = { path = "crates/gpui_icons", default-features = false }
 gpui_icons_macros = { package = "gpui-icons-macros", path = "crates/gpui_icons/macros" }
 gpui_notifications = { path = "crates/gpui_notifications" }
-gpui_automation = { path = "crates/gpui_automation" }
-gpui_media = { path = "crates/gpui_media" }
 gpui_media_core = { path = "crates/gpui_media_core" }
 gpui_media_backend = { path = "crates/gpui_media_backend" }
 gpui_shared_string = { path = "crates/gpui_shared_string" }
@@ -77,16 +74,11 @@ gpui_macos = { path = "crates/gpui_macos", default-features = false }
 gpui_macros = { path = "crates/gpui_macros" }
 gpui_effects = { path = "crates/gpui_effects" }
 gpui_3d = { path = "crates/gpui_3d" }
-gpui_3d_effects = { path = "crates/gpui_3d_effects" }
-gpui_3d_gltf = { path = "crates/gpui_3d_gltf" }
 gpui_platform = { path = "crates/gpui_platform", default-features = false }
 gpui_web = { path = "crates/gpui_web", default-features = false }
-gpui_webview = { path = "crates/gpui_webview", default-features = false }
 gpui_wgpu = { path = "crates/gpui_wgpu" }
 gpui_render = { path = "crates/gpui_render" }
-gpui_richtext = { path = "crates/gpui_richtext" }
 gpui_windows = { path = "crates/gpui_windows", default-features = false }
-gpui_tokio = { path = "crates/gpui_tokio" }
 gpui_util = { path = "crates/gpui_util" }
 http_client = { path = "crates/http_client" }
 scheduler = { path = "crates/scheduler" }

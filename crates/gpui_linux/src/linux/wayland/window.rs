@@ -374,6 +374,8 @@ impl WaylandSurfaceState {
                 xdg_popup,
                 options: options.clone(),
                 next_reposition_token: Cell::new(0),
+                pending_size: Cell::new(None),
+                presented: Cell::new(false),
             }));
         }
 
@@ -498,6 +500,8 @@ pub struct WaylandPopupSurfaceState {
     // Kept so the popup can be re-anchored via `xdg_popup.reposition` when resized.
     options: PopupOptions,
     next_reposition_token: Cell<u32>,
+    pending_size: Cell<Option<Size<Pixels>>>,
+    presented: Cell<bool>,
 }
 
 fn xdg_toplevel_size(size: Size<Pixels>) -> Size<i32> {
@@ -1267,9 +1271,31 @@ impl WaylandWindowStatePtr {
     }
 
     pub fn frame_done(&self, callback: &ObjectId) {
-        if !self.state.borrow_mut().frame_callback.complete(callback) {
+        let mut state = self.state.borrow_mut();
+        if !state.frame_callback.complete(callback) {
             return;
         }
+        let pending_size = if state.buffer_committed {
+            if let WaylandSurfaceState::Popup(popup) = &state.surface_state {
+                popup.presented.set(true);
+                popup.pending_size.take()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(size) = pending_size.filter(|size| *size != state.bounds.size) {
+            let parent_geometry = state
+                .parent
+                .as_ref()
+                .map(|parent| parent.window_geometry())
+                .unwrap_or_default();
+            state
+                .surface_state
+                .reposition_popup(&state.globals, size, parent_geometry);
+        }
+        drop(state);
         self.frame();
     }
 
@@ -2151,9 +2177,16 @@ impl PlatformWindow for WaylandWindow {
         let state_ptr = self.0.clone();
 
         // A popup's placement is the compositor's, so a resize re-runs the positioner and the
-        // configure reply drives the buffer resize. Before the first configure the popup is
-        // unmapped and cannot reposition, but the initial positioner already carries the size.
+        // configure reply drives the buffer resize. Acknowledging the first configure does
+        // not map a popup. Wait for its first frame callback so explicit-sync acquire
+        // fences have completed and the compositor has applied the initial buffer.
         if matches!(state.surface_state, WaylandSurfaceState::Popup(_)) {
+            if let WaylandSurfaceState::Popup(popup) = &state.surface_state
+                && !popup.presented.get()
+            {
+                popup.pending_size.set(Some(size));
+                return;
+            }
             if state.acknowledged_first_configure {
                 let parent_geometry = state
                     .parent
@@ -2518,6 +2551,13 @@ impl PlatformWindow for WaylandWindow {
         if state.renderer_presented {
             state.buffer_committed = true;
             state.presented_destination = destination;
+            if let WaylandSurfaceState::Popup(popup) = &state.surface_state
+                && !popup.presented.get()
+                && popup.pending_size.get().is_some()
+                && state.request_frame_callback()
+            {
+                state.surface.commit();
+            }
             state.last_present_time = Instant::now();
             if !state.idle_release_pending {
                 state.idle_release_pending = true;

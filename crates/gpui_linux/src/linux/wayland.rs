@@ -10,6 +10,7 @@ mod keyboard;
 mod popup;
 mod seat;
 mod serial;
+mod session_lock;
 mod text_input;
 mod window;
 

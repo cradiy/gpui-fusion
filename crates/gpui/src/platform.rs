@@ -127,6 +127,15 @@ pub fn guess_compositor() -> &'static str {
 
 #[expect(missing_docs)]
 pub trait Platform: 'static {
+    /// Requests a standard Wayland session lock. Events run on the app thread.
+    /// Dropping the handle never unlocks the session.
+    fn request_session_lock(
+        &self,
+        _callback: Box<dyn FnMut(SessionLockEvent)>,
+    ) -> Result<Rc<dyn SessionLock>> {
+        anyhow::bail!("session locking is not supported by this platform")
+    }
+
     /// Observes initial media outputs and route changes on the app thread, never inline.
     /// Dropping the subscription unregisters native callbacks. Errors do not imply
     /// that the last successful snapshot has changed. Unsupported platforms return an error.
@@ -2667,6 +2676,25 @@ pub struct TitlebarOptions {
     pub traffic_light_position: Option<Point<Pixels>>,
 }
 
+/// Events from the compositor's session lock controller.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionLockEvent {
+    /// Output inventory changed. Reconcile lock windows against `App::displays()`.
+    OutputsChanged,
+    /// A protected frame has been presented on every output.
+    Locked,
+    /// The compositor rejected or retired the lock. Destroy its windows.
+    Finished,
+}
+
+/// An explicit session lock. Authentication is the client's responsibility.
+/// Closing windows or dropping this handle never unlocks the session.
+pub trait SessionLock: 'static {
+    /// Requests unlock after authentication. Fails before `Locked` or after retirement.
+    /// Success means the request was queued, not that the compositor processed it.
+    fn unlock(&self) -> Result<()>;
+}
+
 /// The kind of window to create
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WindowKind {
@@ -2692,6 +2720,12 @@ pub enum WindowKind {
     /// docks, notifications or wallpapers.
     #[cfg(all(target_os = "linux", feature = "wayland"))]
     LayerShell(layer_shell::LayerShellOptions),
+
+    /// A standard ext-session-lock-v1 surface for the current lock request.
+    /// Requires an explicit output, at most one surface per output. The compositor
+    /// determines its exact size. Unmapping is rejected; close the window instead.
+    #[cfg(all(target_os = "linux", feature = "wayland"))]
+    SessionLock,
 
     /// A window that appears on top of its parent window and blocks interaction with it
     /// until the modal window is closed

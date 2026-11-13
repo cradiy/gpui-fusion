@@ -1540,6 +1540,21 @@ impl App {
         self.platform.open_audio_output_settings()
     }
 
+    /// Requests a standard session lock. Dropping the returned handle never unlocks.
+    /// Create a `WindowKind::SessionLock` window for every output immediately.
+    /// Authenticate before calling the handle's explicit `unlock` method.
+    pub fn request_session_lock(
+        &self,
+        mut callback: impl FnMut(crate::SessionLockEvent, &mut App) + 'static,
+    ) -> Result<Rc<dyn crate::SessionLock>> {
+        let app = self.this.clone();
+        self.platform.request_session_lock(Box::new(move |event| {
+            if let Some(app) = app.upgrade() {
+                app.borrow_mut().update(|cx| callback(event, cx));
+            }
+        }))
+    }
+
     /// Queries the application's default network. Unsupported platforms return an error.
     /// Android requires the manifest permission `android.permission.ACCESS_NETWORK_STATE`.
     pub fn network_status(&self) -> Result<crate::NetworkStatus> {

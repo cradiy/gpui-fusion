@@ -149,6 +149,7 @@ pub struct Globals {
         Option<wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1>,
     pub decoration_manager: Option<zxdg_decoration_manager_v1::ZxdgDecorationManagerV1>,
     pub layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
+    pub(super) session_lock: super::session_lock::LockManager,
     pub(super) blur: Rc<RefCell<BlurGlobals>>,
     pub text_input_manager: Option<zwp_text_input_manager_v3::ZwpTextInputManagerV3>,
     pub gesture_manager: Option<zwp_pointer_gestures_v1::ZwpPointerGesturesV1>,
@@ -209,6 +210,7 @@ impl Globals {
             fractional_scale_manager: globals.bind(&qh, 1..=1, ()).ok(),
             decoration_manager: globals.bind(&qh, 1..=1, ()).ok(),
             layer_shell: globals.bind(&qh, 1..=5, ()).ok(),
+            session_lock: super::session_lock::LockManager::new(&globals, &qh),
             blur,
             text_input_manager: globals.bind(&qh, 1..=1, ()).ok(),
             gesture_manager: globals.bind(&qh, 1..=3, ()).ok(),
@@ -374,7 +376,7 @@ impl Output {
 
 pub(crate) struct WaylandClientState {
     serial_tracker: SerialTracker,
-    globals: Globals,
+    pub(super) globals: Globals,
     external_surface_role: Option<ExternalWaylandSurfaceRoleFactory>,
     pub gpu_context: GpuContext,
     gpu_idle_timeout: Option<Duration>,
@@ -781,11 +783,13 @@ impl WaylandClientStatePtr {
             return;
         }
         state.outputs.insert(id.clone(), output.clone());
+        let locks = state.globals.session_lock.clone();
         let windows = state.windows.values().cloned().collect::<Vec<_>>();
         drop(state);
         for window in windows {
             window.update_output(id, &output);
         }
+        locks.outputs_changed();
     }
 
     pub(super) fn output_for_display(&self, display_id: DisplayId) -> Option<wl_output::WlOutput> {
@@ -1728,6 +1732,17 @@ impl WaylandClient {
 }
 
 impl LinuxClient for WaylandClient {
+    fn request_session_lock(
+        &self,
+        callback: Box<dyn FnMut(gpui::SessionLockEvent)>,
+    ) -> anyhow::Result<Rc<dyn gpui::SessionLock>> {
+        let state = self.0.borrow();
+        state
+            .globals
+            .session_lock
+            .request(&state.globals.qh, callback)
+    }
+
     fn set_gpu_idle_timeout(&self, timeout: Option<Duration>) -> bool {
         let mut state = self.0.borrow_mut();
         state.gpu_idle_timeout = timeout;
@@ -1821,6 +1836,16 @@ impl LinuxClient for WaylandClient {
             _ => (state.keyboard_focused_window.clone(), None),
         };
 
+        if params.kind == WindowKind::SessionLock {
+            anyhow::ensure!(
+                state.external_surface_role.is_none(),
+                "session locking cannot use an external role factory"
+            );
+            anyhow::ensure!(
+                params.display_id.is_some(),
+                "session lock windows require an explicit output"
+            );
+        }
         let target_output = params
             .display_id
             .and_then(|display_id| state.output_for_display(display_id));
@@ -2236,6 +2261,7 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for WaylandClientStat
                 };
                 state.in_progress_outputs.remove(&id);
                 state.outputs.remove(&id);
+                let locks = state.globals.session_lock.clone();
                 if let Some(output) = state.xdg_outputs.remove(&id) {
                     output.destroy();
                 }
@@ -2250,6 +2276,7 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for WaylandClientStat
                 for window in windows {
                     window.remove_output(&id);
                 }
+                locks.outputs_changed();
             }
             _ => {}
         }

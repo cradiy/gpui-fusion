@@ -250,6 +250,7 @@ pub struct WaylandWindowState {
     hovered: bool,
     pub(crate) force_render_after_recovery: bool,
     renderer_presented: bool,
+    buffer_committed: bool,
     last_present_time: Instant,
     idle_release_pending: bool,
     idle_release_task: Option<gpui::Task<()>>,
@@ -267,6 +268,7 @@ pub enum WaylandSurfaceState {
     LayerShell(WaylandLayerSurfaceState),
     Popup(WaylandPopupSurfaceState),
     External(WaylandExternalSurfaceState),
+    SessionLock(super::session_lock::LockSurface),
 }
 
 pub struct WaylandExternalSurfaceState {
@@ -283,6 +285,17 @@ impl WaylandSurfaceState {
         target_output: Option<wl_output::WlOutput>,
         external_role: Option<&ExternalWaylandSurfaceRoleFactory>,
     ) -> anyhow::Result<Self> {
+        if params.kind == WindowKind::SessionLock {
+            return Ok(Self::SessionLock(
+                globals.session_lock.surface(
+                    surface,
+                    target_output
+                        .as_ref()
+                        .context("session lock output is unavailable")?,
+                    &globals.qh,
+                )?,
+            ));
+        }
         if let Some(role) = external_role {
             return Ok(WaylandSurfaceState::External(WaylandExternalSurfaceState {
                 role: Some(role.assign(surface)?),
@@ -554,6 +567,7 @@ impl WaylandSurfaceState {
             WaylandSurfaceState::Popup(WaylandPopupSurfaceState { xdg_surface, .. }) => {
                 xdg_surface.ack_configure(serial);
             }
+            WaylandSurfaceState::SessionLock(lock) => lock.proxy.ack_configure(serial),
             WaylandSurfaceState::External(_) => {}
         }
     }
@@ -583,7 +597,7 @@ impl WaylandSurfaceState {
                 Some(xdg_surface)
             }
             WaylandSurfaceState::LayerShell(_) => None,
-            WaylandSurfaceState::External(_) => None,
+            WaylandSurfaceState::External(_) | WaylandSurfaceState::SessionLock(_) => None,
         }
     }
 
@@ -620,6 +634,7 @@ impl WaylandSurfaceState {
             WaylandSurfaceState::Popup(WaylandPopupSurfaceState { xdg_surface, .. }) => {
                 xdg_surface.set_window_geometry(x, y, width, height);
             }
+            WaylandSurfaceState::SessionLock(_) => {}
             WaylandSurfaceState::External(_) => {}
         }
     }
@@ -679,6 +694,7 @@ impl WaylandSurfaceState {
                 xdg_popup.destroy();
                 xdg_surface.destroy();
             }
+            WaylandSurfaceState::SessionLock(lock) => lock.destroy(),
             WaylandSurfaceState::External(external) => {
                 external.role.take();
             }
@@ -693,6 +709,18 @@ pub struct WaylandWindowStatePtr {
 }
 
 impl WaylandWindowState {
+    fn can_commit_state(&self) -> bool {
+        // After a lock configure, the previous buffer cannot be committed at
+        // the newly acknowledged size. Only WSI may commit the replacement.
+        !matches!(self.surface_state, WaylandSurfaceState::SessionLock(_))
+            || (self.buffer_committed
+                && self.presented_destination
+                    == self
+                        .bounds
+                        .size
+                        .map(|value| (f32::from(value) as i32).max(1)))
+    }
+
     fn watch_device(renderer: &WgpuRenderer, globals: &Globals) {
         let sender = globals.gpu_lost_sender.clone();
         renderer.set_device_lost_waker(move || {
@@ -799,6 +827,7 @@ impl WaylandWindowState {
             hovered: false,
             force_render_after_recovery: false,
             renderer_presented: false,
+            buffer_committed: false,
             last_present_time: Instant::now(),
             idle_release_pending: false,
             idle_release_task: None,
@@ -997,8 +1026,14 @@ impl WaylandWindow {
             this.borrow_mut().request_frame_callback();
         }
 
-        // Kick things off
-        surface.commit();
+        // Lock surfaces receive configure without an initial commit; a commit
+        // with no buffer is a protocol error, even before their first configure.
+        if !matches!(
+            this.borrow().surface_state,
+            WaylandSurfaceState::SessionLock(_)
+        ) {
+            surface.commit();
+        }
         if externally_configured {
             this.0.state.borrow_mut().acknowledged_first_configure = true;
         }
@@ -1376,7 +1411,9 @@ impl WaylandWindowStatePtr {
                 drop(state);
                 self.frame();
             } else if state.mapped && state.resize_throttle && state.request_frame_callback() {
-                state.surface.commit();
+                if state.can_commit_state() {
+                    state.surface.commit();
+                }
             }
         }
     }
@@ -1526,6 +1563,21 @@ impl WaylandWindowStatePtr {
                 false
             }
             _ => false,
+        }
+    }
+
+    pub(super) fn handle_lock_configure(&self, serial: u32, width: u32, height: u32) {
+        let configured = self.state.borrow().acknowledged_first_configure;
+        self.state.borrow_mut().in_progress_configure = Some(InProgressConfigure {
+            size: Some(size(px(width as f32), px(height as f32))),
+            fullscreen: true,
+            maximized: false,
+            resizing: false,
+            tiling: Tiling::default(),
+        });
+        self.handle_xdg_surface_event(xdg_surface::Event::Configure { serial });
+        if configured {
+            self.frame();
         }
     }
 
@@ -1747,7 +1799,9 @@ impl WaylandWindowStatePtr {
     pub fn background_effects_changed(&self) {
         let mut state = self.state.borrow_mut();
         if state.update_background_blur() && state.mapped {
-            state.surface.commit();
+            if state.can_commit_state() {
+                state.surface.commit();
+            }
         }
     }
 
@@ -1970,6 +2024,10 @@ impl PlatformWindow for WaylandWindow {
 
     fn set_mapped(&self, mapped: bool) -> anyhow::Result<()> {
         let mut state = self.borrow_mut();
+        anyhow::ensure!(
+            mapped || !matches!(state.surface_state, WaylandSurfaceState::SessionLock(_)),
+            "session lock windows cannot be unmapped; close the window instead"
+        );
         if state.mapped == mapped {
             return Ok(());
         }
@@ -2010,7 +2068,9 @@ impl PlatformWindow for WaylandWindow {
             if let WaylandSurfaceState::LayerShell(layer) = &state.surface_state {
                 layer.apply_options();
             }
-            state.surface.commit();
+            if state.can_commit_state() {
+                state.surface.commit();
+            }
             if external {
                 // External roles have no configure event to restart rendering.
                 // An unmapped surface also need not receive frame callbacks.
@@ -2033,7 +2093,9 @@ impl PlatformWindow for WaylandWindow {
             // not complete callbacks for a hidden surface.
             state.renderer.unconfigure_surface();
             state.surface.attach(None, 0, 0);
-            state.surface.commit();
+            if state.can_commit_state() {
+                state.surface.commit();
+            }
             // A callback requested before unmap may arrive after remapping.
             // Ignore it instead of starting a second animation callback chain.
             state.frame_callback.clear();
@@ -2083,6 +2145,9 @@ impl PlatformWindow for WaylandWindow {
 
     fn resize(&mut self, size: Size<Pixels>) {
         let mut state = self.borrow_mut();
+        if matches!(state.surface_state, WaylandSurfaceState::SessionLock(_)) {
+            return;
+        }
         let state_ptr = self.0.clone();
 
         // A popup's placement is the compositor's, so a resize re-runs the positioner and the
@@ -2354,7 +2419,9 @@ impl PlatformWindow for WaylandWindow {
                         && state.acknowledged_first_configure
                         && state.request_frame_callback()
                     {
-                        state.surface.commit();
+                        if state.can_commit_state() {
+                            state.surface.commit();
+                        }
                     }
                 })
                 .detach();
@@ -2449,6 +2516,7 @@ impl PlatformWindow for WaylandWindow {
         state.update_background_blur_for_size(size);
         state.renderer_presented = state.renderer.draw(scene);
         if state.renderer_presented {
+            state.buffer_committed = true;
             state.presented_destination = destination;
             state.last_present_time = Instant::now();
             if !state.idle_release_pending {
@@ -2506,7 +2574,9 @@ impl PlatformWindow for WaylandWindow {
         }
 
         if state.force_render_after_recovery && state.request_frame_callback() {
-            state.surface.commit();
+            if state.can_commit_state() {
+                state.surface.commit();
+            }
         }
 
         state.renderer_presented = false;
@@ -2573,7 +2643,9 @@ impl PlatformWindow for WaylandWindow {
             layer
                 .layer_surface
                 .set_exclusive_zone(f32::from(zone) as i32);
-            state.surface.commit();
+            if state.can_commit_state() {
+                state.surface.commit();
+            }
         }
     }
 
@@ -2591,14 +2663,18 @@ impl PlatformWindow for WaylandWindow {
                     layer.layer_surface.version(),
                 ),
             );
-            state.surface.commit();
+            if state.can_commit_state() {
+                state.surface.commit();
+            }
         }
     }
 
     fn set_background_blur_region(&self, region: Option<&[Bounds<Pixels>]>) {
         let mut state = self.borrow_mut();
         if state.blur.set_region(region) && state.update_background_blur() && state.mapped {
-            state.surface.commit();
+            if state.can_commit_state() {
+                state.surface.commit();
+            }
         }
     }
 
@@ -2634,7 +2710,9 @@ impl PlatformWindow for WaylandWindow {
         // While unmapped, leave it pending for the remap commit: layer-shell
         // must have its role properties restored before another commit.
         if state.mapped {
-            state.surface.commit();
+            if state.can_commit_state() {
+                state.surface.commit();
+            }
         }
     }
 
@@ -2788,7 +2866,9 @@ fn update_window(mut state: RefMut<WaylandWindowState>) {
     }
 
     if state.update_background_blur() && state.mapped {
-        state.surface.commit();
+        if state.can_commit_state() {
+            state.surface.commit();
+        }
     }
 
     region.destroy();

@@ -48,6 +48,13 @@ const FILE_PICKER_PORTAL_MISSING: &str =
     "Couldn't open file picker due to missing xdg-desktop-portal implementation.";
 
 pub(crate) trait LinuxClient {
+    fn request_session_lock(
+        &self,
+        _callback: Box<dyn FnMut(gpui::SessionLockEvent)>,
+    ) -> Result<Rc<dyn gpui::SessionLock>> {
+        anyhow::bail!("session locking is not supported by this backend")
+    }
+
     fn set_gpu_idle_timeout(&self, _timeout: Option<std::time::Duration>) -> bool {
         false
     }
@@ -303,6 +310,13 @@ pub(crate) fn release_unused_memory() {
 }
 
 impl<P: LinuxClient + 'static> Platform for LinuxPlatform<P> {
+    fn request_session_lock(
+        &self,
+        callback: Box<dyn FnMut(gpui::SessionLockEvent)>,
+    ) -> Result<Rc<dyn gpui::SessionLock>> {
+        self.inner.request_session_lock(callback)
+    }
+
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     fn memory_reclaimer(&self) -> Option<fn()> {
         Some(release_unused_memory)

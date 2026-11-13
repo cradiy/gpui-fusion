@@ -1538,6 +1538,14 @@ impl Window {
         self.platform_window.set_keyboard_interactivity(mode);
     }
 
+    /// Update the logical space reserved by a layer-shell window.
+    ///
+    /// Zero removes the reservation; negative one ignores other reservations.
+    /// Has no effect on windows without a layer-shell role.
+    pub fn set_layer_shell_exclusive_zone(&self, zone: Pixels) {
+        self.platform_window.set_layer_shell_exclusive_zone(zone);
+    }
+
     /// Return the `WindowBounds` to indicate that how a window should be opened
     /// after it has been closed
     pub fn window_bounds(&self) -> WindowBounds {

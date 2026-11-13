@@ -2555,6 +2555,24 @@ impl PlatformWindow for WaylandWindow {
         }
     }
 
+    fn set_layer_shell_exclusive_zone(&self, zone: Pixels) {
+        let mut state = self.borrow_mut();
+        let mapped = state.mapped;
+        let WaylandSurfaceState::LayerShell(layer) = &mut state.surface_state else {
+            return;
+        };
+        if layer.options.exclusive_zone == Some(zone) {
+            return;
+        }
+        layer.options.exclusive_zone = Some(zone);
+        if mapped {
+            layer
+                .layer_surface
+                .set_exclusive_zone(f32::from(zone) as i32);
+            state.surface.commit();
+        }
+    }
+
     fn set_keyboard_interactivity(&self, mode: gpui::layer_shell::KeyboardInteractivity) {
         let mut state = self.borrow_mut();
         let mapped = state.mapped;

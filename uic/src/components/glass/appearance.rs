@@ -1,13 +1,13 @@
 use gpui::{Hsla, hsla, px, rgb};
-use gpui_effects::{LiquidGlassAppearance, LiquidGlassLensAppearance};
+use gpui_effects::LiquidGlassStyle;
 
 /// Optical surfaces and semantic colors for a glass segmented control.
 /// Layout, typography, outer corners, background, and shadow use `Styled`.
 #[derive(Clone, Copy, Debug)]
 pub struct GlassSegmentedAppearance {
-    pub surface: LiquidGlassAppearance,
-    pub selection: LiquidGlassLensAppearance,
-    /// Color of monochrome content covered by the animated selection lens.
+    pub surface: LiquidGlassStyle,
+    pub selection: LiquidGlassStyle,
+    /// Color of monochrome content covered by the animated selection surface.
     /// Alpha multiplies the content's original alpha; uncovered pixels keep their color.
     pub selected_text: Hsla,
     pub disabled_opacity: f32,
@@ -15,25 +15,30 @@ pub struct GlassSegmentedAppearance {
 
 impl GlassSegmentedAppearance {
     pub fn light() -> Self {
+        let mut surface = LiquidGlassStyle::optical()
+            .blur_radius(px(1.))
+            .refraction(px(24.))
+            .thickness(px(12.))
+            .dispersion(0.04)
+            .tint(hsla(0., 0., 1., 0.015));
+        surface.shape.roundness = 2.;
+        surface.shadow.spread = px(6.);
+        surface.shadow.strength = 0.05;
+        surface.shadow.offset = gpui::point(px(0.), px(2.));
+        surface.optics.fresnel_strength = 0.18;
+        surface.optics.glare_strength = 0.65;
+        let mut selection = LiquidGlassStyle::optical()
+            .blur_radius(px(0.))
+            .refraction(px(8.))
+            .thickness(px(16.))
+            .dispersion(0.02);
+        selection.shape.roundness = 2.;
+        selection.shadow.strength = 0.;
+        selection.optics.fresnel_strength = 0.12;
+        selection.optics.glare_strength = 0.35;
         Self {
-            surface: LiquidGlassAppearance::regular()
-                .blur_radius(px(3.))
-                .clarity(0.8)
-                .refraction(px(1.5))
-                .thickness(px(10.))
-                .highlight(0.2)
-                .tint(hsla(0., 0., 1., 0.12)),
-            selection: LiquidGlassLensAppearance::default()
-                .blur_radius(px(2.))
-                .clarity(1.)
-                .refraction(px(7.))
-                .thickness(px(12.))
-                .edge_width(px(6.))
-                .fresnel(0.8)
-                .highlight(0.32)
-                .rim_width(px(1.2))
-                .dispersion(0.025)
-                .tint(hsla(0., 0., 0., 0.08)),
+            surface,
+            selection,
             selected_text: rgb(0x007aff).into(),
             disabled_opacity: 0.45,
         }
@@ -41,28 +46,11 @@ impl GlassSegmentedAppearance {
 
     /// Pair with a light foreground color through `Styled::text_color`.
     pub fn dark() -> Self {
-        Self {
-            surface: LiquidGlassAppearance::regular()
-                .blur_radius(px(3.))
-                .clarity(0.8)
-                .refraction(px(1.5))
-                .thickness(px(10.))
-                .highlight(0.18)
-                .tint(hsla(0., 0., 1., 0.08)),
-            selection: LiquidGlassLensAppearance::default()
-                .blur_radius(px(2.))
-                .clarity(1.)
-                .refraction(px(7.))
-                .thickness(px(12.))
-                .edge_width(px(6.))
-                .fresnel(0.8)
-                .highlight(0.32)
-                .rim_width(px(1.2))
-                .dispersion(0.025)
-                .tint(hsla(0., 0., 0., 0.08)),
-            selected_text: rgb(0x64b5ff).into(),
-            ..Self::light()
-        }
+        let mut material = Self::light();
+        material.surface.tint = hsla(0.61, 0.12, 0.10, 0.04);
+        material.selection.tint = hsla(0., 0., 1., 0.025);
+        material.selected_text = rgb(0x64b5ff).into();
+        material
     }
 }
 

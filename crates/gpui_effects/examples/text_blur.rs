@@ -2,14 +2,14 @@ use gpui::{
     App, Bounds, Context, FontWeight, Render, Window, WindowBounds, WindowOptions, div, prelude::*,
     px, rgb, rgba, size,
 };
-use gpui_effects::{FrostedGlass, FrostedGlassAppearance, TextBlur};
+use gpui_effects::{LiquidGlass, LiquidGlassStyle, TextBlur};
 use gpui_platform::application;
 
 struct TextBlurExample;
 
 impl Render for TextBlurExample {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let mut glass = FrostedGlassAppearance::dark();
+        let mut glass = LiquidGlassStyle::dark();
         glass.tint = rgba(0x11182a80).into();
 
         div()
@@ -20,7 +20,7 @@ impl Render for TextBlurExample {
             .bg(rgb(0x090d18))
             .text_color(rgb(0xe7edf8))
             .child(
-                FrostedGlass::with_appearance(glass)
+                LiquidGlass::with_style(glass)
                     .opacity(0.78)
                     .w(px(760.))
                     .rounded(px(28.))

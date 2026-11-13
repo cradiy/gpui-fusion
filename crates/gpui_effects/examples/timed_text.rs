@@ -4,9 +4,7 @@ use gpui::{
     Animation, AnimationExt, App, Background, Bounds, Context, FontWeight, Render, Window,
     WindowBounds, WindowOptions, div, prelude::*, px, rgb, rgba, size,
 };
-use gpui_effects::{
-    FrostedGlass, FrostedGlassAppearance, TimedText, TimedTextRevealWave, TimedTextUnit,
-};
+use gpui_effects::{LiquidGlass, LiquidGlassStyle, TimedText, TimedTextRevealWave, TimedTextUnit};
 use gpui_platform::application;
 
 type Piece = (&'static str, u64, u64, usize);
@@ -113,7 +111,7 @@ struct TimedTextExample;
 impl Render for TimedTextExample {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let fill: Background = rgb(0x67c7e9).into();
-        let mut glass = FrostedGlassAppearance::dark();
+        let mut glass = LiquidGlassStyle::dark();
         glass.tint = rgba(0x11182a80).into();
 
         div()
@@ -124,7 +122,7 @@ impl Render for TimedTextExample {
             .justify_center()
             .bg(rgb(0x090d18))
             .child(
-                FrostedGlass::with_appearance(glass)
+                LiquidGlass::with_style(glass)
                     .opacity(0.76)
                     .w(px(900.))
                     .rounded(px(28.))

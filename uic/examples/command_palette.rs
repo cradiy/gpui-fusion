@@ -1,5 +1,5 @@
 use gpui::{prelude::*, *};
-use gpui_effects::{FrostedGlass, FrostedGlassAppearance, LiquidGlass, LiquidGlassAppearance};
+use gpui_effects::{LiquidGlass, LiquidGlassStyle};
 use gpui_icons::{GpuiIcons, IconAssets};
 use uic::components::{
     command_palette::{
@@ -86,19 +86,18 @@ impl Example {
         };
         match self.material {
             1 => palette.surface(|content, _, _| {
-                FrostedGlass::with_appearance(
-                    FrostedGlassAppearance::light()
+                LiquidGlass::with_style(
+                    LiquidGlassStyle::frosted()
                         .tint(rgba(0xf7faffb0).into())
                         .blur_radius(px(14.)),
                 )
                 .child(content)
             }),
             2 => palette.surface(|content, _, _| {
-                LiquidGlass::with_appearance(
-                    LiquidGlassAppearance::regular()
+                LiquidGlass::with_style(
+                    LiquidGlassStyle::frosted()
                         .tint(rgba(0xf7faffa8).into())
-                        .blur_radius(px(16.))
-                        .clarity(0.08),
+                        .blur_radius(px(16.)),
                 )
                 .child(content)
             }),

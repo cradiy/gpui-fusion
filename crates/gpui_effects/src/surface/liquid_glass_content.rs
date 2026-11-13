@@ -2,7 +2,7 @@ use gpui::{
     App, Bounds, Corners, EffectShader, EffectUniforms, Hsla, IntoElement, Pixels, Rgba, Window, px,
 };
 
-use crate::{LiquidGlassDeformation, MaskedEffect, masked_effect};
+use crate::{LiquidGlassDeformation, LiquidGlassShape, MaskedEffect, masked_effect};
 
 /// A glass silhouette in logical window coordinates, shared with content effects.
 #[derive(Clone, Copy, Debug)]
@@ -13,6 +13,8 @@ pub struct LiquidGlassRegion {
     pub corner_radii: Corners<Pixels>,
     /// The same deformation supplied to `paint_deformed_liquid_glass`.
     pub deformation: LiquidGlassDeformation,
+    /// Shape controls matching the background material.
+    pub shape: LiquidGlassShape,
 }
 
 impl LiquidGlassRegion {
@@ -22,6 +24,7 @@ impl LiquidGlassRegion {
             bounds,
             corner_radii,
             deformation: LiquidGlassDeformation::default(),
+            shape: LiquidGlassShape::default(),
         }
     }
 
@@ -63,7 +66,16 @@ impl LiquidGlassRegion {
                 ],
             )
             .with_slot(3, [color.r, color.g, color.b, color.a])
-            .with_slot(5, [deformation.ellipticity, 0., 0., 0.])
+            .with_slot(
+                5,
+                [
+                    deformation.ellipticity,
+                    self.shape.roundness.clamp(2., 7.),
+                    0.,
+                    0.,
+                ],
+            )
+            .with_slot(6, self.shape.merge_uniform(scale))
     }
 }
 

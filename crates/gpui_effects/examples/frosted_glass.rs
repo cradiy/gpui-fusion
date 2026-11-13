@@ -3,7 +3,7 @@ use gpui::{
     MouseUpEvent, Pixels, Point, Render, Window, WindowBounds, WindowOptions, div,
     linear_color_stop, multi_linear_gradient, point, prelude::*, px, rgb, rgba, size,
 };
-use gpui_effects::{FrostedGlass, FrostedGlassAppearance, FrostedGlassShape};
+use gpui_effects::{LiquidGlass, LiquidGlassMerge, LiquidGlassStyle};
 use gpui_platform::application;
 
 const FIELD_LEFT: f32 = 70.0;
@@ -54,11 +54,11 @@ impl FrostedGlassDemo {
         cx.notify();
     }
 
-    fn appearance(&self) -> FrostedGlassAppearance {
+    fn appearance(&self) -> LiquidGlassStyle {
         if self.light {
-            FrostedGlassAppearance::light()
+            LiquidGlassStyle::frosted()
         } else {
-            FrostedGlassAppearance::dark()
+            LiquidGlassStyle::dark()
         }
     }
 
@@ -185,26 +185,30 @@ impl FrostedGlassDemo {
     }
 
     fn glass(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let bar = FrostedGlassShape::new(
-            point(px(BAR_X), px(BAR_Y)),
-            size(px(BAR_WIDTH), px(CONTROL_SIZE)),
-            px(CONTROL_SIZE * 0.5),
-        );
-        let control = FrostedGlassShape::new(
-            self.control_center,
-            size(px(CONTROL_SIZE), px(CONTROL_SIZE)),
-            px(CONTROL_SIZE * 0.5),
-        );
+        let mut material = self.appearance();
+        material.shape.merge = Some(LiquidGlassMerge {
+            offset: self.control_center - point(px(BAR_X), px(BAR_Y)),
+            radius: px(CONTROL_SIZE * 0.5),
+            smoothness: px(44.),
+        });
         let control_left = self.control_center.x - px(CONTROL_SIZE * 0.5);
         let control_top = self.control_center.y - px(CONTROL_SIZE * 0.5);
 
-        FrostedGlass::with_appearance(self.appearance())
-            .merge(bar, control)
+        div()
             .absolute()
             .left(px(FIELD_LEFT))
             .top(px(FIELD_TOP))
             .w(px(FIELD_WIDTH))
             .h(px(FIELD_HEIGHT))
+            .child(
+                LiquidGlass::with_style(material)
+                    .absolute()
+                    .left(px(BAR_X - BAR_WIDTH * 0.5))
+                    .top(px(BAR_Y - CONTROL_SIZE * 0.5))
+                    .w(px(BAR_WIDTH))
+                    .h(px(CONTROL_SIZE))
+                    .rounded(px(CONTROL_SIZE * 0.5)),
+            )
             .child(
                 div()
                     .absolute()
@@ -247,7 +251,7 @@ impl FrostedGlassDemo {
     }
 
     fn layout_panel(&self) -> impl IntoElement {
-        FrostedGlass::with_appearance(self.appearance())
+        LiquidGlass::with_style(self.appearance())
             .absolute()
             .right(px(44.0))
             .top(px(150.0))

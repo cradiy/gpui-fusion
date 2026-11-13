@@ -5,11 +5,9 @@ mod backdrop;
 mod builtins;
 mod color_flow;
 mod fluted_glass;
-mod glass;
 mod grain;
 mod liquid_glass;
 mod liquid_glass_content;
-mod liquid_glass_lens;
 mod material;
 mod point_gradient;
 
@@ -24,18 +22,14 @@ pub use color_flow::{
     color_flow_shader,
 };
 pub use fluted_glass::{FlutedGlassOptions, fluted_glass, fluted_glass_shader};
-pub use glass::{FrostedGlass, FrostedGlassAppearance, FrostedGlassShape};
 pub use grain::{GrainOptions, grain_shader, surface_grain};
 pub use liquid_glass::{
-    LiquidGlass, LiquidGlassAppearance, LiquidGlassDeformation, liquid_glass_compressed_shader,
-    liquid_glass_full_surface_shader, liquid_glass_shader, paint_deformed_liquid_glass,
-    paint_liquid_glass,
+    LiquidGlass, LiquidGlassDeformation, LiquidGlassMerge, LiquidGlassOptics, LiquidGlassShadow,
+    LiquidGlassShape, LiquidGlassStyle, liquid_glass_shader, liquid_glass_shadow_shader,
+    paint_deformed_liquid_glass, paint_liquid_glass,
 };
 pub use liquid_glass_content::{
     LiquidGlassRegion, liquid_glass_content, liquid_glass_content_shader,
-};
-pub use liquid_glass_lens::{
-    LiquidGlassLensAppearance, liquid_glass_lens_shader, paint_liquid_glass_lens,
 };
 pub use material::{
     HolographicOptions, MaterialLight, MaterialSurface, holographic, holographic_image_shader,

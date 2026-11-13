@@ -1,5 +1,5 @@
 use gpui::{IntoElement, div, prelude::*, px, rgb, rgba, transparent_black};
-use gpui_effects::{FrostedGlass, FrostedGlassAppearance};
+use gpui_effects::{LiquidGlass, LiquidGlassStyle};
 use uic::components::context_menu::{ContextMenu, ContextMenuAppearance};
 
 #[derive(Clone, Copy)]
@@ -42,22 +42,18 @@ pub fn menu(material: MenuMaterial) -> ContextMenu {
         .text_color(rgb(0xf8fafc))
         .font_family(gpui::GenericFontFamily::SystemUi)
         .root_surface(move |state, content, _, _| match material {
-            MenuMaterial::DarkFrosted => {
-                FrostedGlass::with_appearance(FrostedGlassAppearance::dark())
-                    .id(("context-menu-dark-frosted", state.session_id))
-                    .rounded(px(16.))
-                    .shadow_lg()
-                    .child(content)
-                    .into_any_element()
-            }
-            MenuMaterial::LightFrosted => {
-                FrostedGlass::with_appearance(FrostedGlassAppearance::light())
-                    .id(("context-menu-light-frosted", state.session_id))
-                    .rounded(px(14.))
-                    .shadow_lg()
-                    .child(content)
-                    .into_any_element()
-            }
+            MenuMaterial::DarkFrosted => LiquidGlass::with_style(LiquidGlassStyle::dark())
+                .id(("context-menu-dark-frosted", state.session_id))
+                .rounded(px(16.))
+                .shadow_lg()
+                .child(content)
+                .into_any_element(),
+            MenuMaterial::LightFrosted => LiquidGlass::with_style(LiquidGlassStyle::frosted())
+                .id(("context-menu-light-frosted", state.session_id))
+                .rounded(px(14.))
+                .shadow_lg()
+                .child(content)
+                .into_any_element(),
             MenuMaterial::Plain => div()
                 .rounded(px(12.))
                 .border_1()
@@ -68,7 +64,7 @@ pub fn menu(material: MenuMaterial) -> ContextMenu {
                 .into_any_element(),
         })
         .submenu_surface(|state, content, _, _| {
-            FrostedGlass::with_appearance(FrostedGlassAppearance::dark())
+            LiquidGlass::with_style(LiquidGlassStyle::dark())
                 .id((
                     "context-submenu-frosted",
                     state.session_id * 10 + state.depth as u64,

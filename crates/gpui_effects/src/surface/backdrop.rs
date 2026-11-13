@@ -11,11 +11,6 @@ pub fn backdrop_effect(shader: BackdropShader) -> BackdropEffect {
     BackdropEffect::new(shader)
 }
 
-/// Returns the shader used by [`crate::FrostedGlass`].
-pub fn frosted_glass_shader() -> BackdropShader {
-    BackdropShader::wgsl(include_str!("shaders/frosted_glass.wgsl"))
-}
-
 /// A styled leaf element that samples both raw and blurred scene content.
 ///
 /// The renderer prepares the backdrop inputs; the shader handles only material
@@ -164,15 +159,5 @@ impl Element for BackdropEffect {
 impl Styled for BackdropEffect {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn frosted_shader_identity_is_stable() {
-        assert_eq!(frosted_glass_shader().id(), frosted_glass_shader().id());
     }
 }

@@ -39,3 +39,40 @@ fn glass_contour(p: vec2<f32>, size: vec2<f32>, radii: vec4<f32>, deformation: v
     return base
         - deformation.z * (0.1 + local * 0.9) - deformation.w * wave;
 }
+
+// Portions copyright (c) 2024 Charles Yin. MIT license: LICENSE-liquid-glass-studio.
+fn glass_superellipse_distance(p: vec2<f32>, size: vec2<f32>, radii: vec4<f32>, exponent: f32) -> f32 {
+    var radius = select(radii.w, radii.x, p.y < 0.0);
+    if (p.x >= 0.0) {
+        radius = select(radii.z, radii.y, p.y < 0.0);
+    }
+    radius = clamp(radius, 0.0, min(size.x, size.y) * 0.5);
+    let q = abs(p) - size * 0.5 + radius;
+    let corner = max(q, vec2<f32>(0.0));
+    // Normalize before raising to a power to keep large device sizes finite.
+    let extent = max(max(corner.x, corner.y), 0.0001);
+    let v = corner / extent;
+    let n = clamp(exponent, 2.0, 7.0);
+    return extent * pow(pow(v.x, n) + pow(v.y, n), 1.0 / n)
+        + min(max(q.x, q.y), 0.0) - radius;
+}
+
+fn glass_material_contour(p: vec2<f32>, size: vec2<f32>, radii: vec4<f32>,
+    deformation: vec4<f32>, ellipticity: f32, roundness: f32, merged_circle: vec4<f32>) -> f32 {
+    var distance = glass_contour(p, size, radii, deformation, ellipticity);
+    if (roundness > 2.0) {
+        distance += (glass_superellipse_distance(p, size, radii, roundness)
+            - glass_distance(p, size, radii)) * (1.0 - clamp(ellipticity, 0.0, 1.0));
+    }
+    if (merged_circle.z > 0.0) {
+        let circle = length(p - merged_circle.xy) - merged_circle.z;
+        let k = merged_circle.w;
+        if (k > 0.0) {
+            let h = clamp(0.5 + 0.5 * (circle - distance) / k, 0.0, 1.0);
+            distance = mix(circle, distance, h) - k * h * (1.0 - h);
+        } else {
+            distance = min(distance, circle);
+        }
+    }
+    return distance;
+}

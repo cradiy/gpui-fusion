@@ -1699,7 +1699,7 @@ impl MetalRenderer {
                 let filter: *mut objc2::runtime::AnyObject = msg_send![
                     filter,
                     initWithDevice: &*self.device,
-                    sigma: backdrop.blur_radius.0.max(0.01)
+                    sigma: (backdrop.blur_radius.0 * if backdrop.shader.as_ref().is_some_and(|shader| shader.uses_gaussian_blur()) { 1.0 / 3.0 } else { 1.0 }).max(0.01)
                 ];
                 let _: () = msg_send![
                     filter,
@@ -2613,7 +2613,10 @@ fn translate_effect_to_msl(shader: &EffectShader) -> Result<String> {
 
 fn translate_backdrop_to_msl(shader: &BackdropShader) -> Result<String> {
     gpui_render::native::to_msl(
-        &gpui::compose_backdrop_shader_wgsl(shader),
+        &gpui::compose_backdrop_shader_wgsl(shader).replace(
+            "const BACKDROP_NATIVE_SRGB: bool = false;",
+            "const BACKDROP_NATIVE_SRGB: bool = true;",
+        ),
         gpui_render::native::ShaderKind::Backdrop,
     )
 }

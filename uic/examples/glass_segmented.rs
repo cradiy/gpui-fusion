@@ -201,26 +201,15 @@ impl Render for Demo {
                             .max_w(px(720.))
                             .h(px(396.))
                             .when(self.samples, |stage| {
-                                stage
-                                    .child(
-                                        div()
-                                            .absolute()
-                                            .left(px(272.))
-                                            .top(px(248.))
-                                            .w(px(112.))
-                                            .h(px(92.))
-                                            .rounded(px(12.))
-                                            .bg(rgb(if self.dark { 0x648bb5 } else { 0x729ac2 })),
-                                    )
-                                    .child(
-                                        div()
-                                            .absolute()
-                                            .right_0()
-                                            .top(px(48.))
-                                            .size(px(124.))
-                                            .rounded_full()
-                                            .bg(rgb(if self.dark { 0x8f939b } else { 0xb7bbc3 })),
-                                    )
+                                stage.children((0..8).map(|index| {
+                                    div()
+                                        .absolute()
+                                        .left_0()
+                                        .right_0()
+                                        .top(px(20. + index as f32 * 48.))
+                                        .h(px(16.))
+                                        .bg(rgb(if self.dark { 0x42566b } else { 0x729ac2 }))
+                                }))
                             })
                             .child(
                                 div()

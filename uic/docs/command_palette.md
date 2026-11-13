@@ -161,7 +161,7 @@ that content exactly once in the returned container.
 
 ```rust
 use gpui::{prelude::*, px};
-use gpui_effects::{FrostedGlass, FrostedGlassAppearance};
+use gpui_effects::{LiquidGlass, LiquidGlassStyle};
 
 CommandPalette::new(&self.commands)
     .w(px(600.))
@@ -170,7 +170,7 @@ CommandPalette::new(&self.commands)
     .border_0()
     .shadow_lg()
     .surface(|content, _, _| {
-        FrostedGlass::with_appearance(FrostedGlassAppearance::light())
+        LiquidGlass::with_style(LiquidGlassStyle::frosted())
             .child(content)
     });
 ```
@@ -184,7 +184,7 @@ layout, and dialog viewport limits also apply to it.
 Custom surfaces do not receive the plain palette's white background. An explicit
 `.bg(...)` still applies to the surface, so omit opaque fills when using backdrop
 materials. For liquid glass, return
-`LiquidGlass::with_appearance(LiquidGlassAppearance::regular()).child(content)`.
+`LiquidGlass::with_style(LiquidGlassStyle::frosted()).child(content)`.
 The material paints before the content, keeping text and controls sharp. Backdrop
 effects sample previously painted content; place visual content behind the palette
 to make the effect visible.

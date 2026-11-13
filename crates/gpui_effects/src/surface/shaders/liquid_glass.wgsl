@@ -1,137 +1,86 @@
-fn glass_footprint(offset: vec2<f32>) -> f32 {
-    let dx = vec2<f32>(1.0, 0.0) + dpdx(offset);
-    let dy = vec2<f32>(0.0, 1.0) + dpdy(offset);
-    return max(length(dx), length(dy));
+fn glass_optical_sample(input: BackdropInput, offset: vec2<f32>, clarity: f32) -> vec3<f32> {
+    return mix(backdrop_to_srgb(sample_blurred_backdrop(input, offset).rgb),
+        backdrop_to_srgb(sample_raw_backdrop(input, offset).rgb), clarity);
 }
 
-fn glass_sample(input: BackdropInput, offset: vec2<f32>, clarity: f32, footprint: f32) -> vec3<f32> {
-    return mix(
-        sample_blurred_backdrop(input, offset).rgb,
-        sample_raw_backdrop(input, offset).rgb,
-        clarity / max(footprint, 1.0),
-    );
+// Portions copyright (c) 2024 Charles Yin. MIT license: LICENSE-liquid-glass-studio.
+fn glass_reflection_band(inside: f32, range: f32, hardness: f32, scale: f32) -> f32 {
+    if (range <= 0.0) { return 0.0; }
+    let base = max(1.0 - inside * scale / 1500.0 * pow(500.0 / range, 2.0) + hardness, 0.0);
+    return clamp(pow(base, 5.0), 0.0, 1.0);
 }
 
-fn glass_border_reflection(sampled: vec3<f32>, lift: f32) -> vec3<f32> {
-    let rgb = clamp(sampled, vec3<f32>(0.0), vec3<f32>(1.0));
-    let peak = max(max(rgb.r, rgb.g), rgb.b);
-    if (peak <= 0.0) {
-        return rgb;
-    }
-    // Scale all channels together. Even maximum lift retains the sampled RGB
-    // ratios instead of replacing a colored sample with white light.
-    return rgb * (mix(peak, 1.0, lift) / peak);
-}
-
-fn liquid_glass_material(input: BackdropInput, params: BackdropParams, full_refraction: bool, compress_highlights: bool) -> vec4<f32> {
+fn liquid_glass_material(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
     let optics = params.slots[0];
     let tint = params.slots[1];
     let surface = params.slots[2];
     let light = params.slots[3];
     let radii = params.slots[4];
     let edge_tint = params.slots[5];
+    let fresnel_settings = params.slots[8];
+    let glare = params.slots[9];
+    let lighting = params.slots[10];
     let deformed = params.slots[6].z > 0.0;
-    // Optical coordinates retain subpixel motion even when the capture rectangle
-    // snaps to device pixels. Slot 3.w / 6.w carry the unsnapped lens center.
     let p = select((input.uv - vec2<f32>(0.5)) * input.size,
         input.position - vec2<f32>(light.w, params.slots[6].w), deformed);
     let shape_size = select(input.size, params.slots[6].xy, deformed);
     let deformation = select(vec4<f32>(0.0), params.slots[7], deformed);
-    let distance = glass_contour(p, shape_size, radii, deformation, max(params.slots[6].z - 1.0, 0.0));
+    let ellipticity = max(params.slots[6].z - 1.0, 0.0);
+    let roundness = max(params.slots[11].x, 2.0);
+    let merged_circle = params.slots[12];
+    let distance = glass_material_contour(p, shape_size, radii, deformation, ellipticity, roundness, merged_circle);
+    if (distance >= 0.5) { return vec4<f32>(0.0); }
     let inside = max(-distance, 0.0);
-
-    // The distance gradient follows straight edges and each individual corner.
     let gradient = vec2<f32>(
-        glass_contour(p + vec2<f32>(0.5, 0.0), shape_size, radii, deformation, max(params.slots[6].z - 1.0, 0.0))
-            - glass_contour(p - vec2<f32>(0.5, 0.0), shape_size, radii, deformation, max(params.slots[6].z - 1.0, 0.0)),
-        glass_contour(p + vec2<f32>(0.0, 0.5), shape_size, radii, deformation, max(params.slots[6].z - 1.0, 0.0))
-            - glass_contour(p - vec2<f32>(0.0, 0.5), shape_size, radii, deformation, max(params.slots[6].z - 1.0, 0.0)),
-    );
+        glass_material_contour(p + vec2<f32>(1.0, 0.0), shape_size, radii, deformation, ellipticity, roundness, merged_circle)
+            - glass_material_contour(p - vec2<f32>(1.0, 0.0), shape_size, radii, deformation, ellipticity, roundness, merged_circle),
+        glass_material_contour(p + vec2<f32>(0.0, 1.0), shape_size, radii, deformation, ellipticity, roundness, merged_circle)
+            - glass_material_contour(p - vec2<f32>(0.0, 1.0), shape_size, radii, deformation, ellipticity, roundness, merged_circle),
+    ) * 0.5;
     let normal = gradient / max(length(gradient), 0.0001);
-    let thickness = min(optics.w, min(shape_size.x, shape_size.y) * 0.45);
-    var curvature = 0.0;
-    if (thickness > 0.0) {
-        curvature = 1.0 - smoothstep(0.0, thickness, inside);
+    let thickness = max(optics.w, 0.0001);
+    let edge_height = clamp(inside / thickness, 0.0, 1.0);
+    let incident = asin(clamp(pow(1.0 - edge_height, 2.0), 0.0, 1.0));
+    let transmitted = asin(clamp(sin(incident) / max(fresnel_settings.x, 1.0), 0.0, 1.0));
+    var edge_factor = max(tan(incident - transmitted), 0.0);
+    if (fresnel_settings.x <= 1.0 || optics.w <= 0.0 || inside >= optics.w) { edge_factor = 0.0; }
+    var displacement = -gradient * edge_factor * optics.z;
+    // Independent sharp/blurred inputs retain chromatic separation at the rim.
+    let blur_mix = select(edge_height, 1.0, lighting.z > 0.0);
+    let clarity = select(0.0, 1.0 - blur_mix, edge_factor > 0.0);
+    var color = glass_optical_sample(input, displacement, clarity);
+    if (surface.z > 0.0 && edge_factor > 0.0) {
+        color.r = glass_optical_sample(input, displacement * (1.0 + surface.z), clarity).r;
+        color.b = glass_optical_sample(input, displacement * (1.0 - surface.z), clarity).b;
     }
-    // Converge toward the lens center as well as following the silhouette.
-    // The tangential component bends lines crossing straight edges, while the
-    // contour normal keeps the displacement continuous around rounded corners.
-    let radial = p / max(shape_size * 0.5, vec2<f32>(1.0));
-    let lens_gradient = normal + radial * 0.75;
-    let lens_direction = lens_gradient / max(length(lens_gradient), 0.0001);
-    // Refraction strength is independent of the band width. Strong settings can
-    // compress and fold the sampled image inside the lens edge. Bound the reach
-    // by the surface size, including dispersion, rather than flattening the lens.
-    let refraction = min(optics.z, min(shape_size.x, shape_size.y) * 0.45 / (1.0 + surface.z));
-    var displacement = -lens_direction * refraction * curvature;
-    if (full_refraction) {
-        // A continuous converging field magnifies scene detail throughout the
-        // interior and joins the curved edge without a flat central region.
-        let body_displacement = -radial * refraction * 0.6;
-        displacement = mix(body_displacement, -lens_direction * refraction, curvature);
-    }
-    // Preserve detail in the lens edge while retaining the configured center blur.
-    let clarity = mix(surface.w, 1.0, curvature * 0.9);
-    let red_displacement = displacement * (1.0 + surface.z);
-    let blue_displacement = displacement * (1.0 - surface.z);
-    // Derivatives run uniformly, with each dispersed channel's own sampling footprint.
-    let footprint = glass_footprint(displacement);
-    let red_footprint = glass_footprint(red_displacement);
-    let blue_footprint = glass_footprint(blue_displacement);
-    var color = glass_sample(input, displacement, clarity, footprint);
-    if (surface.z > 0.0) {
-        color.r = glass_sample(input, red_displacement, clarity, red_footprint).r;
-        color.b = glass_sample(input, blue_displacement, clarity, blue_footprint).b;
+    let background = color;
+    color = mix(color, tint.rgb, clamp(tint.a * 0.8, 0.0, 1.0));
+
+    if (edge_factor > 0.0) {
+        let scale = max(lighting.w, 1.0);
+        // The reference normal is differentiated in physical viewport coordinates.
+        let normal_length = length(gradient) * 1414.213562 / max(globals.viewport_size.y, 1.0);
+        let fresnel = glass_reflection_band(inside, fresnel_settings.y, fresnel_settings.z, scale);
+        var fresnel_lch = SRGB_TO_LCH(mix(vec3<f32>(1.0), tint.rgb, tint.a * 0.5));
+        fresnel_lch.x = clamp(fresnel_lch.x + 20.0 * fresnel * fresnel_settings.w, 0.0, 100.0);
+        color = mix(color, LCH_TO_SRGB(fresnel_lch), fresnel * fresnel_settings.w * 0.7 * normal_length);
+
+        let glare_geo = glass_reflection_band(inside, glare.x, glare.y, scale);
+        // Convert GPUI's downward Y axis to the material's upward Y axis.
+        var angle = atan2(-normal.y, normal.x);
+        if (angle < 0.0) { angle += 6.28318530718; }
+        let glare_angle = (angle - 0.785398163397 + lighting.y) * 2.0;
+        let far_side = (glare_angle > 4.71238898038 && glare_angle < 10.9955742876)
+            || glare_angle < -1.57079632679;
+        let side = 1.2 * select(1.0, lighting.x, far_side);
+        let angular = clamp(pow(max((0.5 + sin(glare_angle) * 0.5) * side * glare.z, 0.0),
+            0.1 + glare.w * 2.0), 0.0, 1.0);
+        var glare_lch = SRGB_TO_LCH(mix(background, tint.rgb, tint.a * 0.5));
+        glare_lch.x = clamp(glare_lch.x + 150.0 * angular * glare_geo, 0.0, 120.0);
+        glare_lch.y += 30.0 * angular * glare_geo;
+        color = mix(color, LCH_TO_SRGB(glare_lch), angular * glare_geo * normal_length);
     }
 
-    let luminance = dot(color, vec3<f32>(0.2126, 0.7152, 0.0722));
-    color = mix(vec3<f32>(luminance), color, optics.x) * optics.y;
-    if (compress_highlights) {
-        let peak = max(max(color.r, color.g), color.b);
-        color /= 1.0 + 2.0 * peak;
-    }
-    color = mix(color, tint.rgb, clamp(tint.a, 0.0, 1.0));
-
-    var direction = vec2<f32>(-0.6, -0.8);
-    if (length(light.xy) > 0.0001) {
-        direction = normalize(light.xy);
-    }
-    let facing = dot(normal, direction);
-    let reflection = pow(max(facing, 0.0), 3.0);
-    let opposite = pow(max(-facing, 0.0), 2.0);
-    var tinted_stroke = 0.0;
-    if (edge_tint.x > 0.0 && edge_tint.y > 0.0) {
-        let width = min(edge_tint.y, min(shape_size.x, shape_size.y) * 0.5);
-        tinted_stroke = 1.0 - smoothstep(width - 0.5, width + 0.5, inside);
-    }
-    var rim = 0.0;
-    if (light.z > 0.0) {
-        rim = 1.0 - smoothstep(light.z, light.z + 1.0, inside);
-    }
-    // Reflection follows the fine rim, not a broad raised bevel.
-    let highlight = surface.x * rim * (0.12 + reflection * 0.88)
-        * (1.0 - edge_tint.x * tinted_stroke);
-    color *= 1.0 - surface.y * opposite * curvature;
-    color = mix(color, vec3<f32>(1.0), highlight);
-
-    if (edge_tint.x > 0.0 && edge_tint.y > 0.0) {
-        // Gather RGB together from the surrounding scene, not from separated
-        // color channels. Sample relative to the silhouette, independently of blur.
-        let outward = normal * (inside + edge_tint.z);
-        let tangent = vec2<f32>(-normal.y, normal.x) * edge_tint.z * 0.5;
-        var gathered = (
-            sample_raw_backdrop(input, outward).rgb * 2.0
-            + sample_raw_backdrop(input, outward + tangent).rgb
-            + sample_raw_backdrop(input, outward - tangent).rgb
-        ) * 0.25;
-        let gathered_luminance = dot(gathered, vec3<f32>(0.2126, 0.7152, 0.0722));
-        gathered = mix(vec3<f32>(gathered_luminance), gathered, optics.x) * optics.y;
-        // Direction affects only brightness. Border opacity does not fade back
-        // toward the white rim on the side opposite the light.
-        let illumination = 1.0 - surface.x * (1.0 - reflection);
-        let reflection_color = glass_border_reflection(gathered, edge_tint.w * illumination);
-        color = mix(color, reflection_color, edge_tint.x * tinted_stroke);
-    }
-    let coverage = select(1.0, 1.0 - smoothstep(-0.5, 0.5, distance), deformed);
-    return vec4<f32>(clamp(color, vec3<f32>(0.0), vec3<f32>(1.0)), coverage);
+    let coverage = 1.0 - smoothstep(-0.5, 0.5, distance);
+    return vec4<f32>(backdrop_from_srgb(clamp(color, vec3<f32>(0.0), vec3<f32>(1.0))), coverage);
 }

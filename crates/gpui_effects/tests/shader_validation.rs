@@ -1,6 +1,6 @@
 #[test]
 fn frosted_glass_backdrop_shader_is_valid_wgsl() {
-    let shader = gpui_effects::frosted_glass_shader();
+    let shader = gpui_effects::liquid_glass_shader();
     let source = gpui::compose_backdrop_shader_wgsl(&shader);
     let module = wgpu::naga::front::wgsl::parse_str(&source)
         .unwrap_or_else(|error| panic!("frosted glass backdrop shader should parse: {error}"));

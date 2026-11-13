@@ -9,7 +9,7 @@ use std::{
 };
 
 /// Number of four-component floating-point uniform slots available to an effect.
-pub const EFFECT_UNIFORM_SLOTS: usize = 8;
+pub const EFFECT_UNIFORM_SLOTS: usize = 16;
 
 /// Stable identity for one feedback surface in a window.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]

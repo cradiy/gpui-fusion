@@ -1,62 +1,39 @@
 # Frosted glass
 
-[`FrostedGlass`](crate::FrostedGlass) is a layout-neutral container that blurs
-content already painted behind it. Its children are painted afterward, so
-labels and icons stay sharp.
+`LiquidGlass` renders clear and frosted surfaces with one optical model.
+`LiquidGlassStyle::frosted()` diffuses background detail, while `dark()`
+adds a dark neutral tint. Both preserve Snell refraction, chromatic dispersion,
+Fresnel reflection, directional glare, and contour shadows.
 
-For a normal panel, size and round it with the standard GPUI style API:
+The backdrop uses separable horizontal and vertical Gaussian blur. The radius
+is the three-sigma support: `sigma = blur_radius / 3`. WGPU evaluates this kernel
+at full resolution to preserve small-radius detail; Metal uses its native
+Gaussian filter with the same sigma. Intermediate textures are allocated on
+demand and are larger than half-resolution blur targets.
 
 ```rust,ignore
-use gpui::{hsla, px, rgb};
-use gpui_effects::{FrostedGlass, FrostedGlassAppearance};
+use gpui::{prelude::*, px, rgb};
+use gpui_effects::{LiquidGlass, LiquidGlassStyle};
 
-FrostedGlass::with_appearance(
-    FrostedGlassAppearance::dark()
-        .blur_radius(px(12.0))
-        .tint(hsla(0.61, 0.30, 0.12, 0.38)),
-)
+LiquidGlass::with_style(LiquidGlassStyle::frosted())
     .w(px(420.0))
     .p_4()
     .rounded(px(24.0))
-    .text_color(rgb(0xf8fafc))
+    .text_color(rgb(0x172430))
     .child("Sharp foreground content")
 ```
 
-The default single-panel shape follows the element bounds. To join two local
-rounded shapes, define them in the coordinate space of a containing field:
+Children retain normal GPUI layout and remain sharp. Layout, typography,
+foreground color, borders, and opacity use `Styled`.
 
-```rust,ignore
-use gpui::{point, px, size};
-use gpui_effects::{FrostedGlass, FrostedGlassShape};
+For a merging circle, set `material.shape.merge` to `Some(LiquidGlassMerge)`.
+Its `offset` is relative to the pane's center; `radius` controls the circle,
+and `smoothness` controls the joining distance. Updating the offset produces
+continuous joining and separation. The pane and circle share a single optical
+pass rather than compositing translucent surfaces over each other. Place
+interactive foreground elements over the two regions to control their motion.
 
-let toolbar = FrostedGlassShape::new(
-    point(px(220.0), px(80.0)),
-    size(px(320.0), px(88.0)),
-    px(44.0),
-);
-let button = FrostedGlassShape::new(
-    point(px(430.0), px(80.0)),
-    size(px(88.0), px(88.0)),
-    px(44.0),
-);
-
-FrostedGlass::new()
-    .merge(toolbar, button)
-    .relative()
-    .w(px(640.0))
-    .h(px(180.0))
-```
-
-Use `FrostedGlassAppearance::dark()` or `::light()` as a starting point, or
-construct the public appearance struct directly. `blur_radius` controls the
-renderer’s separable Gaussian blur; `sheen` controls the subtle glass surface;
-`merge_distance` controls how close two shapes must be before their masks join.
-
-`FrostedGlassAppearance` contains only glass-material parameters. Use the
-normal `Styled` methods for shared element styling, including `text_color`,
-`opacity`, `border`, `shadow`, sizing, spacing, flex layout, and typography.
-
-Run the interactive example from the workspace root:
+Run the interactive example:
 
 ```sh
 cargo run -p gpui_effects --example frosted_glass

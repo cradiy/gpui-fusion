@@ -2822,7 +2822,7 @@ mod tests {
 
     #[::core::prelude::v1::test]
     fn frosted_glass_backdrop_translates_and_compiles_for_directx() {
-        let shader = gpui_effects::frosted_glass_shader();
+        let shader = gpui_effects::liquid_glass_shader();
         let source = translate_backdrop_to_hlsl(&shader)
             .unwrap_or_else(|error| panic!("frosted glass should translate to HLSL: {error}"));
         compile_hlsl(&source, "vs_backdrop", "vs_5_0")

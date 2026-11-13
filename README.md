@@ -54,7 +54,7 @@ visual components:
 - Built-in Aurora, Plasma, Color Orbs, Album Glow, and Album Ripples effects.
 - Shader effects and gradient fills masked by arbitrary elements, including
   ready-to-use text and SVG helpers.
-- `FrostedGlass` panels with strong backdrop blur, light/dark appearances,
+- `LiquidGlass` frosted panels with strong backdrop blur, light/dark appearances,
   normal `div()` layout behavior, and mergeable rounded surfaces.
 - A page-flip component with rigid, soft, and curl styles, single- or
   double-page layouts, lazy content providers, and preloading.

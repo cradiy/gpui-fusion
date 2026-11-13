@@ -10,7 +10,7 @@ struct Bounds {
 }
 
 struct BackdropParams {
-    slots: array<vec4<f32>, 8>,
+    slots: array<vec4<f32>, 16>,
 }
 
 struct BackdropInstance {
@@ -69,7 +69,8 @@ fn fs_blur(input: BackdropVarying) -> @location(0) vec4<f32> {
     }
     // Sample the whole Gaussian support in source texels. Pair adjacent taps
     // through bilinear filtering; scaling a sparse kernel repeats fine detail.
-    let sigma = max(radius * 0.4375, 0.001);
+    let sigma_ratio = select(0.4375, instance.uniforms.slots[0].x, instance.uniforms.slots[0].x > 0.0);
+    let sigma = max(radius * sigma_ratio, 0.001);
     let limit = i32(ceil(radius));
     var color = vec4<f32>(0.0);
     var total_weight = 0.0;

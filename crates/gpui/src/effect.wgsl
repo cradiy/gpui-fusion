@@ -24,7 +24,7 @@ struct TransformationMatrix {
 }
 
 struct EffectParams {
-    slots: array<vec4<f32>, 8>,
+    slots: array<vec4<f32>, 16>,
 }
 
 struct EffectInput {

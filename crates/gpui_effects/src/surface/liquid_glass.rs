@@ -4,14 +4,11 @@ use gpui::{
     Rgba, StatefulInteractiveElement, StyleRefinement, Styled, Window, div, hsla, point, px,
 };
 
-use super::liquid_glass_lens::{LiquidGlassLensAppearance, paint_liquid_glass_lens};
-
 const OPTICS_SLOT: usize = 0;
 const TINT_SLOT: usize = 1;
 const SURFACE_SLOT: usize = 2;
 const LIGHT_SLOT: usize = 3;
 const CORNERS_SLOT: usize = 4;
-const EDGE_TINT_SLOT: usize = 5;
 const SHAPE_SLOT: usize = 6;
 const DEFORMATION_SLOT: usize = 7;
 
@@ -40,101 +37,177 @@ impl LiquidGlassDeformation {
     }
 }
 
-/// Optical parameters for [`LiquidGlass`]. Layout and foreground styling use [`Styled`].
+/// Snell refraction and perceptual reflection controls.
 #[derive(Clone, Copy, Debug, PartialEq, uic_macros::Chainable)]
-pub struct LiquidGlassAppearance {
-    /// Blur radius of the background, in logical pixels.
-    pub blur_radius: Pixels,
-    /// Sharp background contribution at the center in `0..=1`; edges retain more detail.
-    pub clarity: f32,
-    /// Maximum inward background displacement, in logical pixels.
-    pub refraction: Pixels,
-    /// Refract the interior as well as the curved edge. Disabled by default.
-    pub full_refraction: bool,
-    /// Compress sampled highlights while preserving scene detail and RGB ratios.
-    pub compress_highlights: bool,
-    /// Width of the curved edge region, in logical pixels.
-    pub thickness: Pixels,
-    /// Relative RGB separation at refracted edges in `0..=0.1`; zero disables it.
-    pub dispersion: f32,
-    /// Background color wash; alpha controls its contribution.
-    pub tint: Hsla,
-    /// Nonnegative saturation multiplier for the sampled background.
-    pub saturation: f32,
-    /// Nonnegative brightness multiplier for the sampled background.
-    pub brightness: f32,
-    /// Directional reflection strength in `0..=1`.
-    pub highlight: f32,
-    /// Inner shading opposite the light, in `0..=1`; not an exterior drop shadow.
-    pub edge_shadow: f32,
-    /// Width of the fine reflective rim, in logical pixels.
-    pub rim_width: Pixels,
-    /// Contribution of nearby background colors to the outline, `0..=1`; disabled by default.
-    pub edge_tint_strength: f32,
-    /// Width of the background-colored outline, in logical pixels; does not affect layout.
-    pub edge_tint_width: Pixels,
-    /// Distance beyond the silhouette used to gather edge colors, in logical pixels.
-    pub edge_sample_distance: Pixels,
-    /// Brightness lift of the sampled border, `0..=1`, preserving its RGB ratios.
-    pub edge_tint_lift: f32,
-    /// Direction toward the light; negative x/y points toward the top-left.
-    pub light_direction: Point<f32>,
+pub struct LiquidGlassOptics {
+    /// Index of refraction, in `1..=4`.
+    pub refractive_index: f32,
+    /// Fresnel band range, in logical pixels.
+    pub fresnel_range: Pixels,
+    pub fresnel_hardness: f32,
+    pub fresnel_strength: f32,
+    /// Directional glare band range, in logical pixels.
+    pub glare_range: Pixels,
+    pub glare_hardness: f32,
+    pub glare_strength: f32,
+    pub glare_convergence: f32,
+    pub glare_opposite: f32,
+    /// Glare orientation in radians, in a Y-up coordinate system.
+    pub glare_angle: f32,
+    /// Apply background blur to the refracted rim as well as the center.
+    pub blur_edge: bool,
 }
 
-impl LiquidGlassAppearance {
-    /// A softened, lightly tinted surface that balances detail and readability.
-    pub fn regular() -> Self {
+impl Default for LiquidGlassOptics {
+    fn default() -> Self {
         Self {
-            blur_radius: px(8.0),
-            clarity: 0.22,
-            refraction: px(18.0),
-            full_refraction: false,
-            compress_highlights: false,
-            thickness: px(16.0),
-            dispersion: 0.015,
-            tint: hsla(0.0, 0.0, 1.0, 0.12),
-            saturation: 1.04,
-            brightness: 1.0,
-            highlight: 0.34,
-            edge_shadow: 0.04,
-            rim_width: px(0.8),
-            edge_tint_strength: 0.0,
-            edge_tint_width: px(1.0),
-            edge_sample_distance: px(8.0),
-            edge_tint_lift: 0.35,
-            light_direction: point(-0.6, -0.8),
+            refractive_index: 1.4,
+            fresnel_range: px(30.),
+            fresnel_hardness: 0.2,
+            fresnel_strength: 0.2,
+            glare_range: px(30.),
+            glare_hardness: 0.2,
+            glare_strength: 0.9,
+            glare_convergence: 0.5,
+            glare_opposite: 0.8,
+            glare_angle: -std::f32::consts::FRAC_PI_4,
+            blur_edge: true,
+        }
+    }
+}
+
+/// A circle joined to the glass pane by a smooth union.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LiquidGlassMerge {
+    /// Circle center relative to the pane center, in logical pixels.
+    pub offset: Point<Pixels>,
+    pub radius: Pixels,
+    /// Smooth-union distance in logical pixels; zero gives a hard union.
+    pub smoothness: Pixels,
+}
+
+/// Shape controls shared by the glass material and foreground mask.
+#[derive(Clone, Copy, Debug, PartialEq, uic_macros::Chainable)]
+pub struct LiquidGlassShape {
+    /// Superellipse exponent in `2..=7`; 2 produces circular corners.
+    pub roundness: f32,
+    pub merge: Option<LiquidGlassMerge>,
+}
+
+impl Default for LiquidGlassShape {
+    fn default() -> Self {
+        Self {
+            roundness: 2.,
+            merge: None,
+        }
+    }
+}
+
+impl LiquidGlassShape {
+    pub(super) fn merge_uniform(self, scale: f32) -> [f32; 4] {
+        self.merge.map_or([0.; 4], |merge| {
+            [
+                merge.offset.x.as_f32() * scale,
+                merge.offset.y.as_f32() * scale,
+                merge.radius.as_f32().max(0.) * scale,
+                merge.smoothness.as_f32().max(0.) * scale,
+            ]
+        })
+    }
+}
+
+/// Exponential contour shadow, applied to the backdrop before refraction and blur.
+#[derive(Clone, Copy, Debug, PartialEq, uic_macros::Chainable)]
+pub struct LiquidGlassShadow {
+    pub spread: Pixels,
+    pub strength: f32,
+    /// Shadow translation in logical pixels; positive Y points down.
+    pub offset: Point<Pixels>,
+}
+
+impl Default for LiquidGlassShadow {
+    fn default() -> Self {
+        Self {
+            spread: px(25.),
+            strength: 0.,
+            offset: point(px(0.), px(10.)),
+        }
+    }
+}
+
+/// Optical parameters for [`LiquidGlass`]. Layout and foreground styling use [`Styled`].
+#[derive(Clone, Copy, Debug, PartialEq, uic_macros::Chainable)]
+pub struct LiquidGlassStyle {
+    pub optics: LiquidGlassOptics,
+    pub shape: LiquidGlassShape,
+    pub shadow: LiquidGlassShadow,
+    /// Blur radius of the background, in logical pixels.
+    pub blur_radius: Pixels,
+    /// Snell refraction distance multiplier, in logical pixels.
+    pub refraction: Pixels,
+    /// Width of the curved edge region, in logical pixels.
+    pub thickness: Pixels,
+    /// Relative RGB separation at refracted edges in `0..=1`; zero disables it.
+    pub dispersion: f32,
+    /// Background color wash; contributes at 80% of its alpha.
+    pub tint: Hsla,
+}
+
+impl LiquidGlassStyle {
+    /// Untinted optical material with superellipse corners and a contour shadow.
+    pub fn optical() -> Self {
+        Self {
+            optics: LiquidGlassOptics::default(),
+            shape: LiquidGlassShape {
+                roundness: 5.,
+                merge: None,
+            },
+            shadow: LiquidGlassShadow {
+                strength: 0.15,
+                ..Default::default()
+            },
+            blur_radius: px(1.),
+            refraction: px(std::f32::consts::SQRT_2 * 1000. * 0.05),
+            thickness: px(20.),
+            dispersion: 0.14,
+            tint: hsla(0., 0., 1., 0.),
         }
     }
 
-    /// More transparent glass for compact controls over a legible background.
+    /// Softened optical glass that diffuses background detail.
+    pub fn frosted() -> Self {
+        Self {
+            blur_radius: px(18.),
+            tint: hsla(0., 0., 1., 0.06),
+            ..Self::optical()
+        }
+    }
+
+    /// Clear optical glass with no background diffusion.
     pub fn clear() -> Self {
         Self {
-            blur_radius: px(3.0),
-            clarity: 0.78,
-            tint: hsla(0.0, 0.0, 1.0, 0.045),
-            thickness: px(12.0),
-            refraction: px(10.0),
-            ..Self::regular()
+            blur_radius: px(0.),
+            ..Self::optical()
         }
     }
 
-    /// A dark neutral wash for light foreground content.
+    /// Diffuse optical glass with a dark neutral tint.
     pub fn dark() -> Self {
         Self {
-            tint: hsla(0.61, 0.12, 0.10, 0.28),
-            brightness: 0.96,
-            ..Self::regular()
+            tint: hsla(0.61, 0.12, 0.10, 0.18),
+            ..Self::frosted()
         }
     }
 
-    pub(super) fn uniforms(self, corners: Corners<Pixels>, scale: f32) -> EffectUniforms {
+    /// Packs material parameters in device pixels for backdrop rendering.
+    pub fn uniforms(self, corners: Corners<Pixels>, scale: f32) -> EffectUniforms {
         let tint: Rgba = self.tint.into();
         EffectUniforms::new()
             .with_slot(
                 OPTICS_SLOT,
                 [
-                    self.saturation.max(0.0),
-                    self.brightness.max(0.0),
+                    1.0,
+                    1.0,
                     self.refraction.as_f32().max(0.0) * scale,
                     self.thickness.as_f32().max(0.0) * scale,
                 ],
@@ -142,21 +215,7 @@ impl LiquidGlassAppearance {
             .with_slot(TINT_SLOT, [tint.r, tint.g, tint.b, tint.a])
             .with_slot(
                 SURFACE_SLOT,
-                [
-                    self.highlight.clamp(0.0, 1.0),
-                    self.edge_shadow.clamp(0.0, 1.0),
-                    self.dispersion.clamp(0.0, 0.1),
-                    self.clarity.clamp(0.0, 1.0),
-                ],
-            )
-            .with_slot(
-                LIGHT_SLOT,
-                [
-                    self.light_direction.x,
-                    self.light_direction.y,
-                    self.rim_width.as_f32().max(0.0) * scale,
-                    0.0,
-                ],
+                [0.0, 0.0, self.dispersion.clamp(0.0, 1.0), 0.0],
             )
             .with_slot(
                 CORNERS_SLOT,
@@ -168,20 +227,49 @@ impl LiquidGlassAppearance {
                 ],
             )
             .with_slot(
-                EDGE_TINT_SLOT,
+                8,
                 [
-                    self.edge_tint_strength.clamp(0.0, 1.0),
-                    self.edge_tint_width.as_f32().max(0.0) * scale,
-                    self.edge_sample_distance.as_f32().max(0.0) * scale,
-                    self.edge_tint_lift.clamp(0.0, 1.0),
+                    self.optics.refractive_index.clamp(1., 4.),
+                    self.optics.fresnel_range.as_f32().max(0.) * scale,
+                    self.optics.fresnel_hardness.clamp(0., 1.),
+                    self.optics.fresnel_strength.clamp(0., 1.),
+                ],
+            )
+            .with_slot(
+                9,
+                [
+                    self.optics.glare_range.as_f32().max(0.) * scale,
+                    self.optics.glare_hardness.clamp(0., 1.),
+                    self.optics.glare_strength.clamp(0., 1.2),
+                    self.optics.glare_convergence.clamp(0., 1.),
+                ],
+            )
+            .with_slot(
+                10,
+                [
+                    self.optics.glare_opposite.clamp(0., 1.),
+                    self.optics.glare_angle,
+                    f32::from(self.optics.blur_edge),
+                    scale,
+                ],
+            )
+            .with_slot(11, [self.shape.roundness.clamp(2., 7.), 0., 0., 0.])
+            .with_slot(12, self.shape.merge_uniform(scale))
+            .with_slot(
+                13,
+                [
+                    self.shadow.spread.as_f32().max(0.) * scale,
+                    self.shadow.strength.clamp(0., 1.),
+                    self.shadow.offset.x.as_f32() * scale,
+                    self.shadow.offset.y.as_f32() * scale,
                 ],
             )
     }
 }
 
-impl Default for LiquidGlassAppearance {
+impl Default for LiquidGlassStyle {
     fn default() -> Self {
-        Self::regular()
+        Self::optical()
     }
 }
 
@@ -192,36 +280,23 @@ impl Default for LiquidGlassAppearance {
 /// foreground colors, padding, shadows, and interaction use the normal Div APIs.
 pub struct LiquidGlass {
     div: Div,
-    material: GlassMaterial,
-}
-
-enum GlassMaterial {
-    Pane(LiquidGlassAppearance),
-    Lens(LiquidGlassLensAppearance),
+    appearance: LiquidGlassStyle,
 }
 
 impl LiquidGlass {
     pub fn new() -> Self {
-        Self::with_appearance(LiquidGlassAppearance::default())
+        Self::with_style(LiquidGlassStyle::default())
     }
 
-    pub fn with_appearance(appearance: LiquidGlassAppearance) -> Self {
+    pub fn with_style(appearance: LiquidGlassStyle) -> Self {
         Self {
             div: div(),
-            material: GlassMaterial::Pane(appearance),
+            appearance,
         }
     }
 
-    /// A convex lens with a clear center and a folded, dispersive edge.
-    pub fn with_lens(appearance: LiquidGlassLensAppearance) -> Self {
-        Self {
-            div: div(),
-            material: GlassMaterial::Lens(appearance),
-        }
-    }
-
-    pub fn appearance(mut self, appearance: LiquidGlassAppearance) -> Self {
-        self.material = GlassMaterial::Pane(appearance);
+    pub fn glass_style(mut self, appearance: LiquidGlassStyle) -> Self {
+        self.appearance = appearance;
         self
     }
 
@@ -268,22 +343,11 @@ impl IntoElement for LiquidGlass {
 
 impl RenderOnce for LiquidGlass {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let material = self.material;
+        let appearance = self.appearance;
         self.div.on_paint_before_children(
             move |bounds: Bounds<Pixels>, style, window: &mut Window, _| {
                 let corners = style.corner_radii.to_pixels(window.rem_size());
-                match material {
-                    GlassMaterial::Pane(appearance) => {
-                        paint_liquid_glass(bounds, corners, appearance, window)
-                    }
-                    GlassMaterial::Lens(appearance) => paint_liquid_glass_lens(
-                        bounds,
-                        corners,
-                        appearance,
-                        Default::default(),
-                        window,
-                    ),
-                }
+                paint_liquid_glass(bounds, corners, appearance, window);
             },
         )
     }
@@ -298,7 +362,7 @@ impl RenderOnce for LiquidGlass {
 pub fn paint_liquid_glass(
     bounds: Bounds<Pixels>,
     corners: Corners<Pixels>,
-    appearance: LiquidGlassAppearance,
+    appearance: LiquidGlassStyle,
     window: &mut Window,
 ) {
     paint_deformed_liquid_glass(
@@ -316,29 +380,23 @@ pub fn paint_liquid_glass(
 pub fn paint_deformed_liquid_glass(
     bounds: Bounds<Pixels>,
     corners: Corners<Pixels>,
-    appearance: LiquidGlassAppearance,
+    appearance: LiquidGlassStyle,
     deformation: LiquidGlassDeformation,
     window: &mut Window,
 ) {
     let scale = window.raster_scale_factor();
     let uniforms = appearance.uniforms(corners.clamp_radii_for_quad_size(bounds.size), scale);
-    let sampling_reach = if appearance.edge_tint_strength > 0. {
-        appearance.edge_sample_distance.max(px(0.)) * 1.5
-    } else {
-        px(0.)
-    };
+    let index = appearance.optics.refractive_index.clamp(1., 4.);
+    let sampling_reach = appearance.refraction.max(px(0.))
+        * (index * index - 1.).sqrt()
+        * (1. + appearance.dispersion.clamp(0., 1.))
+        * 2.;
     paint_glass_shader(
         bounds,
         deformation,
-        appearance.blur_radius,
+        appearance.blur_radius.clamp(px(0.), px(200.)),
         sampling_reach,
-        if appearance.compress_highlights {
-            liquid_glass_compressed_shader(appearance.full_refraction)
-        } else if appearance.full_refraction {
-            liquid_glass_full_surface_shader()
-        } else {
-            liquid_glass_shader()
-        },
+        liquid_glass_shader(),
         uniforms,
         window,
     );
@@ -386,10 +444,39 @@ pub(super) fn paint_glass_shader(
                 ripple.as_f32() * scale,
             ],
         );
-    window.paint_backdrop_effect(
-        PaintBackdropEffect::new(bounds.dilate(padding), blur_radius.max(px(0.)), shader)
+    let merged = uniforms.slots()[12];
+    let merge_padding = if merged[2] > 0. {
+        let x = merged[0].abs() + merged[2] - bounds.size.width.as_f32() * scale * 0.5;
+        let y = merged[1].abs() + merged[2] - bounds.size.height.as_f32() * scale * 0.5;
+        px((x.max(y).max(0.) + merged[3] * 0.25) / scale)
+    } else {
+        px(0.)
+    };
+    let paint_bounds = bounds.dilate(padding + merge_padding);
+    let shadow = uniforms.slots()[13];
+    if shadow[0] > 0. && shadow[1] > 0. {
+        let shadow_padding = px((shadow[0] * 8. + shadow[2].abs().max(shadow[3].abs())) / scale);
+        window.paint_backdrop_effect(
+            PaintBackdropEffect::new(
+                bounds.dilate(bulge.abs() + ripple.abs() + merge_padding + shadow_padding),
+                px(0.),
+                liquid_glass_shadow_shader(),
+            )
             .uniforms(uniforms),
+        );
+    }
+    window.paint_backdrop_effect(
+        PaintBackdropEffect::new(paint_bounds, blur_radius.max(px(0.)), shader).uniforms(uniforms),
     );
+}
+
+/// Contour shadow sampled by the glass background passes.
+pub fn liquid_glass_shadow_shader() -> BackdropShader {
+    BackdropShader::wgsl(concat!(
+        include_str!("shaders/liquid_glass_shape.wgsl"),
+        "\n",
+        include_str!("shaders/liquid_glass_shadow.wgsl"),
+    ))
 }
 
 /// Portable backdrop shader used by [`LiquidGlass`].
@@ -397,42 +484,12 @@ pub fn liquid_glass_shader() -> BackdropShader {
     BackdropShader::wgsl(concat!(
         include_str!("shaders/liquid_glass_shape.wgsl"),
         "\n",
-        include_str!("shaders/liquid_glass.wgsl"),
-        "\n",
-        "fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> { return liquid_glass_material(input, params, false, false); }"
-    ))
-}
-
-/// Backdrop refraction across the entire surface, including its interior.
-pub fn liquid_glass_full_surface_shader() -> BackdropShader {
-    BackdropShader::wgsl(concat!(
-        include_str!("shaders/liquid_glass_shape.wgsl"),
+        include_str!("shaders/liquid_glass_color.wgsl"),
         "\n",
         include_str!("shaders/liquid_glass.wgsl"),
         "\n",
-        "fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> { return liquid_glass_material(input, params, true, false); }"
-    ))
-}
-
-/// Clear scene sampling with monotonic highlight compression and preserved RGB ratios.
-pub fn liquid_glass_compressed_shader(full_refraction: bool) -> BackdropShader {
-    if full_refraction {
-        BackdropShader::wgsl(concat!(
-            include_str!("shaders/liquid_glass_shape.wgsl"),
-            "\n",
-            include_str!("shaders/liquid_glass.wgsl"),
-            "\n",
-            "fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> { return liquid_glass_material(input, params, true, true); }"
-        ))
-    } else {
-        BackdropShader::wgsl(concat!(
-            include_str!("shaders/liquid_glass_shape.wgsl"),
-            "\n",
-            include_str!("shaders/liquid_glass.wgsl"),
-            "\n",
-            "fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> { return liquid_glass_material(input, params, false, true); }"
-        ))
-    }
+        "fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> { return liquid_glass_material(input, params); }"
+    )).with_gaussian_blur()
 }
 
 #[cfg(test)]
@@ -440,94 +497,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn named_parameters_scale_geometry_but_not_light_or_color() {
-        let appearance = LiquidGlassAppearance::clear()
-            .refraction(px(5.0))
-            .thickness(px(12.0))
-            .rim_width(px(0.5))
-            .dispersion(0.03)
-            .edge_tint_strength(0.6)
-            .edge_tint_width(px(3.0))
-            .edge_sample_distance(px(10.0))
-            .edge_tint_lift(0.4)
-            .light_direction(point(0.4, -0.8));
-        let corners = Corners {
-            top_left: px(1.0),
-            top_right: px(2.0),
-            bottom_right: px(3.0),
-            bottom_left: px(4.0),
-        };
-        let uniforms = appearance.uniforms(corners, 2.0);
-        assert_eq!(uniforms.slots()[OPTICS_SLOT], [1.04, 1.0, 10.0, 24.0]);
-        assert_eq!(uniforms.slots()[LIGHT_SLOT], [0.4, -0.8, 1.0, 0.0]);
-        assert_eq!(uniforms.slots()[CORNERS_SLOT], [2.0, 4.0, 6.0, 8.0]);
-        assert_eq!(uniforms.slots()[SURFACE_SLOT], [0.34, 0.04, 0.03, 0.78]);
-        assert_eq!(uniforms.slots()[EDGE_TINT_SLOT], [0.6, 6.0, 20.0, 0.4]);
-    }
-
-    #[test]
-    fn optical_ranges_are_bounded() {
-        let uniforms = LiquidGlassAppearance::default()
-            .clarity(2.0)
-            .dispersion(1.0)
-            .highlight(-1.0)
-            .edge_shadow(2.0)
-            .refraction(px(-2.0))
-            .edge_tint_strength(2.0)
-            .edge_tint_width(px(-3.0))
-            .edge_sample_distance(px(-5.0))
-            .edge_tint_lift(2.0)
-            .uniforms(Corners::default(), 1.0);
-        assert_eq!(uniforms.slots()[SURFACE_SLOT], [0.0, 1.0, 0.1, 1.0]);
-        assert_eq!(uniforms.slots()[OPTICS_SLOT][2], 0.0);
-        assert_eq!(uniforms.slots()[EDGE_TINT_SLOT], [1.0, 0.0, 0.0, 1.0]);
-    }
-
-    #[test]
-    fn edge_tint_can_be_disabled_without_changing_other_optics() {
-        let appearance = LiquidGlassAppearance::default().edge_tint_strength(0.45);
-        let original = appearance.uniforms(Corners::default(), 1.0);
-        let disabled = appearance
-            .edge_tint_strength(0.0)
-            .uniforms(Corners::default(), 1.0);
-        assert_eq!(disabled.slots()[EDGE_TINT_SLOT][0], 0.0);
-        assert_eq!(
-            original.slots()[..EDGE_TINT_SLOT],
-            disabled.slots()[..EDGE_TINT_SLOT]
-        );
-    }
-
-    #[test]
-    fn edge_tint_is_opt_in_for_all_presets() {
-        for appearance in [
-            LiquidGlassAppearance::default(),
-            LiquidGlassAppearance::regular(),
-            LiquidGlassAppearance::clear(),
-            LiquidGlassAppearance::dark(),
-        ] {
-            assert_eq!(appearance.edge_tint_strength, 0.0);
-            assert_eq!(
-                appearance.uniforms(Corners::default(), 1.0).slots()[EDGE_TINT_SLOT][0],
-                0.0
-            );
-        }
-    }
-
-    #[test]
-    fn tinted_border_preserves_preset_refraction() {
-        for (preset, refraction, thickness) in [
-            (LiquidGlassAppearance::regular(), px(18.0), px(16.0)),
-            (LiquidGlassAppearance::clear(), px(10.0), px(12.0)),
-            (LiquidGlassAppearance::dark(), px(18.0), px(16.0)),
-        ] {
-            let configured = preset.edge_tint_strength(0.75).edge_tint_lift(0.5);
-            assert_eq!(configured.refraction, refraction);
-            assert_eq!(configured.thickness, thickness);
-            assert_eq!(
-                configured.uniforms(Corners::default(), 1.0).slots()[OPTICS_SLOT],
-                preset.uniforms(Corners::default(), 1.0).slots()[OPTICS_SLOT],
-            );
-        }
+    fn named_parameters_scale_geometry_but_not_color() {
+        let appearance = LiquidGlassStyle::optical()
+            .refraction(px(5.))
+            .thickness(px(12.))
+            .dispersion(0.03);
+        let uniforms = appearance.uniforms(Corners::all(px(3.)), 2.);
+        assert_eq!(uniforms.slots()[OPTICS_SLOT], [1., 1., 10., 24.]);
+        assert_eq!(uniforms.slots()[CORNERS_SLOT], [6.; 4]);
+        assert_eq!(uniforms.slots()[SURFACE_SLOT], [0., 0., 0.03, 0.]);
+        assert_eq!(uniforms.slots()[8][0], appearance.optics.refractive_index);
     }
 
     #[test]
@@ -548,11 +527,8 @@ mod tests {
     fn glass_shaders_are_valid_wgsl() {
         for shader in [
             liquid_glass_shader(),
-            liquid_glass_full_surface_shader(),
-            liquid_glass_compressed_shader(false),
-            liquid_glass_compressed_shader(true),
+            liquid_glass_shadow_shader(),
             crate::fluted_glass_shader(),
-            crate::liquid_glass_lens_shader(),
         ] {
             let source = gpui::compose_backdrop_shader_wgsl(&shader);
             let module = naga::front::wgsl::parse_str(&source)

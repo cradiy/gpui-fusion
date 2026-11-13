@@ -9,7 +9,7 @@
 //! See [`timed_text_guide`] for karaoke timelines, grouped emphasis, and
 //! playback-clock integration.
 
-/// Complete usage guide for [`FrostedGlass`](crate::FrostedGlass).
+/// Complete usage guide for [`LiquidGlass`](crate::LiquidGlass).
 #[doc = include_str!("../docs/glass.md")]
 pub mod glass_guide {}
 

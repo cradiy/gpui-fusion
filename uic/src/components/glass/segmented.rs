@@ -6,8 +6,8 @@ use gpui::{
     SharedString, StyleRefinement, Styled, Window, canvas, div, fill, point, prelude::*, px, rgb,
 };
 use gpui_effects::{
-    LiquidGlassDeformation, LiquidGlassRegion, liquid_glass_content, paint_liquid_glass,
-    paint_liquid_glass_lens,
+    LiquidGlassDeformation, LiquidGlassRegion, liquid_glass_content, paint_deformed_liquid_glass,
+    paint_liquid_glass,
 };
 
 use super::{
@@ -23,7 +23,7 @@ struct OptionItem<T> {
 }
 
 /// A controlled, single-selection glass control with an interruptible indicator.
-/// Option layout stays fixed while the moving glass refracts the background and its painted content. Give each
+/// Option layout stays fixed while the moving glass refracts background and content. Give each
 /// control a stable ID and update the selected value in `on_change`.
 /// Selection and keyboard policy are owned by the caller; this control handles pointers.
 #[derive(IntoElement)]
@@ -246,11 +246,11 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for GlassSegmentedControl<T> {
         let selection_horizontal_outset = self.selection_horizontal_outset;
         let disabled = self.disabled;
         let lens = Rc::new(Cell::new(None));
-        let lens_to_paint = lens.clone();
+        let painted_lens = lens.clone();
         let painted = div().on_paint_before_children(move |bounds, style, window, cx| {
             root_bounds.set(Some(bounds));
             content_region.set(None);
-            lens.set(None);
+            painted_lens.set(None);
             let corners = style
                 .corner_radii
                 .to_pixels(window.rem_size())
@@ -319,11 +319,12 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for GlassSegmentedControl<T> {
             });
             let deformation = LiquidGlassDeformation {
                 focus,
-                bulge: px(2.5 * visual.pressure),
-                ripple: px(1.2 * visual.pressure),
+                bulge: px(0.),
+                ripple: px(0.),
                 ellipticity: 0.,
             };
             let region = LiquidGlassRegion {
+                shape: appearance.selection.shape,
                 bounds: if reduced {
                     Bounds::from_corners(
                         window.pixel_snap_point(selected.origin),
@@ -341,27 +342,9 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for GlassSegmentedControl<T> {
             };
             content_region.set(Some(region));
             let mut optics = appearance.selection;
-            optics.highlight *= 0.7 + visual.pressure * 0.6;
-            optics.edge_shadow *= visual.pressure * visual.pressure;
-            optics.fresnel *= visual.pressure;
-            optics.dispersion =
-                (optics.dispersion + visual.pressure * 0.02).min(0.1) * visual.pressure;
-            optics.thickness *= visual.scale * (1. + visual.pressure * 0.3);
-            optics.refraction *= visual.scale * (1. + visual.pressure * 0.5) * visual.pressure;
-            optics.edge_refraction *= visual.scale * (1. + visual.pressure * 0.5) * visual.pressure;
-            optics.edge_width *= visual.scale * (1. + visual.pressure * 0.3);
-            optics.rim_width *= visual.scale;
-            optics.magnification =
-                1. + (optics.magnification - 1. + visual.pressure * 0.025) * visual.pressure;
-            optics.tint.a *= 1. - visual.pressure * 0.25;
-            if let Some(pointer) = pointer {
-                let local = pointer - selected.center();
-                optics.light_direction = point(
-                    -0.6 + (f32::from(local.x) / f32::from(bounds.size.width).max(1.))
-                        .clamp(-0.3, 0.3),
-                    -0.8,
-                );
-            }
+            optics.refraction *= visual.pressure;
+            optics.dispersion *= visual.pressure;
+            optics.blur_radius *= visual.pressure;
             paint_surface(window);
             if reduced {
                 window.paint_quad(
@@ -369,7 +352,7 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for GlassSegmentedControl<T> {
                         .corner_radii(selected_corners),
                 );
             } else {
-                lens.set(Some((selected, selected_corners, optics, deformation)));
+                painted_lens.set(Some((selected, selected_corners, optics, deformation)));
             }
         });
         let mut root = painted
@@ -383,13 +366,18 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for GlassSegmentedControl<T> {
                 canvas(
                     |_, _, _| (),
                     move |_, _, window, _| {
-                        if let Some((bounds, corners, optics, deformation)) = lens_to_paint.get() {
-                            paint_liquid_glass_lens(bounds, corners, optics, deformation, window);
+                        if let Some((bounds, corners, optics, deformation)) = lens.get() {
+                            paint_deformed_liquid_glass(
+                                bounds,
+                                corners,
+                                optics,
+                                deformation,
+                                window,
+                            );
                         }
                     },
                 )
                 .absolute()
-                .inset_0()
                 .size_full(),
             )
             .child(pointer_interaction);

@@ -49,12 +49,12 @@ The common root/submenu split can use the convenience methods:
 ```rust,ignore
 ContextMenu::new()
     .root_surface(|state, content, _, _| {
-        FrostedGlass::with_appearance(FrostedGlassAppearance::dark())
+        LiquidGlass::with_style(LiquidGlassStyle::dark())
             .id(("root-menu", state.session_id))
             .child(content)
     })
     .submenu_surface(|state, content, _, _| {
-        FrostedGlass::with_appearance(FrostedGlassAppearance::light())
+        LiquidGlass::with_style(LiquidGlassStyle::frosted())
             .id(("submenu", state.session_id * 10 + state.depth as u64))
             .child(content)
     })

@@ -1,3 +1,26 @@
+// Metal samples encoded sRGB; WGPU samples the linear scene representation.
+const BACKDROP_NATIVE_SRGB: bool = false;
+
+fn backdrop_to_srgb_channel(value: f32) -> f32 {
+    if (value <= 0.0031308) { return value * 12.92; }
+    return 1.055 * pow(max(value, 0.0), 1.0 / 2.4) - 0.055;
+}
+
+fn backdrop_from_srgb_channel(value: f32) -> f32 {
+    if (value <= 0.04045) { return value / 12.92; }
+    return pow((value + 0.055) / 1.055, 2.4);
+}
+
+fn backdrop_to_srgb(color: vec3<f32>) -> vec3<f32> {
+    if (BACKDROP_NATIVE_SRGB) { return color; }
+    return vec3<f32>(backdrop_to_srgb_channel(color.r), backdrop_to_srgb_channel(color.g), backdrop_to_srgb_channel(color.b));
+}
+
+fn backdrop_from_srgb(color: vec3<f32>) -> vec3<f32> {
+    if (BACKDROP_NATIVE_SRGB) { return color; }
+    return vec3<f32>(backdrop_from_srgb_channel(color.r), backdrop_from_srgb_channel(color.g), backdrop_from_srgb_channel(color.b));
+}
+
 struct GlobalParams {
     viewport_size: vec2<f32>,
     premultiplied_alpha: u32,
@@ -10,7 +33,7 @@ struct Bounds {
 }
 
 struct BackdropParams {
-    slots: array<vec4<f32>, 8>,
+    slots: array<vec4<f32>, 16>,
 }
 
 struct BackdropInput {

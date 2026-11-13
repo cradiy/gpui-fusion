@@ -4,10 +4,7 @@ use gpui::{
     AtlasKey, AtlasTile, BackdropBlur, Bounds, ContentMask, DevicePixels, EffectQuad,
     EffectUniforms, ImageId, RenderImageParams, ScaledPixels as P, Scene, point, size,
 };
-use gpui_effects::{
-    liquid_glass_compressed_shader, liquid_glass_content_shader, liquid_glass_full_surface_shader,
-    liquid_glass_lens_shader, liquid_glass_shader,
-};
+use gpui_effects::{liquid_glass_content_shader, liquid_glass_shader};
 use gpui_wgpu::WgpuOffscreenRenderer;
 
 fn bounds(x: f32, y: f32, w: f32, h: f32) -> Bounds<P> {
@@ -73,7 +70,8 @@ fn glass(center_x: f32, scale: f32, bulge: f32) -> Scene {
             .with_slot(3, [-0.6, -0.8, 0., center_x * scale])
             .with_slot(4, [12. * scale; 4])
             .with_slot(6, [48. * scale, 28. * scale, 1., 24. * scale])
-            .with_slot(7, [0.8, 0.2, bulge * scale, -bulge * 0.25 * scale]),
+            .with_slot(7, [0.8, 0.2, bulge * scale, -bulge * 0.25 * scale])
+            .with_slot(8, [1.4, 0., 0., 0.]),
         time: 0.,
         pointer: point(0., 0.),
         pointer_active: false,
@@ -87,12 +85,31 @@ fn glass(center_x: f32, scale: f32, bulge: f32) -> Scene {
 fn content_coverage_matches_glass_during_fractional_motion_and_deformation() -> anyhow::Result<()> {
     let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(80), DevicePixels(48)))?;
     let tile = white_mask(&renderer);
+    let coverage_shader = |shader: gpui::BackdropShader| {
+        gpui::BackdropShader::wgsl(format!(
+            "{}\nfn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {{ let material = coverage_material(input, params); return vec4<f32>(vec3<f32>(1.0), material.a); }}",
+            shader
+                .wgsl_source()
+                .replace("fn backdrop_effect(", "fn coverage_material(")
+        ))
+    };
     for scale in [1., 1.5, 2.] {
         renderer.resize(size(
             DevicePixels((80. * scale) as i32),
             DevicePixels((48. * scale) as i32),
         ));
-        for (bulge, ellipticity) in [(0., 0.), (3., 0.5), (3., 1.)] {
+        for (bulge, ellipticity, roundness, merged) in [
+            (0., 0., 2., false),
+            (3., 0.5, 2., false),
+            (3., 1., 2., false),
+            (0., 0., 5., true),
+            (2., 0., 7., true),
+        ] {
+            let circle = if merged {
+                [18. * scale, 4. * scale, 16. * scale, 10. * scale]
+            } else {
+                [0.; 4]
+            };
             let mut edge_samples = Vec::new();
             for step in 0..8 {
                 let center_x = 40. + step as f32 / 8.;
@@ -102,26 +119,17 @@ fn content_coverage_matches_glass_during_fractional_motion_and_deformation() -> 
                     .with_slot(2, [0.8, 0.2, bulge * scale, -bulge * 0.25 * scale])
                     .with_slot(3, [1.; 4])
                     .with_slot(4, [0., 0., 0., 1.])
-                    .with_slot(5, [ellipticity, 0., 0., 0.]);
+                    .with_slot(5, [ellipticity, roundness, 0., 0.])
+                    .with_slot(6, circle);
                 let actual = renderer.render_rgba(&content(tile, uniforms, 1., scale))?;
                 let mut glass = glass(center_x, scale, bulge);
                 glass.backdrop_blurs[0].uniforms = glass.backdrop_blurs[0]
                     .uniforms
-                    .with_slot(6, [48. * scale, 28. * scale, 1. + ellipticity, 24. * scale]);
+                    .with_slot(6, [48. * scale, 28. * scale, 1. + ellipticity, 24. * scale])
+                    .with_slot(11, [roundness, 0., 0., 0.])
+                    .with_slot(12, circle);
+                glass.backdrop_blurs[0].shader = Some(coverage_shader(liquid_glass_shader()));
                 let expected = renderer.render_rgba(&glass)?;
-                let mut lens = glass;
-                lens.backdrop_blurs[0].shader = Some(liquid_glass_lens_shader());
-                lens.backdrop_blurs[0].uniforms = lens.backdrop_blurs[0]
-                    .uniforms
-                    .with_slot(5, [1.05, 3. * scale, 4. * scale, 0.35]);
-                let lens_pixels = renderer.render_rgba(&lens)?;
-                assert!(
-                    lens_pixels
-                        .iter()
-                        .zip(&expected)
-                        .all(|(a, b)| a.abs_diff(*b) <= 1),
-                    "lens silhouette must match recolored content at scale {scale}, bulge {bulge}, step {step}"
-                );
                 // Backdrop composition can quantize coverage in an intermediate
                 // UNORM target. Compare linear coverage, not amplified dark sRGB values.
                 let linear = |value: u8| {
@@ -150,7 +158,7 @@ fn content_coverage_matches_glass_during_fractional_motion_and_deformation() -> 
                             || (linear(a[0]) - linear(b[0])).abs() <= 2. / 255.),
                     "content boundary must follow glass at scale {scale}, bulge {bulge}, step {step}: worst {worst:?}"
                 );
-                if scale == 1. && bulge == 0. {
+                if scale == 1. && bulge == 0. && !merged {
                     edge_samples.push(expected[(24 * 80 + 16) * 4]);
                 }
             }
@@ -245,7 +253,7 @@ fn glass_refracts_recolored_content_beyond_its_original_bounds() -> anyhow::Resu
             assert_eq!(pixel(&flat, 61. + fraction), [0; 3]);
             let bent = pixel(&refracted, 61. + fraction);
             assert!(
-                bent[2] > 180 && bent[0] < 10 && bent[1] < 10,
+                bent[2] > 128 && bent[0] < 10 && bent[1] < 10,
                 "the blue stroke must bend beyond its source bounds at scale {scale}, offset {fraction}: {bent:?}"
             );
             assert_eq!(
@@ -253,7 +261,7 @@ fn glass_refracts_recolored_content_beyond_its_original_bounds() -> anyhow::Resu
                 pixel(&refracted, 51. + fraction),
                 "the flat interior preserves the stroke"
             );
-            let compact = render(&mut renderer, 3., 6.)?;
+            let compact = render(&mut renderer, 12., 6.)?;
             for x in 28..58 {
                 assert_eq!(
                     pixel(&compact, x as f32 + fraction),
@@ -265,7 +273,7 @@ fn glass_refracts_recolored_content_beyond_its_original_bounds() -> anyhow::Resu
             // A one-pixel source stroke can straddle two atlas samples. Look
             // for displaced coverage across the edge band rather than requiring
             // an opaque result at one subpixel phase.
-            let edge = (61..64)
+            let edge = (60..64)
                 .map(|x| pixel(&compact, x as f32 + fraction))
                 .max_by_key(|pixel| pixel[2])
                 .unwrap();
@@ -280,452 +288,139 @@ fn glass_refracts_recolored_content_beyond_its_original_bounds() -> anyhow::Resu
 
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn lens_reflects_the_surrounding_scene_at_its_edge_and_preserves_the_center() -> anyhow::Result<()>
-{
-    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(80), DevicePixels(48)))?;
-    let tile = white_mask(&renderer);
-    for scale in [1., 1.5, 2.] {
-        let width = (80. * scale) as usize;
-        renderer.resize(size(
-            DevicePixels(width as i32),
-            DevicePixels((48. * scale) as i32),
-        ));
-        for fraction in [0., 0.375, 0.75] {
-            let source = |color: [f32; 4], rect: Bounds<P>| {
-                let uniforms = EffectUniforms::new()
-                    .with_slot(3, color)
-                    .with_slot(4, color);
-                let mut primitive = content(tile, uniforms, 1., scale).effects.remove(0);
-                primitive.bounds = rect;
-                primitive.effect_bounds = rect;
-                primitive
-            };
-            let render =
-                |renderer: &mut WgpuOffscreenRenderer, lens: bool| -> anyhow::Result<Vec<u8>> {
-                    let mut scene = Scene::default();
-                    scene.insert_primitive(source(
-                        [0., 0.4, 0., 1.],
-                        bounds(0., 0., 80. * scale, 48. * scale),
-                    ));
-                    scene.insert_primitive(source(
-                        [1., 0., 0., 1.],
-                        bounds(
-                            (64. + fraction) * scale,
-                            12. * scale,
-                            5. * scale,
-                            24. * scale,
-                        ),
-                    ));
-                    scene.insert_primitive(source(
-                        [0., 0., 1., 1.],
-                        bounds(
-                            (38. + fraction) * scale,
-                            12. * scale,
-                            4. * scale,
-                            24. * scale,
-                        ),
-                    ));
-                    let mut surface = glass(40. + fraction, scale, 0.).backdrop_blurs.remove(0);
-                    surface.uniforms = surface
-                        .uniforms
-                        .with_slot(0, [1., 1., 7. * scale, 12. * scale])
-                        .with_slot(1, [0.; 4])
-                        .with_slot(2, [0., 0., 0., 1.]);
-                    if lens {
-                        surface.shader = Some(liquid_glass_lens_shader());
-                        surface.uniforms = surface
-                            .uniforms
-                            .with_slot(5, [1.025, 3. * scale, 4. * scale, 1.]);
+fn optical_material_matches_reference_composition() -> anyhow::Result<()> {
+    use gpui::{BackdropShader, Corners, Quad, hsla, px, rgb};
+    use gpui_effects::LiquidGlassStyle;
+
+    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(384), DevicePixels(256)))?;
+    let viewport = bounds(0., 0., 384., 256.);
+    let reference = BackdropShader::wgsl(include_str!("support/liquid_glass_reference.wgsl"))
+        .with_gaussian_blur();
+    let reference_source = gpui::compose_backdrop_shader_wgsl(&reference);
+    let module = naga::front::wgsl::parse_str(&reference_source)
+        .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&reference_source)));
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::all(),
+    )
+    .validate(&module)
+    .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&reference_source)));
+    for (half_width, half_height, radius, roundness) in [(110., 80., 36., 5.), (67., 39., 26., 2.)]
+    {
+        for circle_x in [None, Some(-150.), Some(-175.), Some(-205.)] {
+            for blur_edge in [false, true] {
+                for (index, scale) in [(1.2, 1.), (1.4, 1.), (2.0, 1.), (1.4, 1.5), (1.4, 2.)] {
+                    let mut appearance = LiquidGlassStyle::optical();
+                    appearance.shape.roundness = roundness;
+                    appearance.optics.blur_edge = blur_edge;
+                    appearance.optics.refractive_index = index;
+                    appearance.blur_radius = px(6.);
+                    appearance.shape.merge = circle_x.map(|x| gpui_effects::LiquidGlassMerge {
+                        offset: gpui::point(px(x / scale), px(0.)),
+                        radius: px(48. / scale),
+                        smoothness: px(40. / scale),
+                    });
+                    appearance.tint = hsla(0.58, 0.6, 0.5, 0.12);
+                    let uniforms = appearance
+                        .uniforms(Corners::all(px(radius / scale)), scale)
+                        .with_slot(3, [0., 0., 0., 192.])
+                        .with_slot(6, [half_width * 2., half_height * 2., 1., 128.]);
+                    let render = |renderer: &mut WgpuOffscreenRenderer, shader| {
+                        let mut scene = Scene::default();
+                        scene.insert_primitive(Quad {
+                            bounds: viewport,
+                            content_mask: ContentMask { bounds: viewport },
+                            background: rgb(0x33485a).into(),
+                            ..Default::default()
+                        });
+                        for (ix, color) in [0xe6b455, 0x704cb8, 0x49bea1, 0xf0e7d0]
+                            .into_iter()
+                            .enumerate()
+                        {
+                            scene.insert_primitive(Quad {
+                                bounds: bounds(35. + ix as f32 * 90., 0., 32., 256.),
+                                content_mask: ContentMask { bounds: viewport },
+                                background: rgb(color).into(),
+                                ..Default::default()
+                            });
+                        }
+                        for column in 0..16 {
+                            scene.insert_primitive(Quad {
+                                bounds: bounds(115. + column as f32 * 10., 94., 2., 68.),
+                                content_mask: ContentMask { bounds: viewport },
+                                background: rgb(0x151515).into(),
+                                ..Default::default()
+                            });
+                        }
+                        scene.insert_primitive(BackdropBlur {
+                            order: 0,
+                            bounds: viewport,
+                            content_mask: ContentMask { bounds: viewport },
+                            corner_radii: Default::default(),
+                            blur_radius: P(6.),
+                            opacity: 1.,
+                            shader: Some(shader),
+                            uniforms,
+                            time: 0.,
+                            pointer: point(0., 0.),
+                            pointer_active: false,
+                        });
+                        scene.finish();
+                        renderer.render_rgba(&scene)
+                    };
+                    let actual = render(&mut renderer, liquid_glass_shader())?;
+                    let expected = render(&mut renderer, reference.clone())?;
+                    // Compare the entire interior, including superellipse corners.
+                    let mut worst = 0;
+                    let mut location = (0, 0, [0; 3], [0; 3]);
+                    for y in 0..256 {
+                        for x in 0..384 {
+                            let qx = ((x as f32 + 0.5 - 192.).abs() - half_width + radius).max(0.);
+                            let qy = ((y as f32 + 0.5 - 128.).abs() - half_height + radius).max(0.);
+                            let signed_x = (x as f32 + 0.5 - 192.).abs() - half_width + radius;
+                            let signed_y = (y as f32 + 0.5 - 128.).abs() - half_height + radius;
+                            let mut distance = (qx.powf(roundness) + qy.powf(roundness))
+                                .powf(1. / roundness)
+                                - radius
+                                + signed_x.max(signed_y).min(0.);
+                            if let Some(offset) = circle_x {
+                                let circle = ((x as f32 + 0.5 - 192. - offset).powi(2)
+                                    + (y as f32 + 0.5 - 128.).powi(2))
+                                .sqrt()
+                                    - 48.;
+                                let h = (0.5 + 0.5 * (circle - distance) / 40.).clamp(0., 1.);
+                                distance = circle * (1. - h) + distance * h - 40. * h * (1. - h);
+                            }
+                            if distance > -2. {
+                                continue;
+                            }
+                            let offset = (y * 384 + x) * 4;
+                            for channel in 0..3 {
+                                let difference =
+                                    actual[offset + channel].abs_diff(expected[offset + channel]);
+                                if difference > worst {
+                                    worst = difference;
+                                    location = (
+                                        x,
+                                        y,
+                                        [actual[offset], actual[offset + 1], actual[offset + 2]],
+                                        [
+                                            expected[offset],
+                                            expected[offset + 1],
+                                            expected[offset + 2],
+                                        ],
+                                    );
+                                }
+                            }
+                        }
                     }
-                    scene.insert_primitive(surface);
-                    scene.finish();
-                    renderer.render_rgba(&scene)
-                };
-            let pane = render(&mut renderer, false)?;
-            let lens = render(&mut renderer, true)?;
-            let pixel = |pixels: &[u8], x: f32| {
-                let i = ((24. * scale) as usize * width + (x * scale) as usize) * 4;
-                [pixels[i], pixels[i + 1], pixels[i + 2]]
-            };
-            // Fractional motion can place the narrow reflected band between
-            // raster samples. Measure reflected red coverage within the edge.
-            let edge_end = ((64. + fraction) * scale).floor() as usize;
-            let reflected = (edge_end.saturating_sub((4. * scale) as usize)..edge_end)
-                .map(|x| {
-                    let i = ((24. * scale) as usize * width + x) * 4;
-                    (lens[i], pane[i])
-                })
-                .max_by_key(|(red, original)| red.saturating_sub(*original))
-                .unwrap();
-            assert!(
-                reflected.0 > 5 && reflected.0 > reflected.1.saturating_add(3),
-                "the lens edge must reflect the red scene outside its silhouette at scale {scale}, fraction {fraction}: {reflected:?}"
-            );
-            assert_eq!(
-                pixel(&lens, 40. + fraction),
-                [0, 0, 255],
-                "central content stays legible"
-            );
-            assert_eq!(
-                pixel(&lens, 71.),
-                pixel(&pane, 71.),
-                "uncovered background is unchanged"
-            );
-        }
-    }
-    Ok(())
-}
-
-#[test]
-#[ignore = "requires a GPU adapter"]
-fn default_lens_transmission_does_not_add_a_dark_ring_to_a_uniform_scene() -> anyhow::Result<()> {
-    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(80), DevicePixels(48)))?;
-    let tile = white_mask(&renderer);
-    let optics = gpui_effects::LiquidGlassLensAppearance::default();
-    let tint: gpui::Rgba = optics.tint.into();
-    for scale in [1., 1.5, 2.] {
-        renderer.resize(size(
-            DevicePixels((80. * scale) as i32),
-            DevicePixels((48. * scale) as i32),
-        ));
-        let color = [0.08, 0.17, 0.31, 1.];
-        let source = || {
-            content(
-                tile,
-                EffectUniforms::new()
-                    .with_slot(3, color)
-                    .with_slot(4, color),
-                1.,
-                scale,
-            )
-        };
-        let expected = renderer.render_rgba(&source())?;
-        for (fraction, bulge) in [(0., 0.), (0.375, 3.)] {
-            let mut scene = Scene::default();
-            scene.insert_primitive(source().effects.remove(0));
-            let mut lens = glass(40. + fraction, scale, bulge).backdrop_blurs.remove(0);
-            lens.shader = Some(liquid_glass_lens_shader());
-            // Isolate default transmission from directional specular light.
-            // Uniform surroundings cannot produce a contour-shaped absorption band.
-            lens.uniforms = lens
-                .uniforms
-                .with_slot(
-                    0,
-                    [
-                        optics.saturation,
-                        optics.brightness,
-                        optics.refraction.as_f32() * scale,
-                        optics.thickness.as_f32() * scale,
-                    ],
-                )
-                .with_slot(1, [tint.r, tint.g, tint.b, tint.a])
-                .with_slot(
-                    2,
-                    [0., optics.edge_shadow, optics.dispersion, optics.clarity],
-                )
-                .with_slot(
-                    5,
-                    [
-                        optics.magnification,
-                        optics.edge_refraction.as_f32() * scale,
-                        optics.edge_width.as_f32() * scale,
-                        optics.fresnel,
-                    ],
-                );
-            scene.insert_primitive(lens);
-            scene.finish();
-            let actual = renderer.render_rgba(&scene)?;
-            assert!(
-                actual
-                    .iter()
-                    .zip(&expected)
-                    .all(|(a, b)| a.abs_diff(*b) <= 1),
-                "default glass transmission must preserve a uniform scene at scale {scale}, fraction {fraction}, bulge {bulge}"
-            );
-        }
-    }
-    Ok(())
-}
-
-#[test]
-#[ignore = "requires a GPU adapter"]
-fn lens_transmission_keeps_scene_detail_registered_at_the_silhouette() -> anyhow::Result<()> {
-    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(80), DevicePixels(48)))?;
-    let tile = white_mask(&renderer);
-    for scale in [1., 1.5, 2.] {
-        let width = (80. * scale) as usize;
-        renderer.resize(size(
-            DevicePixels(width as i32),
-            DevicePixels((48. * scale) as i32),
-        ));
-        let mut source = Scene::default();
-        let white = EffectUniforms::new()
-            .with_slot(3, [1.; 4])
-            .with_slot(4, [1.; 4]);
-        for rect in [
-            bounds(16. * scale, 0., 1., 48. * scale),
-            bounds(64. * scale, 0., 1., 48. * scale),
-            bounds(0., 10. * scale, 80. * scale, 1.),
-            bounds(0., 38. * scale, 80. * scale, 1.),
-        ] {
-            let mut stripe = content(tile, white, 1., scale).effects.remove(0);
-            stripe.bounds = rect;
-            stripe.effect_bounds = rect;
-            source.insert_primitive(stripe);
-        }
-        source.finish();
-        let expected = renderer.render_rgba(&source)?;
-        let mut lens = glass(40. + 0.5 / scale, scale, 0.).backdrop_blurs.remove(0);
-        lens.shader = Some(liquid_glass_lens_shader());
-        lens.uniforms = lens
-            .uniforms
-            .with_slot(0, [1., 1., 7. * scale, 12. * scale])
-            .with_slot(1, [0.; 4])
-            .with_slot(2, [0., 0., 0.06, 1.])
-            .with_slot(3, [-0.6, -0.8, 0.6 * scale, 40. * scale + 0.5])
-            .with_slot(5, [1.05, 3. * scale, 5. * scale, 0.])
-            .with_slot(6, [48. * scale, 28. * scale, 1., 24. * scale + 0.5]);
-        source.insert_primitive(lens);
-        source.finish();
-        let actual = renderer.render_rgba(&source)?;
-        for (x, y) in [(16., 24.), (64., 24.), (40., 10.), (40., 38.)] {
-            let i = ((y * scale) as usize * width + (x * scale) as usize) * 4;
-            assert!(
-                actual[i..i + 3]
-                    .iter()
-                    .zip(&expected[i..i + 3])
-                    .all(|(a, b)| a.abs_diff(*b) <= 1),
-                "transmission must meet the original scene at its boundary at scale {scale}, ({x},{y}): {:?} vs {:?}",
-                &actual[i..i + 3],
-                &expected[i..i + 3]
-            );
-        }
-    }
-    Ok(())
-}
-
-#[test]
-#[ignore = "requires a GPU adapter"]
-fn lens_transmission_preserves_scene_order_at_high_refraction() -> anyhow::Result<()> {
-    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(80), DevicePixels(48)))?;
-    let tile = white_mask(&renderer);
-    for scale in [1., 1.5, 2.] {
-        let width = (80. * scale) as usize;
-        renderer.resize(size(
-            DevicePixels(width as i32),
-            DevicePixels((48. * scale) as i32),
-        ));
-        for ellipticity in [0., 0.5, 1.] {
-            let mut scene = Scene::default();
-            for x in 0..width {
-                let value = 0.02 + 0.96 * x as f32 / (width - 1) as f32;
-                let color = [value, value, value, 1.];
-                let uniforms = EffectUniforms::new()
-                    .with_slot(3, color)
-                    .with_slot(4, color);
-                let mut strip = content(tile, uniforms, 1., scale).effects.remove(0);
-                strip.bounds = bounds(x as f32, 0., 1., 48. * scale);
-                strip.effect_bounds = strip.bounds;
-                scene.insert_primitive(strip);
-            }
-            let mut lens = glass(40.375, scale, 0.).backdrop_blurs.remove(0);
-            lens.shader = Some(liquid_glass_lens_shader());
-            lens.uniforms = lens
-                .uniforms
-                .with_slot(0, [1., 1., 100. * scale, 12. * scale])
-                .with_slot(1, [0.; 4])
-                .with_slot(2, [0., 0., 0.1, 1.])
-                .with_slot(5, [1.2, 3. * scale, 4. * scale, 0.])
-                .with_slot(6, [48. * scale, 28. * scale, 1. + ellipticity, 24. * scale]);
-            scene.insert_primitive(lens);
-            scene.finish();
-            let image = renderer.render_rgba(&scene)?;
-            for y in [18., 24., 30.] {
-                let row = (y * scale) as usize;
-                for x in 1..width {
-                    for channel in 0..3 {
-                        let previous = image[(row * width + x - 1) * 4 + channel];
-                        let current = image[(row * width + x) * 4 + channel];
-                        assert!(
-                            current.saturating_add(2) >= previous,
-                            "transmission reversed scene order at scale {scale}, ellipticity {ellipticity}, x {x}, y {row}, channel {channel}: {previous} -> {current}"
-                        );
-                    }
+                    assert!(
+                        worst <= 3,
+                        "reference mismatch: circle={circle_x:?}, index={index}, scale={scale}, blur_edge={blur_edge}, worst={worst}, location={location:?}"
+                    );
                 }
             }
         }
-    }
-    Ok(())
-}
-
-#[test]
-#[ignore = "requires a GPU adapter"]
-fn full_surface_refraction_bends_interior_detail_and_preserves_uncovered_scene()
--> anyhow::Result<()> {
-    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(80), DevicePixels(48)))?;
-    let tile = white_mask(&renderer);
-    for scale in [1., 1.5, 2.] {
-        let width = (80. * scale) as usize;
-        renderer.resize(size(
-            DevicePixels(width as i32),
-            DevicePixels((48. * scale) as i32),
-        ));
-        let mut source = Scene::default();
-        for x in 0..width {
-            let value = 0.02 + 0.96 * x as f32 / (width - 1) as f32;
-            let color = [value, value, value, 1.];
-            let uniforms = EffectUniforms::new()
-                .with_slot(3, color)
-                .with_slot(4, color);
-            let mut strip = content(tile, uniforms, 1., scale).effects.remove(0);
-            strip.bounds = bounds(x as f32, 0., 1., 48. * scale);
-            strip.effect_bounds = strip.bounds;
-            source.insert_primitive(strip);
-        }
-        let render = |renderer: &mut WgpuOffscreenRenderer,
-                      full: bool,
-                      reach: f32|
-         -> anyhow::Result<Vec<u8>> {
-            let mut scene = Scene::default();
-            for strip in &source.effects {
-                scene.insert_primitive(strip.clone());
-            }
-            let mut pane = glass(40., scale, 0.).backdrop_blurs.remove(0);
-            pane.shader = Some(if full {
-                liquid_glass_full_surface_shader()
-            } else {
-                liquid_glass_shader()
-            });
-            pane.uniforms = pane
-                .uniforms
-                .with_slot(0, [1., 1., reach * scale, 6. * scale])
-                .with_slot(1, [0.; 4])
-                .with_slot(2, [0., 0., 0., 1.]);
-            scene.insert_primitive(pane);
-            scene.finish();
-            renderer.render_rgba(&scene)
-        };
-        let flat = render(&mut renderer, false, 0.)?;
-        assert_eq!(
-            flat,
-            render(&mut renderer, true, 0.)?,
-            "zero refraction must preserve the scene in both modes"
-        );
-        let edge = render(&mut renderer, false, 8.)?;
-        let full = render(&mut renderer, true, 8.)?;
-        let pixel = |image: &[u8], x: f32| {
-            image[((24. * scale) as usize * width + (x * scale) as usize) * 4]
-        };
-        for x in [32., 48.] {
-            assert_eq!(
-                pixel(&flat, x),
-                pixel(&edge, x),
-                "edge-only refraction leaves the flat interior unchanged"
-            );
-            assert!(
-                pixel(&flat, x).abs_diff(pixel(&full, x)) >= 2,
-                "full refraction must displace interior scene detail at scale {scale}, x {x}"
-            );
-        }
-        assert!(
-            pixel(&full, 32.) > pixel(&flat, 32.) && pixel(&full, 48.) < pixel(&flat, 48.),
-            "interior rays must converge toward the center"
-        );
-        for x in [8., 72.] {
-            assert_eq!(
-                pixel(&flat, x),
-                pixel(&full, x),
-                "uncovered scene must remain unchanged"
-            );
-        }
-    }
-    Ok(())
-}
-
-#[test]
-#[ignore = "requires a GPU adapter"]
-fn highlight_compression_preserves_sharp_scene_detail_without_a_color_wash() -> anyhow::Result<()> {
-    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(80), DevicePixels(48)))?;
-    let tile = white_mask(&renderer);
-    let render =
-        |renderer: &mut WgpuOffscreenRenderer, compressed: bool| -> anyhow::Result<Vec<u8>> {
-            let mut scene = Scene::default();
-            for x in 0..80 {
-                let color = if x % 2 == 0 {
-                    [0.12, 0.04, 0.02, 1.]
-                } else {
-                    [0.8, 0.3, 0.1, 1.]
-                };
-                let uniforms = EffectUniforms::new()
-                    .with_slot(3, color)
-                    .with_slot(4, color);
-                let mut strip = content(tile, uniforms, 1., 1.).effects.remove(0);
-                strip.bounds = bounds(x as f32, 0., 1., 48.);
-                strip.effect_bounds = strip.bounds;
-                scene.insert_primitive(strip);
-            }
-            let mut pane = glass(40., 1., 0.).backdrop_blurs.remove(0);
-            pane.shader = Some(if compressed {
-                liquid_glass_compressed_shader(false)
-            } else {
-                liquid_glass_shader()
-            });
-            pane.uniforms = pane
-                .uniforms
-                .with_slot(0, [1., 1., 0., 10.])
-                .with_slot(1, [0.; 4])
-                .with_slot(2, [0., 0., 0., 1.]);
-            scene.insert_primitive(pane);
-            scene.finish();
-            renderer.render_rgba(&scene)
-        };
-    let original = render(&mut renderer, false)?;
-    let compressed = render(&mut renderer, true)?;
-    let decode = |value: u8| {
-        let value = value as f32 / 255.;
-        if value <= 0.04045 {
-            value / 12.92
-        } else {
-            ((value + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    let encode = |value: f32| {
-        (255.
-            * if value <= 0.0031308 {
-                value * 12.92
-            } else {
-                1.055 * value.powf(1. / 2.4) - 0.055
-            })
-        .round() as u8
-    };
-    for x in 24..56 {
-        let i = (24 * 80 + x) * 4;
-        let channels = [
-            decode(original[i]),
-            decode(original[i + 1]),
-            decode(original[i + 2]),
-        ];
-        let peak = channels.into_iter().fold(0., f32::max);
-        for channel in 0..3 {
-            let expected = encode(channels[channel] / (1. + 2. * peak));
-            assert!(
-                compressed[i + channel].abs_diff(expected) <= 2,
-                "compression must preserve each original pixel and RGB ratio, x={x}, channel={channel}"
-            );
-        }
-        let next = i + 4;
-        assert!(
-            compressed[i].abs_diff(compressed[next]) > 20,
-            "single-pixel scene detail must remain sharp"
-        );
-    }
-    for x in [8, 72] {
-        let i = (24 * 80 + x) * 4;
-        assert_eq!(
-            &original[i..i + 4],
-            &compressed[i..i + 4],
-            "uncovered scene must be unchanged"
-        );
     }
     Ok(())
 }

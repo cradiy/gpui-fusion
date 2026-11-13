@@ -64,6 +64,7 @@ impl BackdropShaderId {
 pub struct BackdropShader {
     id: BackdropShaderId,
     wgsl: Arc<str>,
+    gaussian_blur: bool,
 }
 
 impl BackdropShader {
@@ -75,7 +76,23 @@ impl BackdropShader {
         Self {
             id: BackdropShaderId(hasher.finish()),
             wgsl,
+            gaussian_blur: false,
         }
+    }
+
+    /// Uses a Gaussian kernel with sigma equal to one third of the blur radius.
+    pub fn with_gaussian_blur(mut self) -> Self {
+        self.gaussian_blur = true;
+        let mut hasher = DefaultHasher::new();
+        self.wgsl.hash(&mut hasher);
+        self.gaussian_blur.hash(&mut hasher);
+        self.id = BackdropShaderId(hasher.finish());
+        self
+    }
+
+    /// Whether the backdrop uses an explicit three-sigma Gaussian support.
+    pub fn uses_gaussian_blur(&self) -> bool {
+        self.gaussian_blur
     }
 
     /// Returns the stable identifier used by renderer pipeline caches.

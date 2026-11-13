@@ -2,7 +2,7 @@
 
 `GlassSegmentedControl` presents a controlled single selection with a moving
 glass indicator. Option layout determines each option's width and remains stable
-while its painted contents refract through the lens.
+while the moving selection refracts foreground content.
 
 ```rust
 use uic::components::glass::{GlassSegmentedAppearance, GlassSegmentedControl};
@@ -67,25 +67,17 @@ inherited typography. `GlassSegmentedAppearance` configures the base and
 selected optical surfaces, selected text, and disabled opacity.
 Pair `dark()` with a light foreground color using `text_color`.
 
-The track is painted first, followed by the options and finally the selection
-lens. The lens samples both the background and the painted options, so icons,
-text, emoji, and images participate in refraction and dispersion while pressed.
-Refraction, dispersion, magnification, and scene reflection fade with the press
-spring and stop at rest; the stationary lens retains its tint and rim.
-Transmission reach is limited relative
-to the curved band, including the dispersed channels, to keep sampled scene
-coordinates ordered across the edge.
+The track is painted beneath the options and the selection above them. Pressing
+activates the selection's optical material, refracting both background and
+foreground content, including while held stationary. Releasing smoothly returns
+refraction, dispersion, and blur to zero. The selection uses the standard optical
+material with circular corners and no separate contour shadow.
+Caller-provided corner radii are resolved through `Styled` for both surfaces.
 
-The light and dark presets use a subtle neutral dark tint for the selected lens.
-Holding preserves most of this tint and uniformly enlarges the rounded contour. Grazing-angle reflection samples the surrounding scene and strengthens
-under pressure. Its color follows that scene. Highlights remain confined to a
-narrow rim.
-
-Before refraction, text and monochrome SVGs use `selected_text` within the lens
-region. Their source colors remain unchanged outside it. Color and glyph shape
-then pass through the same optical sampling as the background. The covered
-color's alpha multiplies the original content alpha. Emoji and colored images
-participate in refraction without monochrome recoloring.
+Text and monochrome SVGs use `selected_text` inside the animated selection
+region. Their source colors remain unchanged outside it. The covered color's
+alpha multiplies the original content alpha; emoji and colored images retain
+their original colors.
 
 The material and content coloring share the indicator's animated bounds, corners,
 and press scale. Only painted pixels deform; content layout and hit regions stay fixed. Stationary
@@ -100,6 +92,6 @@ cargo run -p uic --example glass_segmented
 ```
 
 The example shows independent horizontal and vertical controls over a gray
-background with solid shapes. The shapes can be hidden for comparison.
+background with horizontal color bands. The bands can be hidden for comparison.
 Theme, motion, transparency, and disabled controls apply
 to both controls.

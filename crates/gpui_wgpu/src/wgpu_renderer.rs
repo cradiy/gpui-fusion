@@ -1889,9 +1889,16 @@ impl WgpuRenderer {
         self.trim_instance_buffer();
         let mut needs_paths = false;
         let mut needs_backdrop = false;
+        let mut full_resolution_blur = false;
         self.visit_rendered_scenes(scene, &mut |scene| {
             needs_paths |= !scene.paths.is_empty();
             needs_backdrop |= !scene.backdrop_blurs.is_empty();
+            full_resolution_blur |= scene.backdrop_blurs.iter().any(|backdrop| {
+                backdrop
+                    .shader
+                    .as_ref()
+                    .is_some_and(|shader| shader.uses_gaussian_blur())
+            });
         });
         // Keep briefly idle targets warm without retaining a past workload forever.
         self.unused_path_frames = if needs_paths {
@@ -1923,9 +1930,19 @@ impl WgpuRenderer {
         }
         let needs_path_texture =
             needs_paths && self.resources().path_intermediate_texture.is_none();
+        let blur_divisor = if full_resolution_blur { 1 } else { 2 };
+        let blur_width = self.surface_config.width.div_ceil(blur_divisor);
+        let blur_height = self.surface_config.height.div_ceil(blur_divisor);
         let needs_backdrop_textures = needs_backdrop
             && self.backdrop_blur_supported
-            && self.resources().backdrop_source_texture.is_none();
+            && (self.resources().backdrop_source_texture.is_none()
+                || self
+                    .resources()
+                    .backdrop_horizontal_texture
+                    .as_ref()
+                    .is_none_or(|texture| {
+                        texture.width() != blur_width || texture.height() != blur_height
+                    }));
         if !needs_path_texture && !needs_backdrop_textures {
             return;
         }
@@ -1970,16 +1987,16 @@ impl WgpuRenderer {
                 &resources.device,
                 "backdrop_horizontal",
                 format,
-                width.div_ceil(2),
-                height.div_ceil(2),
+                blur_width,
+                blur_height,
                 rendered,
             );
             let (result, result_view) = Self::create_backdrop_intermediate(
                 &resources.device,
                 "backdrop_result",
                 format,
-                width.div_ceil(2),
-                height.div_ceil(2),
+                blur_width,
+                blur_height,
                 rendered,
             );
             resources.backdrop_source_texture = Some(source);
@@ -4776,11 +4793,22 @@ impl WgpuRenderer {
             self.surface_config.width as f32,
             self.surface_config.height as f32,
         ];
-        let blur_size = [
-            self.surface_config.width.div_ceil(2) as f32,
-            self.surface_config.height.div_ceil(2) as f32,
-        ];
+        let blur_texture = resources.backdrop_horizontal_texture.as_ref().unwrap();
+        let blur_width = blur_texture.width();
+        let blur_height = blur_texture.height();
+        let blur_size = [blur_width as f32, blur_height as f32];
+        let blur_scale_x = blur_size[0] / viewport_size[0];
+        let blur_scale_y = blur_size[1] / viewport_size[1];
         for backdrop in backdrops {
+            let gaussian = backdrop
+                .shader
+                .as_ref()
+                .is_some_and(|shader| shader.uses_gaussian_blur());
+            let radius = if gaussian {
+                backdrop.blur_radius.0.max(0.0)
+            } else {
+                backdrop.blur_radius.0.min(128.0)
+            };
             // Blurring the full screen for a card that covers a fraction of it wastes work
             // proportional to the viewport rather than the card. A frosted panel is
             // typically under 10% of the screen, so the copy and both blur passes only
@@ -4811,20 +4839,20 @@ impl WgpuRenderer {
                 y: top as u32,
                 z: 0,
             };
-            // Blur targets are half resolution, so the scissor is halved as well and then
-            // clamped to the target: a panel touching the screen edge would otherwise
-            // produce a rectangle that runs past the attachment.
-            let blur_width = self.surface_config.width.div_ceil(2);
-            let blur_height = self.surface_config.height.div_ceil(2);
-            let scissor_x = ((left * 0.5).floor() as u32).min(blur_width.saturating_sub(1));
-            let scissor_y = ((top * 0.5).floor() as u32).min(blur_height.saturating_sub(1));
+            // Match the actual blur target resolution, including odd viewport dimensions.
+            let scissor_x =
+                ((left * blur_scale_x).floor() as u32).min(blur_width.saturating_sub(1));
+            let scissor_y =
+                ((top * blur_scale_y).floor() as u32).min(blur_height.saturating_sub(1));
             let blur_scissor = (
                 scissor_x,
                 scissor_y,
-                (((right - left) * 0.5).ceil() as u32)
+                ((right * blur_scale_x).ceil() as u32)
+                    .saturating_sub(scissor_x)
                     .min(blur_width - scissor_x)
                     .max(1),
-                (((bottom - top) * 0.5).ceil() as u32)
+                ((bottom * blur_scale_y).ceil() as u32)
+                    .saturating_sub(scissor_y)
                     .min(blur_height - scissor_y)
                     .max(1),
             );
@@ -4845,83 +4873,84 @@ impl WgpuRenderer {
                 extent,
             );
 
-            let horizontal = BackdropInstance::blur(
-                viewport_size,
-                blur_size,
-                backdrop.blur_radius.0.min(128.0),
-                [1.0, 0.0],
-            );
-            {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("backdrop_horizontal_pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: horizontal_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: None,
-                    ..Default::default()
-                });
-                pass.set_scissor_rect(
-                    blur_scissor.0,
-                    blur_scissor.1,
-                    blur_scissor.2,
-                    blur_scissor.3,
-                );
-                if !self.draw_instances_with_texture(
-                    bytemuck::bytes_of(&horizontal),
-                    1,
-                    source_view,
-                    &resources.pipelines.backdrop_blur,
-                    instance_offset,
-                    &mut pass,
-                ) {
-                    return false;
+            if radius > 0.0 {
+                let mut horizontal =
+                    BackdropInstance::blur(viewport_size, blur_size, radius, [1.0, 0.0]);
+                horizontal.uniforms[0][0] = if gaussian { 1.0 / 3.0 } else { 0.4375 };
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("backdrop_horizontal_pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: horizontal_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                            depth_slice: None,
+                        })],
+                        depth_stencil_attachment: None,
+                        ..Default::default()
+                    });
+                    pass.set_scissor_rect(
+                        blur_scissor.0,
+                        blur_scissor.1,
+                        blur_scissor.2,
+                        blur_scissor.3,
+                    );
+                    if !self.draw_instances_with_texture(
+                        bytemuck::bytes_of(&horizontal),
+                        1,
+                        source_view,
+                        &resources.pipelines.backdrop_blur,
+                        instance_offset,
+                        &mut pass,
+                    ) {
+                        return false;
+                    }
                 }
-            }
 
-            let vertical = BackdropInstance::blur(
-                viewport_size,
-                blur_size,
-                backdrop.blur_radius.0.min(128.0),
-                [0.0, 1.0],
-            );
-            {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("backdrop_vertical_pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: result_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                            store: wgpu::StoreOp::Store,
-                        },
-                        depth_slice: None,
-                    })],
-                    depth_stencil_attachment: None,
-                    ..Default::default()
-                });
-                pass.set_scissor_rect(
-                    blur_scissor.0,
-                    blur_scissor.1,
-                    blur_scissor.2,
-                    blur_scissor.3,
-                );
-                if !self.draw_instances_with_texture(
-                    bytemuck::bytes_of(&vertical),
-                    1,
-                    horizontal_view,
-                    &resources.pipelines.backdrop_blur,
-                    instance_offset,
-                    &mut pass,
-                ) {
-                    return false;
+                let mut vertical =
+                    BackdropInstance::blur(viewport_size, blur_size, radius, [0.0, 1.0]);
+                vertical.uniforms[0][0] = if gaussian { 1.0 / 3.0 } else { 0.4375 };
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("backdrop_vertical_pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: result_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                            depth_slice: None,
+                        })],
+                        depth_stencil_attachment: None,
+                        ..Default::default()
+                    });
+                    pass.set_scissor_rect(
+                        blur_scissor.0,
+                        blur_scissor.1,
+                        blur_scissor.2,
+                        blur_scissor.3,
+                    );
+                    if !self.draw_instances_with_texture(
+                        bytemuck::bytes_of(&vertical),
+                        1,
+                        horizontal_view,
+                        &resources.pipelines.backdrop_blur,
+                        instance_offset,
+                        &mut pass,
+                    ) {
+                        return false;
+                    }
                 }
             }
+            let result_view = if radius > 0.0 {
+                result_view
+            } else {
+                source_view
+            };
 
             let composite = BackdropInstance::from(backdrop);
             {

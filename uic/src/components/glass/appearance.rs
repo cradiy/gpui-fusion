@@ -30,6 +30,8 @@ impl GlassSegmentedAppearance {
         surface.optics.inner_shading = 0.12;
         surface.optics.caustic_strength = 0.;
         let mut selection = LiquidGlassStyle::optical();
+        selection.refraction = px(6.);
+        selection.thickness = px(18.);
         selection.frost = 0.82;
         selection.optics.magnification = 0.12;
         Self {

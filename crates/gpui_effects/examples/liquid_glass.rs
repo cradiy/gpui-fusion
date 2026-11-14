@@ -124,11 +124,12 @@ impl GlassStudy {
                     )
                     .child(
                         button(
-                            "blur-edge",
-                            format!("Blur rim: {}", self.appearance.optics.blur_edge),
+                            "center-blur",
+                            format!("Center blur: {:.2}", self.appearance.optics.center_blur),
                         )
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.appearance.optics.blur_edge = !this.appearance.optics.blur_edge;
+                            this.appearance.optics.center_blur =
+                                1. - this.appearance.optics.center_blur;
                             cx.notify();
                         })),
                     )
@@ -217,153 +218,106 @@ impl GlassStudy {
 #[derive(Clone, Copy)]
 enum Knob {
     Blur,
-
     Refraction,
     Thickness,
-
     Dispersion,
-
-    Radius,
-    Index,
-    Roundness,
-    FresnelRange,
-    FresnelHardness,
-    FresnelStrength,
-    GlareRange,
-    GlareHardness,
-    GlareStrength,
-    GlareConvergence,
-    GlareOpposite,
-    GlareAngle,
+    Frost,
+    Magnification,
+    Rim,
+    Reflection,
+    Inner,
+    Caustic,
     ShadowSpread,
     ShadowStrength,
+    Radius,
+    Roundness,
 }
-
 impl Knob {
-    const ALL: [Self; 18] = [
+    const ALL: [Self; 14] = [
         Self::Blur,
         Self::Refraction,
         Self::Thickness,
         Self::Dispersion,
-        Self::Radius,
-        Self::Index,
-        Self::Roundness,
-        Self::FresnelRange,
-        Self::FresnelHardness,
-        Self::FresnelStrength,
-        Self::GlareRange,
-        Self::GlareHardness,
-        Self::GlareStrength,
-        Self::GlareConvergence,
-        Self::GlareOpposite,
-        Self::GlareAngle,
+        Self::Frost,
+        Self::Magnification,
+        Self::Rim,
+        Self::Reflection,
+        Self::Inner,
+        Self::Caustic,
         Self::ShadowSpread,
         Self::ShadowStrength,
+        Self::Radius,
+        Self::Roundness,
     ];
-
     fn label(self) -> &'static str {
         match self {
             Self::Blur => "Blur (px)",
-
             Self::Refraction => "Refraction (px)",
-            Self::Thickness => "Thickness (px)",
-
+            Self::Thickness => "Bevel (px)",
             Self::Dispersion => "Dispersion",
-
-            Self::Radius => "Corner radius (px)",
-            Self::Index => "Refraction index",
-            Self::Roundness => "Corner exponent",
-            Self::FresnelRange => "Fresnel range",
-            Self::FresnelHardness => "Fresnel hardness",
-            Self::FresnelStrength => "Fresnel strength",
-            Self::GlareRange => "Glare range",
-            Self::GlareHardness => "Glare hardness",
-            Self::GlareStrength => "Glare strength",
-            Self::GlareConvergence => "Glare convergence",
-            Self::GlareOpposite => "Opposite glare",
-            Self::GlareAngle => "Glare angle (radians)",
+            Self::Frost => "Frost",
+            Self::Magnification => "Magnification",
+            Self::Rim => "Rim light",
+            Self::Reflection => "Top reflection",
+            Self::Inner => "Inner shading",
+            Self::Caustic => "Caustic",
             Self::ShadowSpread => "Shadow spread",
             Self::ShadowStrength => "Shadow strength",
+            Self::Radius => "Corner radius",
+            Self::Roundness => "Corner exponent",
         }
     }
-
     fn value(self, study: &GlassStudy) -> f32 {
         match self {
             Self::Blur => study.appearance.blur_radius.as_f32(),
-
             Self::Refraction => study.appearance.refraction.as_f32(),
             Self::Thickness => study.appearance.thickness.as_f32(),
-
             Self::Dispersion => study.appearance.dispersion,
-
-            Self::Radius => study.radius,
-            Self::Index => study.appearance.optics.refractive_index,
-            Self::Roundness => study.appearance.shape.roundness,
-            Self::FresnelRange => study.appearance.optics.fresnel_range.as_f32(),
-            Self::FresnelHardness => study.appearance.optics.fresnel_hardness,
-            Self::FresnelStrength => study.appearance.optics.fresnel_strength,
-            Self::GlareRange => study.appearance.optics.glare_range.as_f32(),
-            Self::GlareHardness => study.appearance.optics.glare_hardness,
-            Self::GlareStrength => study.appearance.optics.glare_strength,
-            Self::GlareConvergence => study.appearance.optics.glare_convergence,
-            Self::GlareOpposite => study.appearance.optics.glare_opposite,
-            Self::GlareAngle => study.appearance.optics.glare_angle,
+            Self::Frost => study.appearance.frost,
+            Self::Magnification => study.appearance.optics.magnification,
+            Self::Rim => study.appearance.optics.rim_strength,
+            Self::Reflection => study.appearance.optics.top_reflection,
+            Self::Inner => study.appearance.optics.inner_shading,
+            Self::Caustic => study.appearance.optics.caustic_strength,
             Self::ShadowSpread => study.appearance.shadow.spread.as_f32(),
             Self::ShadowStrength => study.appearance.shadow.strength,
+            Self::Radius => study.radius,
+            Self::Roundness => study.appearance.shape.roundness,
         }
     }
-
     fn adjust(self, study: &mut GlassStudy, direction: f32) {
-        let (step, max) = match self {
-            Self::Blur => (2.0, 200.0),
-
-            Self::Refraction => (5.0, 280.0),
-            Self::Thickness => (2.0, 64.0),
-            Self::Dispersion => (0.02, 1.0),
-            Self::Radius => (8.0, GLASS_HEIGHT * 0.5),
-            Self::Index => (0.1, 4.0),
-            Self::Roundness => (0.5, 7.0),
-            Self::FresnelRange => (5.0, 100.0),
-            Self::FresnelHardness => (0.1, 1.0),
-            Self::FresnelStrength => (0.1, 1.0),
-            Self::GlareRange => (5.0, 100.0),
-            Self::GlareHardness => (0.1, 1.0),
-            Self::GlareStrength => (0.1, 1.2),
-            Self::GlareConvergence => (0.1, 1.0),
-            Self::GlareOpposite => (0.1, 1.0),
-            Self::GlareAngle => (0.2, 6.2831855),
-            Self::ShadowSpread => (5.0, 100.0),
-            Self::ShadowStrength => (0.05, 1.0),
-        };
-        let min = match self {
-            Self::Index => 1.0,
-            Self::Roundness => 2.0,
-            Self::GlareAngle => -std::f32::consts::PI,
-            _ => 0.0,
+        let (step, min, max) = match self {
+            Self::Blur => (2.0, 0., 200.0),
+            Self::Refraction => (2.0, 0., 100.0),
+            Self::Thickness => (2.0, 0., 100.0),
+            Self::Dispersion => (0.02, 0., 1.0),
+            Self::Frost => (0.05, 0., 1.0),
+            Self::Magnification => (0.02, 0., 1.0),
+            Self::Rim => (0.05, 0., 1.0),
+            Self::Reflection => (0.05, 0., 1.0),
+            Self::Inner => (0.02, 0., 1.0),
+            Self::Caustic => (0.02, 0., 1.0),
+            Self::ShadowSpread => (2.0, 0., 100.0),
+            Self::ShadowStrength => (0.02, 0., 1.0),
+            Self::Radius => (2., 0., GLASS_HEIGHT * 0.5),
+            Self::Roundness => (0.5, 2., 7.),
         };
         let value = (self.value(study) + step * direction).clamp(min, max);
         match self {
             Self::Blur => study.appearance.blur_radius = px(value),
-
             Self::Refraction => study.appearance.refraction = px(value),
             Self::Thickness => study.appearance.thickness = px(value),
-
             Self::Dispersion => study.appearance.dispersion = value,
-
-            Self::Radius => study.radius = value,
-            Self::Index => study.appearance.optics.refractive_index = value,
-            Self::Roundness => study.appearance.shape.roundness = value,
-            Self::FresnelRange => study.appearance.optics.fresnel_range = px(value),
-            Self::FresnelHardness => study.appearance.optics.fresnel_hardness = value,
-            Self::FresnelStrength => study.appearance.optics.fresnel_strength = value,
-            Self::GlareRange => study.appearance.optics.glare_range = px(value),
-            Self::GlareHardness => study.appearance.optics.glare_hardness = value,
-            Self::GlareStrength => study.appearance.optics.glare_strength = value,
-            Self::GlareConvergence => study.appearance.optics.glare_convergence = value,
-            Self::GlareOpposite => study.appearance.optics.glare_opposite = value,
-            Self::GlareAngle => study.appearance.optics.glare_angle = value,
+            Self::Frost => study.appearance.frost = value,
+            Self::Magnification => study.appearance.optics.magnification = value,
+            Self::Rim => study.appearance.optics.rim_strength = value,
+            Self::Reflection => study.appearance.optics.top_reflection = value,
+            Self::Inner => study.appearance.optics.inner_shading = value,
+            Self::Caustic => study.appearance.optics.caustic_strength = value,
             Self::ShadowSpread => study.appearance.shadow.spread = px(value),
             Self::ShadowStrength => study.appearance.shadow.strength = value,
+            Self::Radius => study.radius = value,
+            Self::Roundness => study.appearance.shape.roundness = value,
         }
     }
 }

@@ -379,3 +379,76 @@ fn shared_subpixel_rgb_bgr_and_clip() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn backdrop_srgb_colors_match_on_native_and_srgb_targets() -> anyhow::Result<()> {
+    let context = WgpuContext::new_headless()?;
+    for format in [
+        wgpu::TextureFormat::Rgba8Unorm,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+    ] {
+        let mut renderer = WgpuOffscreenRenderer::with_context(
+            context.clone(),
+            size(DevicePixels(16), DevicePixels(16)),
+        )?;
+        renderer.renderer = WgpuRenderer::new_external(
+            &context,
+            WgpuExternalRendererConfig {
+                size: renderer.size,
+                format,
+                alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+                target_usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::COPY_SRC,
+            },
+        )?;
+        renderer.target = context.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("backdrop_color_target"),
+            size: wgpu::Extent3d {
+                width: 16,
+                height: 16,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        renderer.target_view = renderer.target.create_view(&Default::default());
+        let viewport = bounds(0., 0., 16., 16.);
+        let mut scene = Scene::default();
+        scene.insert_primitive(gpui::BackdropBlur {
+            order: 0,
+            bounds: viewport,
+            content_mask: ContentMask { bounds: viewport },
+            corner_radii: Default::default(),
+            blur_radius: ScaledPixels(0.),
+            opacity: 1.,
+            shader: Some(gpui::BackdropShader::wgsl(
+                r#"
+                fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
+                    return vec4<f32>(backdrop_from_srgb(vec3<f32>(0.2, 0.4, 0.8)), 1.0);
+                }
+            "#,
+            )),
+            uniforms: Default::default(),
+            time: 0.,
+            pointer: point(0., 0.),
+            pointer_active: false,
+        });
+        scene.finish();
+        let pixels = renderer.render_rgba(&scene)?;
+        for (actual, expected) in pixels[(8 * 16 + 8) * 4..][..4]
+            .iter()
+            .zip([51u8, 102, 204, 255])
+        {
+            assert!(
+                actual.abs_diff(expected) <= 1,
+                "{format:?}: {actual} != {expected}"
+            );
+        }
+    }
+    Ok(())
+}

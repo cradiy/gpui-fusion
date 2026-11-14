@@ -1,4 +1,4 @@
-// Metal samples encoded sRGB; WGPU samples the linear scene representation.
+// Renderers specialize this for targets that store encoded sRGB without hardware conversion.
 const BACKDROP_NATIVE_SRGB: bool = false;
 
 fn backdrop_to_srgb_channel(value: f32) -> f32 {

@@ -1,9 +1,9 @@
 # Liquid glass
 
 `LiquidGlass` is a screen-space refractive material. It samples content already
-painted in the same GPUI window, bends it near curved edges, and adds LCH Fresnel
-reflection, directional glare, and a contour shadow. The center displays the
-blurred background. Foreground children remain sharp.
+painted in the same GPUI window, bends it near curved edges, and adds a narrow
+reflection rim, top reflection, inner shading, and a soft drop shadow. The center
+can magnify background detail. Foreground children remain sharp.
 
 The material provides no component behavior, popup management, or automatic
 foreground contrast selection. It supports rounded rectangles with independent
@@ -22,27 +22,33 @@ let material = LiquidGlassStyle::frosted()
     .dispersion(0.14);
 ```
 
-`optical()` is the default untinted refractive surface, with superellipse corners, Fresnel reflection, directional glare, and a contour shadow. `frosted()` is a softened surface. `clear()` retains more background
-detail with less blur and tint. `dark()` adds a dark neutral wash. These are
-starting configurations, not automatic adaptations to the background.
+`optical()` is an untinted height-field lens. `frosted()` blends a light frost
+over the sampled background; `dark()` uses neutral dark frost colors. `clear()`
+disables background blur. These are material configurations, not automatic
+foreground contrast adaptations.
 
-| Field | Frosted default | Meaning |
+| Field | Optical default | Meaning |
 | --- | --- | --- |
-| `blur_radius` | `18 px` | Nonnegative background blur radius |
-| `refraction` | `70.71 px` | Refraction distance multiplier; `0` disables bending |
-| `thickness` | `20 px` | Width of the curved edge region; `0` disables curvature |
-| `dispersion` | `0.14` | Relative red/blue displacement, `0..=1`; `0` disables separation |
-| `tint` | White, alpha `0.06` | Color wash mixed into the sampled background |
+| `blur_radius` | `2.2 px` | Maximum Gaussian background blur radius |
+| `refraction` | `37 px` | Maximum inward edge displacement |
+| `thickness` | `62 px` | Bevel width, limited by the local corner radius |
+| `dispersion` | `0.12` | Relative red/blue displacement gain |
+| `frost` | `0` | Frost coverage, from clear `0` to opaque `1` |
+| `frost_center`, `frost_edge` | Light neutral colors | Frost gradient across the bevel |
+| `tint` | Transparent | Color wash over the sampled material |
 
-Lengths use logical pixels and follow the window scale factor. Refraction uses
-Snell's law with `optics.refractive_index`, `refraction`, and `thickness`.
-A refractive index of one disables edge bending. The interior is flat. Strong edge refraction can fold background detail.
+Lengths use logical pixels and follow the window scale factor. The height field
+has a flat interior and a rounded bevel. Refraction is confined to the outer
+35% of the bevel, with a smooth falloff. Scale lengths to the control size;
+`refraction = 0` disables bending without removing surface lighting.
 
-`optics` controls Fresnel range, hardness and strength, and glare range,
-hardness, convergence, opposite-side strength, orientation and intensity.
-The reflection colors are evaluated in LCH through sRGB/Lab conversion.
-`optics.blur_edge` applies blur to the refracted rim; disabling it progressively
-restores sharp samples toward the boundary. Tint alpha contributes at 80% strength.
+`optics` controls interior magnification, rim intensity, top reflection,
+inner shading, caustic strength, and directional lighting. `center_blur` selects
+how much of the Gaussian blur reaches the interior. The rim uses the full blur.
+`frost` also softens the interior, suppresses refraction and reflections, and
+blends `frost_center` into `frost_edge` toward the boundary. For interactive
+controls, paint a resting frosted surface before labels and a clear pressed lens
+after labels when the text should participate in refraction.
 
 `shape.roundness` selects a superellipse exponent from 2 through 7.
 `shape.merge` supplies a circle center relative to the pane center, radius,
@@ -50,7 +56,7 @@ and smooth-union distance, all in logical pixels. The circle and connecting
 region extend paint coverage without changing layout or pointer hit regions.
 Set the same `shape` on `LiquidGlassRegion` when recoloring foreground content.
 
-`shadow` controls an exponential contour shadow with spread, strength, and
+`shadow` controls near and ambient drop shadows with spread, strength, and
 translation. It is painted before glass, so refraction and blur include it.
 Zero strength disables the shadow pass. Ancestor clipping applies to the pane,
 merged circle, and shadow.
@@ -161,7 +167,7 @@ shared distance field joins and separates continuously as either shape moves.
 The checkerboard exposes edge refraction and dispersion; a gradient background
 is also available. Presets adjust diffusion and tint while retaining the same
 optical model and current shape configuration. Controls expose refraction,
-Fresnel reflection, glare, shadow, and corner parameters. Redraws are requested
+frost, magnification, rim lighting, inner shading, shadow, and corner parameters. Redraws are requested
 on interaction rather than by a continuous animation loop.
 
 Backdrop sampling is limited to previously painted content in the same window;

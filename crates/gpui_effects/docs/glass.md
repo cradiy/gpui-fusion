@@ -2,8 +2,9 @@
 
 `LiquidGlass` renders clear and frosted surfaces with one optical model.
 `LiquidGlassStyle::frosted()` diffuses background detail, while `dark()`
-adds a dark neutral tint. Both preserve Snell refraction, chromatic dispersion,
-Fresnel reflection, directional glare, and contour shadows.
+uses dark neutral frost colors. Both use height-field refraction, chromatic
+dispersion, a narrow reflection rim, inner shading, and soft drop shadows.
+Increasing `frost` softens optical detail and blends the frost colors into the lens.
 
 The backdrop uses separable horizontal and vertical Gaussian blur. The radius
 is the three-sigma support: `sigma = blur_radius / 3`. WGPU evaluates this kernel

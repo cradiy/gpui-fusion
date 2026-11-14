@@ -20,66 +20,78 @@ impl MenuMaterial {
 }
 
 pub fn menu(material: MenuMaterial) -> ContextMenu {
+    let light = matches!(material, MenuMaterial::LightFrosted);
+    let foreground = if light { rgb(0x242428) } else { rgb(0xf5f5f7) };
+    let muted = if light { rgb(0x73737b) } else { rgb(0xa8a8b1) };
+    let mut glass = if light {
+        LiquidGlassStyle::frosted()
+    } else {
+        LiquidGlassStyle::dark()
+    };
+    glass.refraction = px(6.);
+    glass.thickness = px(14.);
+    glass.blur_radius = px(12.);
+    glass.frost = 0.62;
+    glass.optics.rim_strength = 0.35;
+    glass.optics.top_reflection = 0.08;
+    glass.optics.inner_shading = 0.04;
+    glass.shadow.strength = 0.;
+
     ContextMenu::new()
         .appearance(
             ContextMenuAppearance::default()
-                .muted_foreground(rgb(0x94a3b8).into())
-                .danger_foreground(rgb(0xfb7185).into())
-                .selected_background(rgba(0x94a3b829).into())
-                .selected_foreground(rgb(0xffffff).into())
-                .item_height(px(34.0))
-                .item_padding_x(px(10.0))
+                .muted_foreground(muted.into())
+                .danger_foreground(if light { rgb(0xbe123c) } else { rgb(0xfb7185) }.into())
+                .selected_background(
+                    if light {
+                        rgba(0x0000000e)
+                    } else {
+                        rgba(0xffffff12)
+                    }
+                    .into(),
+                )
+                .selected_foreground(foreground.into())
+                .item_height(px(36.0))
+                .item_padding_x(px(12.0))
                 .item_radius(px(8.0))
-                .separator(rgb(0x64748b).into())
+                .separator(
+                    if light {
+                        rgba(0x24242814)
+                    } else {
+                        rgba(0xffffff18)
+                    }
+                    .into(),
+                )
                 .separator_margin(px(5.0)),
         )
-        .w(px(220.0))
+        .w(px(232.0))
         .max_h(px(420.0))
-        .p(px(8.0))
-        .rounded(px(16.0))
+        .p(px(6.0))
+        .rounded(px(14.0))
         .border(px(0.0))
         .bg(transparent_black())
-        .text_color(rgb(0xf8fafc))
+        .text_color(foreground)
+        .text_size(px(14.))
         .font_family(gpui::GenericFontFamily::SystemUi)
-        .root_surface(move |state, content, _, _| match material {
-            MenuMaterial::DarkFrosted => LiquidGlass::with_style(LiquidGlassStyle::dark())
-                .id(("context-menu-dark-frosted", state.session_id))
-                .rounded(px(16.))
-                .shadow_lg()
-                .child(content)
-                .into_any_element(),
-            MenuMaterial::LightFrosted => LiquidGlass::with_style(LiquidGlassStyle::frosted())
-                .id(("context-menu-light-frosted", state.session_id))
-                .rounded(px(14.))
-                .shadow_lg()
-                .child(content)
-                .into_any_element(),
+        .surface(move |state, content, _, _| match material {
+            MenuMaterial::DarkFrosted | MenuMaterial::LightFrosted => {
+                LiquidGlass::with_style(glass)
+                    .id((
+                        "context-menu-glass",
+                        state.session_id * 10 + state.depth as u64,
+                    ))
+                    .rounded(px(14.))
+                    .shadow_lg()
+                    .child(content)
+                    .into_any_element()
+            }
             MenuMaterial::Plain => div()
-                .rounded(px(12.))
+                .rounded(px(14.))
                 .border_1()
                 .border_color(rgb(0x334155))
                 .bg(rgb(0x111827))
                 .shadow_lg()
                 .child(content)
                 .into_any_element(),
-        })
-        .submenu_surface(|state, content, _, _| {
-            LiquidGlass::with_style(LiquidGlassStyle::dark())
-                .id((
-                    "context-submenu-frosted",
-                    state.session_id * 10 + state.depth as u64,
-                ))
-                .rounded(px(13.))
-                .shadow_lg()
-                .child(content)
-        })
-        .surface_for_depth(2, |_, content, _, _| {
-            div()
-                .rounded(px(11.))
-                .border_1()
-                .border_color(rgb(0x475569))
-                .bg(rgb(0x1e294b))
-                .shadow_lg()
-                .child(content)
         })
 }

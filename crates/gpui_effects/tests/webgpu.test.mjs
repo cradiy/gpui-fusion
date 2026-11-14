@@ -12,7 +12,6 @@ async function glassShaders() {
     const read = path => readFile(new URL(path, import.meta.url), 'utf8');
     const template = await read('../../gpui/src/backdrop.wgsl');
     const shape = await read('../src/surface/shaders/liquid_glass_shape.wgsl');
-    const color = await read('../src/surface/shaders/liquid_glass_color.wgsl');
     const shaders = [];
     for (const sampling of ['backdrop_sampling', 'backdrop_sampling_manual']) {
         const sampler = await read(`../../gpui/src/${sampling}.wgsl`);
@@ -22,7 +21,7 @@ async function glassShaders() {
                 name: `${name}/${sampling}`,
                 code: template.replace('// __GPUI_BACKDROP_SAMPLING__', sampler)
                     .replace('// __GPUI_BACKDROP_SOURCE__',
-                        (name === 'liquid_glass' ? shape + '\n' + color + '\n' : '') + effect
+                        (name === 'liquid_glass' ? shape + '\n' : '') + effect
                         + (name === 'liquid_glass' ? '\nfn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> { return liquid_glass_material(input, params); }' : '')),
             });
         }

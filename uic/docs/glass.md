@@ -2,7 +2,9 @@
 
 `GlassSegmentedControl` presents a controlled single selection with a moving
 glass indicator. Option layout determines each option's width and remains stable
-while the moving selection refracts foreground content.
+while the pressed selection refracts foreground content. At rest a frosted pill
+is painted below the labels, keeping text and icons sharp. Pressing blends
+to a clear lens above the content, with interior magnification and edge refraction.
 
 ```rust
 use uic::components::glass::{GlassSegmentedAppearance, GlassSegmentedControl};

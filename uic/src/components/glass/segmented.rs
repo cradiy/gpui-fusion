@@ -255,7 +255,7 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for GlassSegmentedControl<T> {
                 .corner_radii
                 .to_pixels(window.rem_size())
                 .clamp_radii_for_quad_size(bounds.size);
-            let mut fallback = appearance.surface.tint;
+            let mut fallback = appearance.surface.frost_center;
             fallback.a = 1.;
             let (visual, pointer) = motion.update(cx, |state, _| {
                 state.motion.press_scales = press_scales;
@@ -342,17 +342,46 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for GlassSegmentedControl<T> {
             };
             content_region.set(Some(region));
             let mut optics = appearance.selection;
-            optics.refraction *= visual.pressure;
-            optics.dispersion *= visual.pressure;
-            optics.blur_radius *= visual.pressure;
+            let pressure = visual.pressure;
+            let unit = selected.size.height.min(selected.size.width).as_f32() / 120.;
+            optics.thickness *= unit;
+            optics.refraction *= unit * pressure;
+            optics.dispersion *= pressure;
+            optics.optics.magnification *= pressure;
+            optics.optics.rim_strength *= pressure;
+            optics.optics.top_reflection *= pressure;
+            optics.optics.inner_shading *= pressure;
+            optics.optics.caustic_strength *= pressure;
+            optics.shadow.spread *= unit;
+            optics.shadow.offset *= unit;
+            optics.shadow.strength *= pressure;
+            optics.blur_radius *= unit * pressure;
             paint_surface(window);
             if reduced {
-                window.paint_quad(
-                    fill(selected, optics.tint.composite_over(fallback))
-                        .corner_radii(selected_corners),
-                );
+                window
+                    .paint_quad(fill(selected, optics.frost_center).corner_radii(selected_corners));
             } else {
-                painted_lens.set(Some((selected, selected_corners, optics, deformation)));
+                if pressure < 1. {
+                    let mut resting = appearance.selection;
+                    resting.thickness *= unit;
+                    resting.refraction = px(0.);
+                    resting.dispersion = 0.;
+                    resting.optics.magnification = 0.;
+                    resting.optics.center_blur = 1.;
+                    resting.optics.rim_strength = 0.;
+                    resting.optics.top_reflection = 0.;
+                    resting.optics.inner_shading = 0.;
+                    resting.optics.caustic_strength = 0.;
+                    resting.blur_radius = (resting.blur_radius * unit).max(px(6.));
+                    resting.shadow.strength = 0.;
+                    window.with_subtree_effect_chain(selected, &[], 1. - pressure, |window| {
+                        paint_liquid_glass(selected, selected_corners, resting, window);
+                    });
+                }
+                if pressure > 0. {
+                    optics.frost = 0.;
+                    painted_lens.set(Some((selected, selected_corners, optics, deformation)));
+                }
             }
         });
         let mut root = painted

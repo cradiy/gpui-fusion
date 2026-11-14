@@ -61,7 +61,12 @@ including its STIX Two Math font (SIL OFL 1.1) and modified dvips color table
 table attribution when distributing these assets. The optional Mermaid renderer,
 `mermaid-svg`, uses MIT.
 
-The liquid-glass optical shaders and reference shader in `gpui_effects` include
-MIT-licensed code from Liquid Glass Studio, copyright (c) 2024 Charles Yin.
+The liquid-glass shape functions in `gpui_effects` include MIT-licensed code
+from Liquid Glass Studio, copyright (c) 2024 Charles Yin.
 The notice is retained in
 `crates/gpui_effects/src/surface/shaders/LICENSE-liquid-glass-studio`.
+
+The liquid-glass lens shading and refraction reference in `gpui_effects` adapt
+MIT-licensed code from `bilalgursen/liquid-glass`, copyright (c) 2026 Bilal
+Abdullah Gürşen. Its notice is retained in
+`crates/gpui_effects/src/surface/shaders/LICENSE-bilalgursen-liquid-glass`.

@@ -1270,7 +1270,13 @@ impl WgpuRenderer {
         alpha_mode: wgpu::CompositeAlphaMode,
         shader: &BackdropShader,
     ) -> anyhow::Result<wgpu::RenderPipeline> {
-        let source = gpui::compose_backdrop_shader_wgsl(shader);
+        let mut source = gpui::compose_backdrop_shader_wgsl(shader);
+        if !surface_format.is_srgb() {
+            source = source.replace(
+                "const BACKDROP_NATIVE_SRGB: bool = false;",
+                "const BACKDROP_NATIVE_SRGB: bool = true;",
+            );
+        }
         let module = wgpu::naga::front::wgsl::parse_str(&source)
             .map_err(|error| anyhow::anyhow!("WGSL parse error: {error}"))?;
         wgpu::naga::valid::Validator::new(

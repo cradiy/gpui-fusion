@@ -9,25 +9,25 @@ pub struct GlassSegmentedAppearance {
     pub selection: LiquidGlassStyle,
     /// Color of monochrome content covered by the animated selection surface.
     /// Alpha multiplies the content's original alpha; uncovered pixels keep their color.
-    pub selected_text: Hsla,
+    pub selected_foreground: Hsla,
     pub disabled_opacity: f32,
 }
 
 impl GlassSegmentedAppearance {
     pub fn light() -> Self {
         let mut surface = LiquidGlassStyle::clear()
-            .refraction(px(0.))
-            .thickness(px(0.))
-            .dispersion(0.);
+            .refraction(px(4.))
+            .thickness(px(12.))
+            .dispersion(0.02);
         surface.blur_radius = px(12.);
         surface.optics.center_blur = 1.;
         surface.frost = 0.65;
         surface.frost_center = rgb(0xdedfe2).into();
         surface.frost_edge = surface.frost_center;
         surface.shadow.strength = 0.;
-        surface.optics.rim_strength = 0.;
-        surface.optics.top_reflection = 0.;
-        surface.optics.inner_shading = 0.;
+        surface.optics.rim_strength = 0.6;
+        surface.optics.top_reflection = 0.1;
+        surface.optics.inner_shading = 0.12;
         surface.optics.caustic_strength = 0.;
         let mut selection = LiquidGlassStyle::optical();
         selection.frost = 0.82;
@@ -35,7 +35,7 @@ impl GlassSegmentedAppearance {
         Self {
             surface,
             selection,
-            selected_text: rgb(0x1d1d1f).into(),
+            selected_foreground: rgb(0x007aff).into(),
             disabled_opacity: 0.45,
         }
     }
@@ -47,7 +47,7 @@ impl GlassSegmentedAppearance {
         material.surface.frost_edge = material.surface.frost_center;
         material.selection.frost_center = rgb(0x2a2c31).into();
         material.selection.frost_edge = rgb(0x1c1d21).into();
-        material.selected_text = rgb(0xf5f5f7).into();
+        material.selected_foreground = rgb(0x64b5ff).into();
         material
     }
 }

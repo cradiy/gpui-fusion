@@ -66,17 +66,17 @@ layout, uniformly scaling width and height.
 
 `Styled` controls the outer layout, padding, corners, background, shadow, and
 inherited typography. `GlassSegmentedAppearance` configures the base and
-selected optical surfaces, selected text, and disabled opacity.
+selected optical surfaces, selected foreground, and disabled opacity.
 Pair `dark()` with a light foreground color using `text_color`.
 
-The track is painted beneath the options and the selection above them. Pressing
+The frosted track and resting selection are painted beneath the options. Pressing
 activates the selection's optical material, refracting both background and
 foreground content, including while held stationary. Releasing smoothly returns
-refraction, dispersion, and blur to zero. The selection uses the standard optical
-material with circular corners and no separate contour shadow.
+to a translucent frosted selection with sharp foreground content. The pressed
+selection uses the optical material above the options, including its shadow.
 Caller-provided corner radii are resolved through `Styled` for both surfaces.
 
-Text and monochrome SVGs use `selected_text` inside the animated selection
+Text and monochrome SVGs use `selected_foreground` inside the animated selection
 region. Their source colors remain unchanged outside it. The covered color's
 alpha multiplies the original content alpha; emoji and colored images retain
 their original colors.

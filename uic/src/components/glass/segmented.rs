@@ -235,7 +235,7 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for GlassSegmentedControl<T> {
                     )
                     .child(liquid_glass_content(
                         option.content,
-                        appearance.selected_text,
+                        appearance.selected_foreground,
                         move |_, _| region.get(),
                     ))
             })

@@ -3543,6 +3543,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-fusion"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "schemars 1.0.4",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "gpui-icons-macros"
 version = "0.1.0"
 dependencies = [

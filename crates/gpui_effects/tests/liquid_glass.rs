@@ -424,3 +424,39 @@ fn optical_material_matches_reference_composition() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn optical_material_preserves_transparent_backdrops() -> anyhow::Result<()> {
+    use gpui_effects::LiquidGlassStyle;
+
+    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(80), DevicePixels(48)))?;
+    let source = liquid_glass_shader()
+        .wgsl_source()
+        .replace("fn backdrop_effect(", "fn optical_material(")
+        .replace("sample_blurred_backdrop(", "sample_empty_backdrop(")
+        .replace("sample_raw_backdrop(", "sample_empty_backdrop(");
+    let shader = gpui::BackdropShader::wgsl(format!(
+        "{source}\nfn sample_empty_backdrop(input: BackdropInput, offset: vec2<f32>) -> vec4<f32> {{ return vec4<f32>(0.0); }}\nfn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {{ let material = optical_material(input, params); return vec4<f32>(vec3<f32>(material.a), 1.0); }}"
+    ));
+    for (material, expected) in [
+        (LiquidGlassStyle::clear(), 0..=0),
+        (LiquidGlassStyle::frosted(), 1..=254),
+        (
+            LiquidGlassStyle::clear().tint(gpui::hsla(0., 0., 1., 1.)),
+            255..=255,
+        ),
+    ] {
+        let mut scene = glass(40., 1., 0.);
+        let surface = &mut scene.backdrop_blurs[0];
+        surface.uniforms = material.uniforms(Default::default(), 1.);
+        surface.shader = Some(shader.clone());
+        let pixels = renderer.render_rgba(&scene)?;
+        let center = pixels[(24 * 80 + 40) * 4];
+        assert!(
+            expected.contains(&center),
+            "unexpected glass alpha over an empty backdrop: {center}, expected {expected:?}"
+        );
+    }
+    Ok(())
+}

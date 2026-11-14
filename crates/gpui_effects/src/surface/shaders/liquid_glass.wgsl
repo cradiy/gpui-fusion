@@ -1,6 +1,14 @@
-fn glass_optical_sample(input: BackdropInput, offset: vec2<f32>, clarity: f32) -> vec3<f32> {
-    return mix(backdrop_to_srgb(sample_blurred_backdrop(input, offset).rgb),
-        backdrop_to_srgb(sample_raw_backdrop(input, offset).rgb), clarity);
+fn glass_optical_sample(input: BackdropInput, offset: vec2<f32>, clarity: f32) -> vec4<f32> {
+    let blurred = sample_blurred_backdrop(input, offset);
+    let raw = sample_raw_backdrop(input, offset);
+    return mix(vec4<f32>(backdrop_to_srgb(blurred.rgb), blurred.a),
+        vec4<f32>(backdrop_to_srgb(raw.rgb), raw.a), clarity);
+}
+
+fn glass_optical_layer(base: vec4<f32>, color: vec3<f32>, weight: f32) -> vec4<f32> {
+    let alpha = clamp(mix(base.a, 1.0, weight), 0.0, 1.0);
+    let premultiplied = mix(base.rgb * base.a, color, weight);
+    return vec4<f32>(premultiplied / max(alpha, 0.00001), alpha);
 }
 
 // Portions copyright (c) 2024 Charles Yin. MIT license: LICENSE-liquid-glass-studio.
@@ -53,8 +61,10 @@ fn liquid_glass_material(input: BackdropInput, params: BackdropParams) -> vec4<f
         color.r = glass_optical_sample(input, displacement * (1.0 + surface.z), clarity).r;
         color.b = glass_optical_sample(input, displacement * (1.0 - surface.z), clarity).b;
     }
-    let background = color;
-    color = mix(color, tint.rgb, clamp(tint.a * 0.8, 0.0, 1.0));
+    let background = color.rgb;
+    // Retain transparent scene pixels so compositor backgrounds remain visible.
+    let tint_weight = clamp(tint.a * mix(1.0, 0.8, color.a), 0.0, 1.0);
+    color = glass_optical_layer(color, tint.rgb, tint_weight);
 
     if (edge_factor > 0.0) {
         let scale = max(lighting.w, 1.0);
@@ -63,7 +73,7 @@ fn liquid_glass_material(input: BackdropInput, params: BackdropParams) -> vec4<f
         let fresnel = glass_reflection_band(inside, fresnel_settings.y, fresnel_settings.z, scale);
         var fresnel_lch = SRGB_TO_LCH(mix(vec3<f32>(1.0), tint.rgb, tint.a * 0.5));
         fresnel_lch.x = clamp(fresnel_lch.x + 20.0 * fresnel * fresnel_settings.w, 0.0, 100.0);
-        color = mix(color, LCH_TO_SRGB(fresnel_lch), fresnel * fresnel_settings.w * 0.7 * normal_length);
+        color = glass_optical_layer(color, LCH_TO_SRGB(fresnel_lch), fresnel * fresnel_settings.w * 0.7 * normal_length);
 
         let glare_geo = glass_reflection_band(inside, glare.x, glare.y, scale);
         // Convert GPUI's downward Y axis to the material's upward Y axis.
@@ -78,9 +88,9 @@ fn liquid_glass_material(input: BackdropInput, params: BackdropParams) -> vec4<f
         var glare_lch = SRGB_TO_LCH(mix(background, tint.rgb, tint.a * 0.5));
         glare_lch.x = clamp(glare_lch.x + 150.0 * angular * glare_geo, 0.0, 120.0);
         glare_lch.y += 30.0 * angular * glare_geo;
-        color = mix(color, LCH_TO_SRGB(glare_lch), angular * glare_geo * normal_length);
+        color = glass_optical_layer(color, LCH_TO_SRGB(glare_lch), angular * glare_geo * normal_length);
     }
 
     let coverage = 1.0 - smoothstep(-0.5, 0.5, distance);
-    return vec4<f32>(backdrop_from_srgb(clamp(color, vec3<f32>(0.0), vec3<f32>(1.0))), coverage);
+    return vec4<f32>(backdrop_from_srgb(clamp(color.rgb, vec3<f32>(0.0), vec3<f32>(1.0))), coverage * color.a);
 }

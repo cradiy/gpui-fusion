@@ -1089,6 +1089,10 @@ impl WaylandWindowStatePtr {
         let handler = state.input_handler.take();
         drop(state);
         let was_composing = if let Some(mut handler) = handler {
+            if !handler.query_ime_enabled() {
+                self.state.borrow_mut().input_handler = Some(handler);
+                return None;
+            }
             let marked = handler.marked_text_range();
             let was_composing = marked.is_some();
             if let Some(marked) = marked {
@@ -1342,7 +1346,7 @@ impl WaylandWindowStatePtr {
         let ime_enabled = state
             .input_handler
             .as_mut()
-            .map(|input_handler| input_handler.query_accepts_text_input())
+            .map(|input_handler| input_handler.query_ime_enabled())
             .unwrap_or(true);
         drop(state);
         if Some(ime_enabled) != client.ime_enabled() {
@@ -1755,6 +1759,10 @@ impl WaylandWindowStatePtr {
         let mut state = self.state.borrow_mut();
         if let Some(mut input_handler) = state.input_handler.take() {
             drop(state);
+            if !input_handler.query_ime_enabled() {
+                self.state.borrow_mut().input_handler = Some(input_handler);
+                return;
+            }
             match ime {
                 ImeInput::InsertText(text) => {
                     input_handler.replace_text_in_range(None, &text);

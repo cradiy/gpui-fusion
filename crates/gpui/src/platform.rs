@@ -2134,6 +2134,13 @@ impl PlatformInputHandler {
             .unwrap_or(true)
     }
 
+    /// Returns whether the focused editor allows input-method composition.
+    pub fn query_ime_enabled(&mut self) -> bool {
+        self.cx
+            .update(|window, cx| self.handler.ime_enabled(window, cx))
+            .unwrap_or(false)
+    }
+
     /// Returns the focused editor's text entry mode.
     pub fn text_input_mode(&mut self) -> crate::TextInputMode {
         self.cx
@@ -2420,6 +2427,12 @@ pub trait InputHandler: 'static {
     /// Returns whether this handler is accepting text input to be inserted.
     fn accepts_text_input(&mut self, _window: &mut Window, _cx: &mut App) -> bool {
         true
+    }
+
+    /// Allows input-method composition independently of direct text insertion.
+    /// Desktop backends bypass the IME when false while preserving ordinary key input.
+    fn ime_enabled(&mut self, window: &mut Window, cx: &mut App) -> bool {
+        self.accepts_text_input(window, cx)
     }
 
     /// Describes the editor to platform input methods. This does not validate inserted text.

@@ -231,6 +231,11 @@ pub trait EntityInputHandler: 'static + Sized {
         None
     }
 
+    /// See [`InputHandler::ime_enabled`] for details.
+    fn ime_enabled(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.accepts_text_input(window, cx)
+    }
+
     /// See [`InputHandler::accepts_text_input`] for details
     fn accepts_text_input(&self, _window: &mut Window, _cx: &mut Context<Self>) -> bool {
         true
@@ -441,8 +446,12 @@ impl<V: EntityInputHandler> InputHandler for ElementInputHandler<V> {
             .update(cx, |view, cx| view.accepts_text_input(window, cx))
     }
 
-    fn prefers_ime_for_printable_keys(&mut self, window: &mut Window, cx: &mut App) -> bool {
+    fn ime_enabled(&mut self, window: &mut Window, cx: &mut App) -> bool {
         self.view
-            .update(cx, |view, cx| view.accepts_text_input(window, cx))
+            .update(cx, |view, cx| view.ime_enabled(window, cx))
+    }
+
+    fn prefers_ime_for_printable_keys(&mut self, window: &mut Window, cx: &mut App) -> bool {
+        self.ime_enabled(window, cx)
     }
 }

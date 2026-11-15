@@ -296,7 +296,12 @@ fn password_visibility_toggle_keeps_selection_composition_and_keyboard_access(
             cx,
         )
         .unwrap();
-        let editor = cx.new(|cx| InputState::new(cx).password().initial_value("mø🦉"));
+        let editor = cx.new(|cx| {
+            InputState::new(cx)
+                .password()
+                .password_ime(true)
+                .initial_value("mø🦉")
+        });
         let field = cx.new(|cx| Input::new(&editor, window, cx));
         Harness {
             field,

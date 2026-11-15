@@ -441,9 +441,18 @@ default.
 
 Password fields include an eye/eye-off button with mouse, keyboard, and accessibility
 activation. `password_toggle(false)` omits it; `set_password_visible` changes it
-programmatically. Revealing the value preserves the selection and composition;
-password clipboard, surrounding-text, and history protections remain active.
+programmatically. Revealing the value preserves the selection and composition.
+Selected text can be copied while the password is visible, including in read-only
+fields. Masked or disabled fields block copying. Password cutting, surrounding-text,
+and history protections remain active.
 Disabling the editor hides the value again.
+
+Masked passwords disable desktop IME composition by default while allowing direct
+key input and paste. `InputState::password_ime(true)` opts into composition while
+masked; `set_password_ime(enabled, cx)` changes the policy at runtime. Revealed
+passwords allow composition. Hiding a password with masked IME disabled, or
+turning off masked IME during composition, cancels the pre-edit without committing
+it. Read-only and disabled fields never enable IME.
 
 `clearable(true)` adds an undoable clear action when editable text is nonempty.
 `icon(side, InputIcon::new(path))` sets a leading or trailing SVG. Icons are
@@ -458,7 +467,7 @@ the application's asset source to provide the bundled SVG assets.
 
 Ctrl/Cmd+Z undoes and Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes. A complete IME
 composition is one edit. History is bounded to 100 entries and 1 MiB of text;
-password fields retain no history and disallow clipboard copying. Programmatic
+password fields retain no history. Programmatic
 value replacement clears history. Switching to read-only or disabled cancels
 unfinished composition without emitting a committed edit.
 

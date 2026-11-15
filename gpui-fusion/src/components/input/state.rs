@@ -552,6 +552,7 @@ pub struct InputState {
     pending_edit: Option<super::history::Snapshot>,
     pub(super) mode: InputMode,
     password_visible: bool,
+    password_ime: bool,
     pub(super) tab_size: usize,
     input_purpose: gpui::TextInputPurpose,
     pub(super) autofill: Option<gpui::AutofillOptions>,
@@ -611,6 +612,7 @@ impl InputState {
             pending_edit: None,
             mode: InputMode::Text,
             password_visible: false,
+            password_ime: false,
             tab_size: 4,
             input_purpose: gpui::TextInputPurpose::default(),
             autofill: None,
@@ -745,12 +747,31 @@ impl InputState {
         let visible = visible && self.mode == InputMode::Password && !self.disabled;
         if self.password_visible != visible {
             self.password_visible = visible;
+            if self.is_password_masked() && !self.password_ime {
+                self.cancel_composition();
+            }
             self.last_layout = None;
             self.last_cursor_scroll = None;
             self.scroll_cursor_pending = true;
             cx.notify();
         }
     }
+    /// Allows IME composition while a password is masked. Disabled by default.
+    pub fn password_ime(mut self, enabled: bool) -> Self {
+        self.password_ime = enabled;
+        self
+    }
+
+    pub fn set_password_ime(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.password_ime != enabled {
+            self.password_ime = enabled;
+            if self.is_password_masked() && !enabled {
+                self.cancel_composition();
+            }
+            cx.notify();
+        }
+    }
+
     pub fn is_password_visible(&self) -> bool {
         self.mode == InputMode::Password && self.password_visible
     }
@@ -1192,7 +1213,7 @@ impl InputState {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        if self.disabled || self.mode == InputMode::Password {
+        if self.disabled || self.is_password_masked() {
             return;
         }
         if !self.selected_range.is_empty() {
@@ -1468,6 +1489,7 @@ impl InputState {
         self.selection_reversed = snapshot.reversed;
         self.caret_affinity = snapshot.affinity;
         self.marked_range = None;
+        self.preedit_cursor_hidden = false;
         self.horizontal_selection_anchor = None;
         self.preferred_x = None;
         self.scroll_cursor_pending = true;
@@ -1571,6 +1593,10 @@ impl EntityInputHandler for InputState {
             InputMode::Multiline => gpui::TextInputMode::Multiline,
             InputMode::Password => gpui::TextInputMode::Password,
         }
+    }
+
+    fn ime_enabled(&self, _: &mut Window, _: &mut Context<Self>) -> bool {
+        !self.disabled && !self.read_only && (!self.is_password_masked() || self.password_ime)
     }
 
     fn accepts_text_input(&self, _: &mut Window, _: &mut Context<Self>) -> bool {
@@ -1800,7 +1826,7 @@ impl EntityInputHandler for InputState {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.disabled || self.read_only {
+        if !self.ime_enabled(_window, cx) {
             return;
         }
         self.remember_edit();
@@ -1855,7 +1881,7 @@ impl EntityInputHandler for InputState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.disabled || self.read_only {
+        if !self.ime_enabled(window, cx) {
             return;
         }
         self.replace_and_mark_text_in_range(range_utf16, new_text, selection.range(), window, cx);

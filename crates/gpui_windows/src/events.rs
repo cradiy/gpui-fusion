@@ -650,7 +650,7 @@ impl WindowsWindowInner {
 
     fn update_ime_enabled(&self, handle: HWND) {
         let ime_enabled = self
-            .with_input_handler(|input_handler| input_handler.query_accepts_text_input())
+            .with_input_handler(|input_handler| input_handler.query_ime_enabled())
             .unwrap_or(false);
         if ime_enabled == self.state.ime_enabled.get() {
             return;
@@ -675,6 +675,12 @@ impl WindowsWindowInner {
     }
 
     fn handle_ime_composition(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
+        if !self
+            .with_input_handler(|handler| handler.query_ime_enabled())
+            .unwrap_or(false)
+        {
+            return Some(0);
+        }
         let ctx = ImeContext::get(handle)?;
         self.handle_ime_composition_inner(*ctx, lparam)
     }

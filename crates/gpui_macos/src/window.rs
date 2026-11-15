@@ -2375,6 +2375,24 @@ extern "C" fn handle_key_event(this: &Object, native_event: id, key_equivalent: 
 
             drop(lock);
 
+            if with_input_handler(this, |handler| handler.query_ime_enabled()) == Some(false) {
+                let handled = run_callback(PlatformInput::KeyDown(key_down_event.clone()));
+                if handled == YES {
+                    return YES;
+                }
+                let modifiers = key_down_event.keystroke.modifiers;
+                if !modifiers.control
+                    && !modifiers.platform
+                    && !modifiers.function
+                    && let Some(text) = key_down_event.keystroke.key_char.as_ref()
+                    && text.chars().all(|c| !c.is_control())
+                {
+                    with_input_handler(this, |handler| handler.replace_text_in_range(None, text));
+                    return YES;
+                }
+                return NO;
+            }
+
             let is_composing =
                 with_input_handler(this, |input_handler| input_handler.marked_text_range())
                     .flatten()

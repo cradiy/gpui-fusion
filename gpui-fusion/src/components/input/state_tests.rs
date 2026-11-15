@@ -1975,3 +1975,137 @@ fn password_masks_graphemes_and_maps_pointer_and_ime_to_source(cx: &mut TestAppC
     })
     .unwrap();
 }
+
+#[gpui::test]
+fn password_copy_tracks_visibility_and_keeps_readonly_and_disabled_rules(cx: &mut TestAppContext) {
+    let view = open_input(cx, |cx| {
+        InputState::new(cx).password().initial_value("aλ🪶z")
+    });
+    let mut visual = draw_and_focus(&view, cx);
+    view.update(&mut visual.cx, |view, window, cx| {
+        cx.write_to_clipboard(ClipboardItem::new_string("unchanged".into()));
+        view.state.update(cx, |input, cx| {
+            input.set_selected_text_range(1..4, window, cx);
+        });
+    })
+    .unwrap();
+    visual.simulate_keystrokes("ctrl-c");
+    view.update(&mut visual.cx, |view, _, cx| {
+        assert_eq!(
+            cx.read_from_clipboard().unwrap().text().unwrap(),
+            "unchanged"
+        );
+        view.state
+            .update(cx, |input, cx| input.set_password_visible(true, cx));
+    })
+    .unwrap();
+    visual.simulate_keystrokes("ctrl-c");
+    view.update(&mut visual.cx, |view, _, cx| {
+        assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), "λ🪶");
+        cx.write_to_clipboard(ClipboardItem::new_string("unchanged".into()));
+        view.state
+            .update(cx, |input, cx| input.set_read_only(true, cx));
+    })
+    .unwrap();
+    visual.simulate_keystrokes("ctrl-c");
+    view.update(&mut visual.cx, |view, _, cx| {
+        assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), "λ🪶");
+        cx.write_to_clipboard(ClipboardItem::new_string("unchanged".into()));
+        view.state
+            .update(cx, |input, cx| input.set_password_visible(false, cx));
+    })
+    .unwrap();
+    visual.simulate_keystrokes("ctrl-c");
+    view.update(&mut visual.cx, |view, window, cx| {
+        assert_eq!(
+            cx.read_from_clipboard().unwrap().text().unwrap(),
+            "unchanged"
+        );
+        view.state.update(cx, |input, cx| {
+            input.set_password_visible(true, cx);
+            input.set_disabled(true, cx);
+            input.copy(&Copy, window, cx);
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().unwrap(),
+                "unchanged"
+            );
+            assert_eq!(input.value().as_ref(), "aλ🪶z");
+        });
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn masked_password_ime_is_opt_in_without_disabling_direct_input(cx: &mut TestAppContext) {
+    let view = open_input(cx, |cx| InputState::new(cx).password());
+    let mut visual = draw_and_focus(&view, cx);
+    visual.simulate_keystrokes("r");
+    view.update(&mut visual.cx, |view, window, cx| {
+        let mut handler = gpui::ElementInputHandler::new(Bounds::default(), view.state.clone());
+        assert!(gpui::InputHandler::accepts_text_input(
+            &mut handler,
+            window,
+            cx
+        ));
+        assert!(!gpui::InputHandler::ime_enabled(&mut handler, window, cx));
+        assert!(!gpui::InputHandler::prefers_ime_for_printable_keys(
+            &mut handler,
+            window,
+            cx
+        ));
+        view.state.update(cx, |input, cx| {
+            assert_eq!(input.value().as_ref(), "r");
+            input.replace_and_mark_text_in_range(None, "xy", Some(2..2), window, cx);
+            assert!(!input.is_composing());
+            input.replace_and_mark_text_with_selection(
+                None,
+                "xy",
+                PreeditSelection::Hidden,
+                window,
+                cx,
+            );
+            assert!(!input.preedit_cursor_hidden);
+            assert_eq!(input.value().as_ref(), "r");
+            input.set_password_ime(true, cx);
+            assert!(input.ime_enabled(window, cx));
+            input.replace_and_mark_text_in_range(None, "xy", Some(2..2), window, cx);
+            assert!(input.is_composing());
+            input.set_password_ime(false, cx);
+            assert!(!input.is_composing());
+            assert_eq!(input.value().as_ref(), "r");
+            input.set_password_visible(true, cx);
+            assert!(input.ime_enabled(window, cx));
+            input.replace_and_mark_text_with_selection(
+                None,
+                "zw",
+                PreeditSelection::Hidden,
+                window,
+                cx,
+            );
+            assert!(input.preedit_cursor_hidden);
+            assert!(input.is_composing());
+            input.set_password_visible(false, cx);
+            assert!(!input.is_composing());
+            assert!(!input.preedit_cursor_hidden);
+            assert_eq!(input.value().as_ref(), "r");
+            input.set_password_ime(true, cx);
+            input.replace_and_mark_text_in_range(None, "uv", Some(2..2), window, cx);
+            input.replace_text_in_range(None, "界", window, cx);
+            assert_eq!(input.value().as_ref(), "r界");
+            input.set_read_only(true, cx);
+            assert!(!input.ime_enabled(window, cx));
+            input.set_read_only(false, cx);
+            input.set_disabled(true, cx);
+            assert!(!input.ime_enabled(window, cx));
+        });
+    })
+    .unwrap();
+    visual.run_until_parked();
+    view.update(&mut visual.cx, |view, _, _| {
+        assert_eq!(
+            &*view.changes.borrow(),
+            &[SharedString::from("r"), SharedString::from("r界")]
+        );
+    })
+    .unwrap();
+}

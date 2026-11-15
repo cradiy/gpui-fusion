@@ -540,3 +540,46 @@ fn invalid_gradients_and_inactive_motion_are_rejected_before_paint() {
         );
     }
 }
+
+#[test]
+fn glass_edge_color_cascades_without_replacing_body_material() {
+    use gpui_fusion::{default_styles, default_theme, style::MaterialMode};
+    let theme = default_theme();
+    let styles = default_styles();
+    let patch = StylePatch::default().glass_edge_color(Token::<Hsla>::new("accent"));
+    let patch = StylePatch::from_json(&serde_json::to_string(&patch).unwrap()).unwrap();
+    for mode in ["light", "dark"] {
+        let context = ResolveContext::new(&theme, mode, "neutral").unwrap();
+        let expected = context
+            .resolve(&Token::<Hsla>::new("accent").into())
+            .unwrap();
+        for name in ["input", "button"] {
+            let recipe = &styles.recipes[name];
+            let resolve = |patch: &StylePatch| {
+                recipe
+                    .resolve(
+                        None,
+                        MaterialMode::Glass,
+                        patch,
+                        &context,
+                        &State::FocusVisible.into(),
+                        None,
+                    )
+                    .unwrap()
+                    .material
+                    .unwrap()
+            };
+            let original = resolve(&StylePatch::default());
+            let changed = resolve(&patch);
+            assert_eq!(changed.edge_color, expected);
+            assert_eq!(changed.tint, original.tint);
+            assert_eq!(changed.frost_center, original.frost_center);
+            assert_eq!(changed.frost_edge, original.frost_edge);
+            assert_eq!(changed.refraction, original.refraction);
+            let mut cleared_patch = StylePatch::default();
+            cleared_patch.properties.glass_edge_color = Property::Clear;
+            let cleared = resolve(&cleared_patch);
+            assert_eq!(cleared.edge_color.a, 0.);
+        }
+    }
+}

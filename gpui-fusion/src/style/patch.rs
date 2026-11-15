@@ -51,6 +51,7 @@ pub trait Styled: Sized {
         pb => padding_bottom: Pixels, pl => padding_left: Pixels,
         gap => gap: Pixels, rounded => radius: Pixels, border => border_width: Pixels,
         text_color => foreground: Hsla,
+        glass_edge_color => glass_edge_color: Hsla,
         opacity => opacity: f32,
     }
     fn bg(mut self, value: impl Into<StyleValue<Hsla>>) -> Self {
@@ -248,6 +249,13 @@ pub fn resolve_style(
     let mut computed = ComputedStyle::default();
     for layer in layers {
         layer.apply(context, states, part, &mut computed, 0)?;
+    }
+    if let Some(glass) = &mut computed.material {
+        match computed.glass_edge_color {
+            super::Resolved::Value(color) => glass.edge_color = color,
+            super::Resolved::Clear => glass.edge_color = gpui::transparent_black(),
+            super::Resolved::Unset => {}
+        }
     }
     computed.validate()?;
     Ok(computed)

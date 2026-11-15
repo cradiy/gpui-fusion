@@ -10,6 +10,8 @@ pub fn default_styles() -> crate::style::ComponentStyles {
         blur: length("glass_blur").into(),
         refraction: length("glass_refraction").scale(if pressed { 1. } else { 0.1875 }),
         thickness: length("glass_thickness").scale(if pressed { 1. } else { 0.75 }),
+        edge_light: Token::<f32>::new("glass_edge_light").into(),
+        edge_color: Token::<Hsla>::new("glass_edge_color").into(),
         frost: Token::<f32>::new("glass_frost").scale(0.08),
         tint: color("surface").opacity(0.08),
         frost_center: color("surface").into(),
@@ -109,6 +111,8 @@ pub fn default_styles() -> crate::style::ComponentStyles {
                     blur: length("glass_blur").into(),
                     refraction: length("glass_refraction").scale(1.5),
                     thickness: length("glass_thickness").scale(1.1875),
+                    edge_light: Token::<f32>::new("glass_edge_light").into(),
+                    edge_color: Token::<Hsla>::new("glass_edge_color").into(),
                     frost: Token::<f32>::new("glass_frost").into(),
                     tint: gpui::transparent_black().into(),
                     frost_center: color("surface_contrast").into(),
@@ -149,6 +153,8 @@ pub fn default_styles() -> crate::style::ComponentStyles {
                     blur: length("glass_blur").into(),
                     refraction: length("glass_refraction").scale(1.75),
                     thickness: length("glass_thickness").scale(1.25),
+                    edge_light: Token::<f32>::new("glass_edge_light").into(),
+                    edge_color: Token::<Hsla>::new("glass_edge_color").into(),
                     frost: Token::<f32>::new("glass_frost").into(),
                     tint: color("surface").opacity(0.04),
                     frost_center: color("surface_contrast").into(),
@@ -190,6 +196,8 @@ pub fn default_styles() -> crate::style::ComponentStyles {
                 blur: length("glass_blur").into(),
                 refraction: length("glass_refraction").into(),
                 thickness: length("glass_thickness").into(),
+                edge_light: Token::<f32>::new("glass_edge_light").into(),
+                edge_color: Token::<Hsla>::new("glass_edge_color").into(),
                 frost: Token::<f32>::new("glass_frost").scale(0.92),
                 tint: color("surface").opacity(0.025),
                 frost_center: color("surface_raised").into(),
@@ -199,12 +207,107 @@ pub fn default_styles() -> crate::style::ComponentStyles {
         }),
         variants: BTreeMap::new(),
     };
+    let input_glass = |focused: bool| Material::Glass {
+        blur: length("glass_blur").scale(14.),
+        refraction: length("glass_refraction").scale(0.5),
+        thickness: length("glass_thickness").scale(0.5),
+        edge_light: Token::<f32>::new("glass_edge_light").scale(if focused { 0.55 } else { 0.4 }),
+        edge_color: Token::<Hsla>::new("glass_edge_color").into(),
+        frost: Token::<f32>::new("glass_frost").scale(0.55),
+        tint: color("surface").opacity(0.08),
+        frost_center: color("surface").into(),
+        frost_edge: color("muted_surface").into(),
+    };
+    let input = Recipe {
+        parts: BTreeSet::from([
+            "placeholder".into(),
+            "caret".into(),
+            "selection".into(),
+            "scrollbar".into(),
+            "action_button".into(),
+            "resize_handle".into(),
+        ]),
+        base: StylePatch::default()
+            .text_size(length("font_body"))
+            .px(px(12.))
+            .py(px(8.))
+            .gap(px(8.))
+            .rounded(length("radius_control"))
+            .border(px(1.))
+            .bg(color("surface"))
+            .text_color(color("foreground"))
+            .border_color(color("edge"))
+            .hover(|s| s.border_color(color("primary_hover")))
+            .focus_visible(|s| {
+                s.border_color(color("focus"))
+                    .glass_edge_color(color("focus").opacity(0.35))
+            })
+            .state(State::Disabled, |s| {
+                s.bg(color("surface_disabled"))
+                    .text_color(color("foreground_disabled"))
+                    .border_color(color("edge_subtle"))
+            })
+            .part(crate::style::PartName("placeholder".into()), |s| {
+                s.text_color(color("placeholder"))
+                    .state(State::Disabled, |s| {
+                        s.text_color(color("foreground_disabled"))
+                    })
+            })
+            .part(crate::style::PartName("action_button".into()), |s| {
+                s.text_color(color("foreground_muted"))
+                    .text_size(px(18.))
+                    .w(px(24.))
+                    .h(px(24.))
+                    .rounded(px(4.))
+                    .border_color(color("focus"))
+                    .state(State::Disabled, |s| {
+                        s.text_color(color("foreground_disabled"))
+                    })
+            })
+            .part(crate::style::PartName("resize_handle".into()), |s| {
+                s.text_color(color("foreground_muted").opacity(0.7))
+            })
+            .part(crate::style::PartName("caret".into()), |s| {
+                s.w(px(1.5)).text_color(color("foreground"))
+            })
+            .part(crate::style::PartName("selection".into()), |s| {
+                s.bg(color("selection"))
+            })
+            .part(crate::style::PartName("scrollbar".into()), |s| {
+                s.bg(color("foreground_muted").opacity(0.5))
+                    .h(px(24.))
+                    .rounded(px(999.))
+                    .border_color(color("focus"))
+                    .hover(|s| s.bg(color("foreground_muted")))
+                    .pressed(|s| s.bg(color("foreground")))
+            }),
+        glass: StylePatch::default()
+            .rounded(px(10.))
+            .material(input_glass(false))
+            .focus_visible(|s| s.material(input_glass(true)))
+            .state(State::Disabled, |s| s.material(Material::Plain)),
+        variants: BTreeMap::from([(
+            "invalid".into(),
+            StylePatch::default()
+                .border_color(color("error"))
+                .glass_edge_color(color("error").opacity(0.4))
+                .hover(|s| {
+                    s.border_color(color("error_hover"))
+                        .glass_edge_color(color("error_hover").opacity(0.4))
+                })
+                .focus_visible(|s| {
+                    s.border_color(color("error"))
+                        .glass_edge_color(color("error").opacity(0.4))
+                }),
+        )]),
+    };
     crate::style::ComponentStyles {
         recipes: BTreeMap::from([
             ("button".into(), button),
             ("switch".into(), switch),
             ("slider".into(), slider),
             ("segmented".into(), segmented),
+            ("input".into(), input),
         ]),
     }
 }

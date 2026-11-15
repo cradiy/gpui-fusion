@@ -129,3 +129,59 @@ fn separable_gaussian_matches_impulse_kernel_after_target_resolution_changes() -
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn glass_edge_color_preserves_center_and_exterior() -> anyhow::Result<()> {
+    use gpui::{Corners, hsla, px};
+    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(128), DevicePixels(96)))?;
+    let viewport = Bounds::new(point(P(0.), P(0.)), size(P(128.), P(96.)));
+    let bounds = Bounds::new(point(P(16.), P(16.)), size(P(96.), P(64.)));
+    for background in [0x202830, 0xe0d8d0] {
+        for frost in [0., 0.55] {
+            let mut images = Vec::new();
+            for alpha in [0., 0.8] {
+                let mut scene = Scene::default();
+                scene.insert_primitive(Quad {
+                    bounds: viewport,
+                    content_mask: ContentMask { bounds: viewport },
+                    background: rgb(background).into(),
+                    ..Default::default()
+                });
+                scene.insert_primitive(BackdropBlur {
+                    order: 0,
+                    bounds,
+                    content_mask: ContentMask { bounds: viewport },
+                    corner_radii: Corners::all(P(12.)),
+                    blur_radius: P(8.),
+                    opacity: 1.,
+                    shader: Some(liquid_glass_shader()),
+                    uniforms: LiquidGlassStyle::optical()
+                        .frost(frost)
+                        .edge_color(hsla(0.3, 0.8, 0.5, alpha))
+                        .uniforms(Corners::all(px(12.)), 1.),
+                    time: 0.,
+                    pointer: point(0., 0.),
+                    pointer_active: false,
+                });
+                scene.finish();
+                images.push(renderer.render_rgba(&scene)?);
+            }
+            for (x, y) in [(64, 48), (54, 42), (5, 5), (120, 88)] {
+                let offset = (y * 128 + x) * 4;
+                assert_eq!(
+                    &images[0][offset..offset + 4],
+                    &images[1][offset..offset + 4]
+                );
+            }
+            let changed = (17..22).any(|y| {
+                (40..88).any(|x| {
+                    let offset = (y * 128 + x) * 4;
+                    images[0][offset..offset + 3] != images[1][offset..offset + 3]
+                })
+            });
+            assert!(changed, "edge tint must affect the curved boundary");
+        }
+    }
+    Ok(())
+}

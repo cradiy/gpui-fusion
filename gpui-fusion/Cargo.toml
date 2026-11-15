@@ -14,6 +14,8 @@ default = ["theme-watch"]
 theme-watch = ["dep:notify", "dep:async-channel"]
 
 [dependencies]
+gpui_icons = { workspace = true, features = ["lucide-core", "lucide-common"] }
+unicode-segmentation.workspace = true
 gpui.workspace = true
 gpui_effects.workspace = true
 serde.workspace = true
@@ -25,7 +27,7 @@ notify = { version = "8.2", optional = true }
 async-channel = { workspace = true, optional = true }
 
 [dev-dependencies]
+gpui_wgpu.workspace = true
 tempfile.workspace = true
-gpui_icons = { workspace = true, features = ["lucide-core"] }
 gpui = { workspace = true, features = ["test-support"] }
 gpui_platform = { workspace = true, features = ["wayland", "font-kit"] }

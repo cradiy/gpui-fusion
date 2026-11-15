@@ -1,0 +1,538 @@
+use std::{cell::RefCell, ops::Range, rc::Rc};
+
+use gpui::{
+    App, Bounds, Element, ElementId, ElementInputHandler, Entity, GlobalElementId, Hitbox,
+    HitboxBehavior, LayoutId, LongPressEvent, PaintQuad, Pixels, Style, TextInputFocusEvent,
+    TextRun, UnderlineStyle, Window, fill, point, prelude::*, px, relative, size,
+};
+
+use super::{InputMode, InputState, state::TextLayout};
+
+pub(super) struct TextElement {
+    pub(super) input: Entity<InputState>,
+    pub(super) accessibility: Option<super::accessibility::Geometry>,
+}
+
+pub(super) struct CursorScrollSnapshot {
+    viewport: Bounds<Pixels>,
+    cursor_row: Bounds<Pixels>,
+    offset: gpui::Point<Pixels>,
+}
+
+pub(super) struct PrepaintState {
+    focus_hitbox: Option<Hitbox>,
+    layout: Option<TextLayout>,
+    cursor: Option<PaintQuad>,
+    cursor_bounds: Option<Bounds<Pixels>>,
+    selection: Vec<PaintQuad>,
+    text_bounds: Bounds<Pixels>,
+    viewport_bounds: Bounds<Pixels>,
+    horizontal_offset: Pixels,
+}
+
+impl IntoElement for TextElement {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for TextElement {
+    type RequestLayoutState = (bool, Rc<RefCell<Option<TextLayout>>>);
+    type PrepaintState = PrepaintState;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let input = self.input.read(cx);
+        let multiline = input.mode == InputMode::Multiline;
+        let cursor_was_visible = multiline
+            && input.last_cursor_scroll.as_ref().is_some_and(|previous| {
+                let top =
+                    previous.cursor_row.top() + input.scroll_handle.offset().y - previous.offset.y;
+                previous.viewport.size.height > px(0.)
+                    && top >= previous.viewport.top()
+                    && top + previous.cursor_row.size.height <= previous.viewport.bottom()
+            });
+        let layout = Rc::new(RefCell::new(None));
+        let mut style = Style::default();
+        style.size.width = relative(1.).into();
+        let text_style = window.text_style();
+        let line_height = window.line_height();
+        let input = self.input.clone();
+        let measured = layout.clone();
+        let layout_id =
+            window.request_measured_layout(style, move |known, available, window, cx| {
+                let width = known.width.or(match available.width {
+                    gpui::AvailableSpace::Definite(width) => Some(width),
+                    _ => None,
+                });
+                let input = input.read(cx);
+                let mut cached = measured.borrow_mut();
+                let next = shape_input(
+                    input,
+                    &text_style,
+                    multiline.then_some(width).flatten(),
+                    line_height,
+                    cached.as_ref().or(input.last_layout.as_ref()),
+                    window,
+                );
+                let height = line_height
+                    * if multiline {
+                        next.visual_row_count()
+                    } else {
+                        1
+                    };
+                if multiline
+                    && !input.disabled
+                    && input.focus_handle.is_focused(window)
+                    && (input.scroll_cursor_pending || cursor_was_visible)
+                {
+                    let viewport_height = input.scroll_handle.bounds().size.height;
+                    if viewport_height > px(0.) {
+                        let caret =
+                            next.position_for_caret(input.cursor_offset(), input.caret_affinity);
+                        let mut offset = input.scroll_handle.offset();
+                        if caret.y + offset.y < px(0.) {
+                            offset.y = -caret.y;
+                        } else if caret.y + line_height + offset.y > viewport_height {
+                            offset.y = viewport_height - caret.y - line_height;
+                        }
+                        offset.y = offset
+                            .y
+                            .clamp(-(height - viewport_height).max(px(0.)), px(0.));
+                        input.scroll_handle.set_offset(offset);
+                    }
+                }
+                let measured_width = width.unwrap_or_else(|| {
+                    next.lines
+                        .iter()
+                        .map(|line| line.width())
+                        .max()
+                        .unwrap_or_default()
+                });
+                *cached = Some(next);
+                size(measured_width, height)
+            });
+        (layout_id, (cursor_was_visible, layout))
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        request_layout: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        let input = self.input.read(cx);
+        let disabled = input.disabled;
+        let preedit_cursor_hidden = input.marked_range.is_some() && input.preedit_cursor_hidden;
+        let selected_range = input.display_offset(input.selected_range.start)
+            ..input.display_offset(input.selected_range.end);
+        let cursor_offset = input.display_offset(input.cursor_offset());
+        let caret_affinity = input.caret_affinity;
+        let caret_width = super::field::length(&input.caret_style.width, px(1.5));
+        let caret_height = super::field::length(&input.caret_style.height, window.line_height());
+        let multiline = input.mode == InputMode::Multiline;
+        let focus_handle = input.focus_handle.clone();
+        let scroll_cursor_pending = input.scroll_cursor_pending;
+        let current_scroll_offset = input.single_line_scroll_offset;
+        let style = window.text_style();
+
+        let layout = request_layout.1.borrow_mut().take().unwrap_or_else(|| {
+            shape_input(
+                input,
+                &style,
+                multiline.then_some(bounds.size.width),
+                window.line_height(),
+                input.last_layout.as_ref(),
+                window,
+            )
+        });
+
+        let cursor_position = layout.position_for_caret(cursor_offset, caret_affinity);
+        let mut horizontal_offset = px(0.);
+        let mut text_bounds = bounds;
+        if !multiline {
+            let content_width = layout
+                .lines
+                .first()
+                .map(|line| line.width())
+                .unwrap_or_default()
+                + caret_width
+                + px(1.);
+            let max_scroll = (content_width - bounds.size.width).max(px(0.));
+            horizontal_offset = current_scroll_offset.clamp(-max_scroll, px(0.));
+
+            if focus_handle.is_focused(window) && scroll_cursor_pending {
+                let cursor_left = cursor_position.x + horizontal_offset;
+                let cursor_right = cursor_left + caret_width + px(1.);
+                if cursor_left < px(0.) {
+                    horizontal_offset -= cursor_left;
+                } else if cursor_right > bounds.size.width {
+                    horizontal_offset -= cursor_right - bounds.size.width;
+                }
+                horizontal_offset = horizontal_offset.clamp(-max_scroll, px(0.));
+            }
+
+            text_bounds = Bounds::new(
+                point(bounds.left() + horizontal_offset, bounds.top()),
+                size(content_width.max(bounds.size.width), bounds.size.height),
+            );
+        }
+        let indicator_top = if multiline {
+            bounds.top() + cursor_position.y + (layout.line_height - caret_height) / 2.
+        } else {
+            bounds.top() + (bounds.size.height - caret_height) / 2.
+        };
+        let cursor_bounds = Bounds::new(
+            point(text_bounds.left() + cursor_position.x, indicator_top),
+            size(caret_width, caret_height),
+        );
+        let cursor_row_bounds = Bounds::new(
+            point(
+                text_bounds.left() + cursor_position.x,
+                bounds.top() + cursor_position.y,
+            ),
+            size(caret_width, layout.line_height),
+        );
+        let (selection, cursor) = if disabled || preedit_cursor_hidden {
+            (Vec::new(), None)
+        } else if selected_range.is_empty() {
+            (
+                Vec::new(),
+                Some(fill(
+                    cursor_bounds,
+                    super::field::color(&input.caret_style.foreground),
+                )),
+            )
+        } else {
+            (
+                selection_quads(
+                    &layout,
+                    selected_range,
+                    text_bounds,
+                    super::field::color(&input.selection_style.background),
+                ),
+                None,
+            )
+        };
+
+        if let Some(geometry) = &self.accessibility {
+            geometry.borrow_mut().update(
+                &input.content,
+                &layout,
+                text_bounds,
+                window.scale_factor(),
+            );
+        }
+
+        PrepaintState {
+            focus_hitbox: (!disabled).then(|| window.insert_hitbox(bounds, HitboxBehavior::Normal)),
+            layout: Some(layout),
+            cursor,
+            cursor_bounds: Some(cursor_row_bounds),
+            selection,
+            text_bounds,
+            viewport_bounds: bounds,
+            horizontal_offset,
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        request_layout: &mut Self::RequestLayoutState,
+        prepaint: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let (focus_handle, disabled, multiline, scroll_handle, mut scroll_cursor_pending) = {
+            let input = self.input.read(cx);
+            (
+                input.focus_handle.clone(),
+                input.disabled,
+                input.mode == InputMode::Multiline,
+                input.scroll_handle.clone(),
+                input.scroll_cursor_pending,
+            )
+        };
+        if !disabled {
+            if window.supports_autofill()
+                && let Some(options) = self.input.read(cx).autofill.clone()
+            {
+                let value = self.input.read(cx).content.clone();
+                let weak = self.input.downgrade();
+                window.handle_autofill(
+                    &focus_handle,
+                    options.clone(),
+                    value,
+                    prepaint.viewport_bounds,
+                    move |value, window, cx| {
+                        let _ = weak.update(cx, |input, cx| {
+                            if input.disabled || input.autofill.as_ref() != Some(&options) {
+                                return;
+                            }
+                            let range = 0..input.content.encode_utf16().count();
+                            gpui::EntityInputHandler::replace_text_in_range(
+                                input,
+                                Some(range),
+                                &value,
+                                window,
+                                cx,
+                            );
+                        });
+                    },
+                );
+            }
+            if let Some(hitbox) = prepaint.focus_hitbox.take() {
+                let long_press_hitbox = hitbox.clone();
+                window.on_mouse_event(move |_: &LongPressEvent, phase, window, cx| {
+                    if phase.bubble() && long_press_hitbox.is_hovered(window) {
+                        // Keep Android's default text-selection action while excluding
+                        // ancestor context menus.
+                        cx.stop_propagation();
+                    }
+                });
+                let input = self.input.clone();
+                window.on_mouse_event(move |event: &TextInputFocusEvent, phase, window, cx| {
+                    if phase.bubble() && hitbox.is_hovered(window) {
+                        input.update(cx, |input, cx| input.focus_at(event.position, window, cx));
+                        window.prevent_default();
+                        cx.stop_propagation();
+                    }
+                });
+            }
+            window.handle_input(
+                &focus_handle,
+                ElementInputHandler::new(bounds, self.input.clone()),
+                cx,
+            );
+        }
+        for selection in prepaint.selection.drain(..) {
+            window.paint_quad(selection);
+        }
+
+        let layout = prepaint.layout.take().expect("input layout must exist");
+        let clip = window.content_mask().bounds;
+        let visible = layout.visible_lines(clip.top() - bounds.top(), clip.bottom() - bounds.top());
+        for line_ix in visible {
+            let line = &layout.lines[line_ix];
+            let rows_before = layout.row_starts[line_ix];
+            let origin = point(
+                prepaint.text_bounds.left(),
+                bounds.top() + layout.line_height * rows_before as f32,
+            );
+            let height = layout.line_height * (line.wrap_boundaries().len() + 1);
+            let overhang = line.font_size().max(line.ascent() + line.descent());
+            if origin.y + height + overhang < clip.top() || origin.y - overhang > clip.bottom() {
+                continue;
+            }
+            line.paint(
+                origin,
+                layout.line_height,
+                gpui::TextAlign::Left,
+                Some(prepaint.viewport_bounds),
+                window,
+                cx,
+            )
+            .expect("failed to paint input text");
+        }
+
+        if !disabled
+            && focus_handle.is_focused(window)
+            && let Some(cursor) = prepaint.cursor.take()
+        {
+            window.paint_quad(cursor);
+        }
+
+        let viewport = scroll_handle.bounds();
+        let scroll_offset = scroll_handle.offset();
+        if multiline && !disabled && focus_handle.is_focused(window) && request_layout.0 {
+            let input = self.input.read(cx);
+            let reflowed = input.last_layout.as_ref().is_some_and(|previous| {
+                previous.line_height != layout.line_height
+                    || !Rc::ptr_eq(&previous.lines, &layout.lines)
+            });
+            scroll_cursor_pending |= reflowed
+                || input
+                    .last_cursor_scroll
+                    .as_ref()
+                    .is_some_and(|old| old.viewport.size != viewport.size);
+        }
+        self.input.update(cx, |input, _| {
+            input.last_layout = Some(layout);
+            input.last_bounds = Some(prepaint.text_bounds);
+            input.last_viewport_bounds = Some(prepaint.viewport_bounds);
+            if multiline {
+                input.last_cursor_scroll =
+                    prepaint
+                        .cursor_bounds
+                        .map(|cursor_row| CursorScrollSnapshot {
+                            viewport,
+                            cursor_row,
+                            offset: scroll_offset,
+                        });
+                input.scroll_cursor_pending = scroll_cursor_pending;
+            }
+            if !multiline {
+                input.single_line_scroll_offset = prepaint.horizontal_offset;
+                if focus_handle.is_focused(window) && scroll_cursor_pending {
+                    input.scroll_cursor_pending = false;
+                }
+            }
+        });
+
+        if multiline && focus_handle.is_focused(window) && scroll_cursor_pending {
+            let scroll_changed = prepaint
+                .cursor_bounds
+                .is_some_and(|cursor_bounds| keep_cursor_visible(cursor_bounds, &scroll_handle));
+            self.input.update(cx, |input, _| {
+                input.scroll_cursor_pending = false;
+            });
+            if scroll_changed {
+                window.request_animation_frame();
+            }
+        }
+    }
+}
+
+fn shape_input(
+    input: &InputState,
+    style: &gpui::TextStyle,
+    wrap_width: Option<Pixels>,
+    line_height: Pixels,
+    previous: Option<&TextLayout>,
+    window: &Window,
+) -> TextLayout {
+    let content = input.content.clone();
+    let multiline = input.mode == InputMode::Multiline;
+    let (display_text, text_color) = if content.is_empty() {
+        (
+            input.placeholder.clone(),
+            super::field::color(&input.placeholder_style.foreground),
+        )
+    } else if input.is_password_masked() {
+        (input.password_mask(), style.color)
+    } else if multiline {
+        (content.clone(), style.color)
+    } else {
+        (content.replace(['\r', '\n'], " ").into(), style.color)
+    };
+
+    let run = TextRun {
+        len: display_text.len(),
+        font: style.font(),
+        color: text_color,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let shaping_run = run.clone();
+    let runs = if !content.is_empty()
+        && let Some(marked_range) = input.marked_range.as_ref()
+    {
+        let marked_range =
+            input.display_offset(marked_range.start)..input.display_offset(marked_range.end);
+        vec![
+            TextRun {
+                len: marked_range.start,
+                ..run.clone()
+            },
+            TextRun {
+                len: marked_range.end - marked_range.start,
+                underline: Some(UnderlineStyle {
+                    color: Some(run.color),
+                    thickness: px(1.0),
+                    wavy: false,
+                }),
+                ..run.clone()
+            },
+            TextRun {
+                len: display_text.len() - marked_range.end,
+                ..run
+            },
+        ]
+        .into_iter()
+        .filter(|run| run.len > 0)
+        .collect::<Vec<_>>()
+    } else {
+        vec![run]
+    };
+
+    let font_size = style.font_size.to_pixels(window.rem_size());
+    let mut layout = TextLayout::shape(
+        display_text,
+        runs,
+        super::state::TextLayoutSettings {
+            font_size,
+            wrap_width,
+            line_height,
+            tab_size: input.tab_size,
+        },
+        window.text_system(),
+        previous,
+    );
+    layout.shaping_run = Some(shaping_run);
+
+    layout
+}
+
+pub(super) fn selection_quads(
+    layout: &TextLayout,
+    selected: Range<usize>,
+    bounds: Bounds<Pixels>,
+    color: gpui::Hsla,
+) -> Vec<PaintQuad> {
+    let mut quads = Vec::new();
+    let mut rows_before = 0;
+    for (line_ix, line) in layout.lines.iter().enumerate() {
+        let line_start = layout.line_starts[line_ix];
+        let local = selected.start.saturating_sub(line_start)
+            ..selected.end.saturating_sub(line_start).min(line.len());
+        for mut selection in line.selection_bounds(local, layout.line_height) {
+            selection.origin += bounds.origin + point(px(0.), layout.line_height * rows_before);
+            quads.push(fill(selection, color));
+        }
+        rows_before += line.wrap_boundaries().len() + 1;
+    }
+    quads
+}
+
+fn keep_cursor_visible(cursor: Bounds<Pixels>, scroll: &gpui::ScrollHandle) -> bool {
+    let viewport = scroll.bounds();
+    if viewport.size.height <= px(0.) {
+        return false;
+    }
+    let mut offset = scroll.offset();
+    if cursor.top() < viewport.top() {
+        offset.y += viewport.top() - cursor.top();
+    } else if cursor.bottom() > viewport.bottom() {
+        offset.y -= cursor.bottom() - viewport.bottom();
+    }
+    let max_offset = scroll.max_offset();
+    offset.y = offset.y.clamp(-max_offset.y, px(0.));
+    if offset != scroll.offset() {
+        scroll.set_offset(offset);
+        true
+    } else {
+        false
+    }
+}

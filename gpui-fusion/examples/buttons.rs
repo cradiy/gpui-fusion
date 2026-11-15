@@ -79,6 +79,8 @@ fn glass(material: MaterialChoice, pressed: bool) -> Material {
         blur: px(blur).into(),
         refraction: px(refraction).into(),
         thickness: px(thickness).into(),
+        edge_light: Token::<f32>::new("glass_edge_light").into(),
+        edge_color: Token::<Hsla>::new("glass_edge_color").into(),
         frost: frost.into(),
         tint: Token::<Hsla>::new("surface").opacity(0.04),
         frost_center: Token::<Hsla>::new("surface").into(),

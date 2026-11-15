@@ -12,6 +12,7 @@ pub fn default_theme() -> Theme {
         ("muted_surface", 0xf0f0f0, 0x303030),
         ("surface", 0xffffff, 0x25272b),
         ("surface_raised", 0xffffff, 0x2e3137),
+        ("surface_disabled", 0xf0f0f0, 0x303030),
         ("surface_sunken", 0xe9ecf1, 0x101216),
         ("surface_inverse", 0x202126, 0xf1f2f4),
         ("surface_contrast", 0xf8f9fb, 0xdfe3e9),
@@ -22,7 +23,7 @@ pub fn default_theme() -> Theme {
         ("foreground", 0x202126, 0xf1f2f4),
         ("foreground_secondary", 0x505866, 0xb8c0cc),
         ("foreground_muted", 0x626c7b, 0x99a3b3),
-        ("foreground_disabled", 0x8b93a1, 0x717b8c),
+        ("foreground_disabled", 0x929292, 0x777777),
         ("foreground_inverse", 0xf1f2f4, 0x202126),
         ("edge", 0xd9d9d9, 0x424242),
         ("edge_subtle", 0xe7e9ee, 0x343840),
@@ -126,6 +127,14 @@ pub fn default_theme() -> Theme {
             TokenDefinition::Length(ModeValues::constant(gpui::px(value))),
         );
     }
+    tokens.insert(
+        "glass_edge_color".into(),
+        TokenDefinition::Color(ModeValues::constant(gpui::transparent_black())),
+    );
+    tokens.insert(
+        "glass_edge_light".into(),
+        TokenDefinition::Number(ModeValues::constant(1.)),
+    );
     tokens.insert(
         "glass_frost".into(),
         TokenDefinition::Number(ModeValues::constant(1.)),

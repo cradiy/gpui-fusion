@@ -99,6 +99,7 @@ declarations! {
     padding_top: Pixels, padding_right: Pixels, padding_bottom: Pixels, padding_left: Pixels,
     gap: Pixels, radius: Pixels, border_width: Pixels,
     background: Hsla, foreground: Hsla, border_color: Hsla, opacity: f32,
+    glass_edge_color: Hsla,
 }
 
 impl ComputedStyle {

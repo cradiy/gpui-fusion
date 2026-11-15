@@ -99,9 +99,13 @@ fn liquid_glass_material(input: BackdropInput, params: BackdropParams) -> vec4<f
         1.0 - smoothstep(-0.5, 0.1, normalized.x));
     var rim_color = mix(vec3<f32>(1.0), warm_cool, down * 0.6);
     rim_color = mix(rim_color, vec3<f32>(0.12, 0.6, 1.2), mix(left, away, lean) * 0.85);
+    let edge_color = params.slots[5];
+    rim_color = mix(rim_color, edge_color.rgb, clamp(edge_color.a, 0.0, 1.0));
     let reflection = rim_color * (rim * rim_direction * lighting.x + fresnel * mix(right, facing, lean) * 0.02 * lighting.x / 0.55) * clear;
     let caustic = vec3<f32>(1.0, 0.92, 0.86) * smoothstep(0.72, 0.98, depth) * down * lighting.w * clear;
     color = vec4<f32>(color.rgb + reflection + caustic, color.a);
+    let edge_coverage = pow(depth, 1.6);
+    color = glass_optical_layer(color, edge_color.rgb, clamp(edge_color.a, 0.0, 1.0) * edge_coverage);
     let coverage = 1.0 - smoothstep(-0.5, 0.5, distance);
     return vec4<f32>(backdrop_from_srgb(clamp(color.rgb, vec3<f32>(0.0), vec3<f32>(1.0))), coverage * color.a);
 }

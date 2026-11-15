@@ -36,6 +36,7 @@ foreground contrast adaptations.
 | `frost` | `0` | Frost coverage, from clear `0` to opaque `1` |
 | `frost_center`, `frost_edge` | Light neutral colors | Frost gradient across the bevel |
 | `tint` | Transparent | Color wash over the sampled material |
+| `edge_color` | Transparent | Curved edge color; alpha controls strength without changing the flat center |
 
 Lengths use logical pixels and follow the window scale factor. The height field
 has a flat interior and a rounded bevel. Refraction is confined to the outer

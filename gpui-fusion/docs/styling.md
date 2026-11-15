@@ -121,7 +121,7 @@ the whole component's opacity.
 
 `Theme.material` selects `MaterialMode::Plain` or `MaterialMode::Glass` globally.
 The component recipe supplies geometry and its glass adaptation. Generic tokens
-such as `glass_blur`, `glass_refraction`, `glass_thickness`, and `glass_frost`
+such as `glass_blur`, `glass_refraction`, `glass_thickness`, `glass_edge_light`, `glass_edge_color`, and `glass_frost`
 control material parameters through the same theme file. Components
 follow the theme by default. `.material_mode(mode)` fixes a component's material;
 `set_material_mode(None, cx)` resumes following. Fixed controls unsubscribe from
@@ -393,3 +393,74 @@ Settled controls do not request animation frames.
 
 Run `cargo run -p gpui-fusion --example segmented` for text, icon, mixed-content,
 and fixed-material controls with theme and material switching.
+
+## Inputs
+
+Create an `InputState` entity for the editable value, then an
+`Input::new(&state, window, cx)` entity for the themed field. The state supports
+single-line text, `password()`, and soft-wrapping `multiline()` input. Set
+`aria_label` independently of the placeholder. `read_only(true)` retains
+selection and copying; `disabled(true)` prevents interaction and tab focus.
+
+The `input` recipe controls the surface through Fusion `Styled`. `InputPart`
+provides `Placeholder` (text color), `Caret` (color, width, optional height),
+`Selection` (background), and `Scrollbar` (background, hover/pressed background,
+radius, minimum thumb height, focus border), `ActionButton` (built-in icon color, size, radius, and focus border), and `ResizeHandle` (grip color). The `invalid` variant uses error
+colors. `rows` sets the multiline viewport height unless `h` is explicit.
+`prefix` and `suffix` build adornments inside the field's focus boundary.
+
+Colors and material follow the injected theme. `material_mode` fixes the field's
+material while retaining theme colors; `set_material_mode(None, cx)` resumes
+following it. Glass uses a frosted background beneath the text, selection, and
+caret. The default glass field uses its optical edge without an additional outline;
+focus increases edge lighting. `glass_edge_color` colors the optical edge independently
+of the body tint, including in state and variant rules. The shared glass material
+resolves `edge_color` from the `glass_edge_color` theme token by default. Explicit instance
+border colors or gradients can provide an outline. The material's
+`edge_light` value scales rim, reflection, and caustic lighting in `0..=1`.
+Disabled fields use the neutral disabled surface and text colors.
+Theme changes preserve the editor entity, focus, selection, and IME
+composition. Resolved styles and unchanged text layouts are cached; the field
+does not animate the material while idle.
+
+`on_change` receives committed edits and programmatic `set_value` changes, but
+not IME pre-edit updates. `value()` includes visible pre-edit text. Enter submits
+single-line fields; multiline fields insert a newline and use Ctrl/Cmd+Enter to
+submit. The state also emits `InputEvent` and configured software-keyboard
+`InputActionEvent` events. Input bindings are installed once when a field is
+created. While a multiline editor has focus, wheel and touchpad scrolling over
+the field stays within the field, including at its scroll boundaries.
+
+Multiline fields can opt into a resize grip with `resizable(true)`. `resize` selects
+`InputResize::Vertical`, `Horizontal`, `Both`, or `Disabled`. `resize_limits` sets
+the minimum and maximum outer dimensions in logical pixels. Dragging preserves the
+value, selection, and composition. Disabled and single-line fields have no grip.
+`set_resizable` changes availability without discarding the current size;
+`reset_size` restores sizing from `rows` and the style. The grip is disabled by
+default.
+
+Password fields include an eye/eye-off button with mouse, keyboard, and accessibility
+activation. `password_toggle(false)` omits it; `set_password_visible` changes it
+programmatically. Revealing the value preserves the selection and composition;
+password clipboard, surrounding-text, and history protections remain active.
+Disabling the editor hides the value again.
+
+`clearable(true)` adds an undoable clear action when editable text is nonempty.
+`icon(side, InputIcon::new(path))` sets a leading or trailing SVG. Icons are
+noninteractive by default; `InputIcon::on_click(label, callback)` makes an icon
+an accessible button with mouse and keyboard activation. `search_icon(side)` is
+a shortcut using the same icon slot and rendering: its action emits
+`InputEvent::Submit` and invokes `on_submit` when composition is inactive.
+`prefix`, `suffix`, and `icon` replace the content of their respective slot;
+the last setter wins. Clear and password buttons remain independent.
+All built-in buttons honor disabled state. Install `gpui_icons::IconAssets` in
+the application's asset source to provide the bundled SVG assets.
+
+Ctrl/Cmd+Z undoes and Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes. A complete IME
+composition is one edit. History is bounded to 100 entries and 1 MiB of text;
+password fields retain no history and disallow clipboard copying. Programmatic
+value replacement clears history. Switching to read-only or disabled cancels
+unfinished composition without emitting a committed edit.
+
+Run `cargo run -p gpui-fusion --example inputs` for theme/material switching,
+multiline, password, read-only, disabled, and validation styling.

@@ -144,6 +144,8 @@ pub struct LiquidGlassStyle {
     pub dispersion: f32,
     /// Background color wash.
     pub tint: Hsla,
+    /// Edge color wash; alpha controls strength without tinting the flat center.
+    pub edge_color: Hsla,
     /// Opaque frost blended over the lens, in `0..=1`.
     pub frost: f32,
     pub frost_center: Hsla,
@@ -166,6 +168,7 @@ impl LiquidGlassStyle {
             thickness: px(62.),
             dispersion: 0.12,
             tint: hsla(0., 0., 1., 0.),
+            edge_color: hsla(0., 0., 1., 0.),
             frost: 0.,
             frost_center: gpui::rgb(0xf9fafc).into(),
             frost_edge: gpui::rgb(0xe2e4e9).into(),
@@ -201,6 +204,7 @@ impl LiquidGlassStyle {
     /// Packs material parameters in device pixels for backdrop rendering.
     pub fn uniforms(self, corners: Corners<Pixels>, scale: f32) -> EffectUniforms {
         let tint: Rgba = self.tint.into();
+        let edge_color: Rgba = self.edge_color.into();
         let frost_center: Rgba = self.frost_center.into();
         let frost_edge: Rgba = self.frost_edge.into();
         EffectUniforms::new()
@@ -214,6 +218,7 @@ impl LiquidGlassStyle {
                 ],
             )
             .with_slot(TINT_SLOT, [tint.r, tint.g, tint.b, tint.a])
+            .with_slot(5, [edge_color.r, edge_color.g, edge_color.b, edge_color.a])
             .with_slot(
                 SURFACE_SLOT,
                 [

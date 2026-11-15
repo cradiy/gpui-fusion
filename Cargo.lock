@@ -3552,12 +3552,14 @@ dependencies = [
  "gpui_effects",
  "gpui_icons",
  "gpui_platform",
+ "gpui_wgpu",
  "notify",
  "schemars 1.0.4",
  "serde",
  "serde_json",
  "tempfile",
  "toml 0.9.8",
+ "unicode-segmentation",
 ]
 
 [[package]]

@@ -184,3 +184,37 @@ independent of this decorative content.
 
 Run `cargo run -p gpui-fusion --example switches` to compare plain and glass
 controls, change theme, and exercise disabled states.
+
+## Sliders
+
+`Slider::new` creates a persistent horizontal numeric control using the `slider`
+recipe. Its default range is 0..=100 with a step of 1. `range(SliderRange::new(min,
+max, step)?)` sets finite increasing limits; `None` selects continuous values.
+Steps are anchored at the minimum and both endpoints remain reachable. Initial
+values are clamped and snapped to the configured range; nonfinite initial values
+use the default minimum. Nonfinite `set_value` calls are ignored.
+
+`on_change` receives distinct user values during dragging, track clicks, or
+keyboard adjustment. `set_value` and `set_range` update application state without
+emitting it. Disabling, losing focus, or an application value update ends the
+current drag. Theme changes preserve the value and focus.
+
+Arrow keys adjust one step, Page Up/Down adjust at least one step or ten percent
+of the range, and Home/End select the limits. Continuous ranges use one percent
+for keyboard increments. Accessibility exposes the label, numeric limits,
+current value, and increment/decrement actions.
+
+The root style controls the interaction area. `SliderPart::Track` controls rail
+height and paint, `Fill` controls the filled rail paint, and `Thumb` controls thumb
+size, radius, border, and material. Set the thumb part to `border(px(0.))`
+to remove its outline, or combine `border` with `border_color` to customize it.
+The optical material's edge highlight is independent of this painted outline.
+Fill follows the animated position. The
+`glass` variant rests as a frosted thumb. Pressing expands it into a clear
+refractive lens; releasing restores the frosted surface. A glass thumb uses
+material tint and frost colors instead of its solid background. `animated(false)`
+changes the position and pressed geometry immediately. Settled sliders do not
+request animation frames; theme resolution is cached independently of the value.
+
+Run `cargo run -p gpui-fusion --example sliders` to compare standard and glass
+controls with continuous or stepped interaction and light/dark themes.

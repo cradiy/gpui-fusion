@@ -2,6 +2,7 @@
 
 pub mod button;
 pub mod runtime;
+pub mod slider;
 pub mod style;
 pub mod switch;
 pub mod theme;

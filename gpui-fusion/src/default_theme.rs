@@ -97,6 +97,9 @@ pub fn default_theme() -> Theme {
     let palette = [
         ("muted_surface", 0xf0f0f0, 0x303030),
         ("surface", 0xffffff, 0x25272b),
+        ("slider_thumb", 0xf8f9fb, 0xdfe3e9),
+        ("slider_thumb_edge", 0xe6e9ef, 0xc1c8d2),
+        ("slider_disabled_fill", 0xaeb5bf, 0x737e8d),
         ("foreground", 0x202126, 0xf1f2f4),
         ("edge", 0xd9d9d9, 0x424242),
         ("primary", 0x1677ff, 0x1668dc),
@@ -173,5 +176,57 @@ pub fn default_theme() -> Theme {
         .unwrap()
         .recipes
         .insert("switch".into(), switch);
+    let slider = Recipe {
+        parts: BTreeSet::from(["track".into(), "fill".into(), "thumb".into()]),
+        base: StylePatch::default()
+            .w(px(280.))
+            .h(px(36.))
+            .part(crate::style::PartName("track".into()), |s| {
+                s.h(px(6.)).bg(color("edge"))
+            })
+            .part(crate::style::PartName("fill".into()), |s| {
+                s.bg(color("primary"))
+                    .state(State::Disabled, |s| s.bg(color("slider_disabled_fill")))
+            })
+            .part(crate::style::PartName("thumb".into()), |s| {
+                s.w(px(22.))
+                    .h(px(22.))
+                    .bg(color("slider_thumb"))
+                    .border(px(2.))
+                    .border_color(color("primary"))
+                    .state(State::Disabled, |s| {
+                        s.border_color(color("slider_disabled_fill"))
+                    })
+                    .hover(|s| s.border_color(color("primary_hover")))
+                    .focus_visible(|s| s.border(px(3.)).border_color(color("focus")))
+            }),
+        variants: BTreeMap::from([(
+            "glass".into(),
+            StylePatch::default()
+                .h(px(40.))
+                .part(crate::style::PartName("track".into()), |s| s.h(px(12.)))
+                .part(crate::style::PartName("thumb".into()), |s| {
+                    s.w(px(50.))
+                        .h(px(26.))
+                        .border(px(0.))
+                        .material(Material::Glass {
+                            blur: px(1.).into(),
+                            refraction: px(14.).into(),
+                            thickness: px(20.).into(),
+                            frost: 1.0.into(),
+                            tint: color("surface").opacity(0.04),
+                            frost_center: color("slider_thumb").into(),
+                            frost_edge: color("slider_thumb_edge").into(),
+                        })
+                        .focus_visible(|s| s.border(px(2.)).border_color(color("focus")))
+                }),
+        )]),
+    };
+    theme
+        .style_sets
+        .get_mut("neutral")
+        .unwrap()
+        .recipes
+        .insert("slider".into(), slider);
     theme
 }

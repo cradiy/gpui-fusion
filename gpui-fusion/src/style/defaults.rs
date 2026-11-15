@@ -157,11 +157,54 @@ pub fn default_styles() -> crate::style::ComponentStyles {
                 .focus_visible(|s| s.border(px(2.)).border_color(color("focus")))
         }),
     };
+    let segmented = Recipe {
+        parts: BTreeSet::from(["item".into(), "indicator".into()]),
+        base: StylePatch::default()
+            .w(px(300.))
+            .h(px(40.))
+            .p(px(4.))
+            .rounded(px(999.))
+            .bg(crate::style::StyleValue::from(color("muted_surface"))
+                .mix(color("surface_sunken"), 0.35))
+            .part(crate::style::PartName("item".into()), |s| {
+                s.text_size(length("font_body"))
+                    .px(px(10.))
+                    .gap(px(6.))
+                    .text_color(color("foreground_muted"))
+                    .state(State::Selected, |s| s.text_color(color("foreground")))
+                    .hover(|s| s.text_color(color("foreground")))
+                    .state(State::Disabled, |s| {
+                        s.text_color(color("foreground_disabled"))
+                    })
+            })
+            .part(crate::style::PartName("indicator".into()), |s| {
+                s.bg(color("surface_raised"))
+                    .text_color(color("foreground"))
+                    .border(px(0.))
+                    .border_color(color("focus"))
+                    .focus_visible(|s| s.border(px(2.)))
+                    .state(State::Disabled, |s| s.bg(color("fill_disabled")))
+            }),
+        glass: StylePatch::default().part(crate::style::PartName("indicator".into()), |s| {
+            s.material(Material::Glass {
+                blur: length("glass_blur").into(),
+                refraction: length("glass_refraction").into(),
+                thickness: length("glass_thickness").into(),
+                frost: Token::<f32>::new("glass_frost").scale(0.92),
+                tint: color("surface").opacity(0.025),
+                frost_center: color("surface_raised").into(),
+                frost_edge: color("surface").into(),
+            })
+            .state(State::Disabled, |s| s.material(Material::Plain))
+        }),
+        variants: BTreeMap::new(),
+    };
     crate::style::ComponentStyles {
         recipes: BTreeMap::from([
             ("button".into(), button),
             ("switch".into(), switch),
             ("slider".into(), slider),
+            ("segmented".into(), segmented),
         ]),
     }
 }

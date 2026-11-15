@@ -4,7 +4,7 @@ Import `gpui_fusion::prelude::Styled` for Fusion's symbolic style builders.
 Components implement this trait by exposing their `StylePatch` and a typed
 `Part` identifier. GPUI's `Styled` is used only by the final style adapter.
 
-Controls are grouped under `gpui_fusion::components::{button, switch, slider}`.
+Controls are grouped under `gpui_fusion::components::{button, switch, slider, segmented}`.
 Theme models live in `gpui_fusion::theme`; its `catalog`, `runtime`, and `session`
 modules provide directory discovery, application injection, and synchronization.
 Symbolic values and component recipes live in `gpui_fusion::style`.
@@ -369,3 +369,27 @@ request animation frames; theme resolution is cached independently of the value.
 
 Run `cargo run -p gpui-fusion --example sliders` to compare standard and glass
 controls with continuous or stepped interaction and light/dark themes.
+
+## Segmented controls
+
+`Segmented::new(label, items, window, cx)` creates an equal-width radio group.
+Each `Segment` has a unique nonempty value and an accessible label. `icon` adds
+an SVG; `icon_only` hides the visual label while preserving its accessible name.
+Individual items can be disabled. The first enabled item is initially selected;
+empty and fully disabled groups have no selection and are excluded from tab order.
+
+`set_selected` selects an enabled value without calling `on_change`. User clicks,
+completed drags, arrow keys, Home, and End emit one callback when selection changes.
+Keyboard navigation skips disabled items and wraps. Escape, focus loss, disabling,
+or losing the pressed mouse button cancels a drag without committing it.
+
+The `segmented` recipe declares `Item` and `Indicator` parts through `SegmentedPart`.
+Root width, height, and padding determine the shared cell geometry. Material choice
+follows the theme unless fixed with `material_mode`. Glass rests as a frosted pill
+with crisp foreground content; holding or moving it reveals a refractive lens.
+The indicator's foreground colors content inside the active lens. Its border can
+supply a focus outline. `animated(false)` applies position and pressure immediately.
+Settled controls do not request animation frames.
+
+Run `cargo run -p gpui-fusion --example segmented` for text, icon, mixed-content,
+and fixed-material controls with theme and material switching.

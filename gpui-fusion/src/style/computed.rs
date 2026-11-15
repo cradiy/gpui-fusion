@@ -3,6 +3,13 @@ use crate::theme::{ResolveContext, StyleError};
 use gpui::{Hsla, Pixels};
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BorderStyle {
+    Solid,
+    Dashed,
+}
+
 /// Unset inherits a lower layer; Clear explicitly removes that layer's value.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(
@@ -40,11 +47,26 @@ macro_rules! declarations {
         #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
         #[serde(default, deny_unknown_fields)]
         pub struct Declarations {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub background_gradient: Option<super::Gradient>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub border_gradient: Option<super::Gradient>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub border_motion: Option<super::BorderMotion>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub border_style: Option<BorderStyle>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub material: Option<super::Material>,
             $(#[serde(skip_serializing_if = "Property::is_unset")]
             pub $field: Property<$ty>,)*
         }
         #[derive(Clone, Debug, Default, PartialEq)]
         pub struct ComputedStyle {
+            pub background_gradient: Option<gpui::Background>,
+            pub border_gradient: Option<gpui::BorderGradient>,
+            pub border_motion: Option<super::BorderMotion>,
+            pub border_style: Option<BorderStyle>,
+            pub material: Option<gpui_effects::LiquidGlassStyle>,
             $(pub $field: Resolved<$ty>,)*
         }
         impl Declarations {
@@ -55,13 +77,25 @@ macro_rules! declarations {
                     Property::Set(value) => target.$field = Resolved::Value(value.resolve(context)
                         .map_err(|e| StyleError::new(stringify!($field), e.to_string()))?),
                 })*
+                if !self.background.is_unset() { target.background_gradient = None; }
+                if !self.border_color.is_unset() { target.border_gradient = None; }
+                if let Some(gradient) = &self.background_gradient { target.background_gradient = Some(gradient.background(context)?); }
+                if let Some(gradient) = &self.border_gradient { target.border_gradient = Some(gradient.border(context)?); }
+                if let Some(motion) = self.border_motion {
+                    if let super::BorderMotion::Flow { seconds_per_cycle } = motion {
+                        if !seconds_per_cycle.is_finite() || seconds_per_cycle <= 0. { return Err(StyleError::new("border_motion", "cycle duration must be finite and positive")); }
+                    }
+                    target.border_motion = Some(motion);
+                }
+                if let Some(material) = &self.material { target.material = material.resolve(context)?; }
+                if let Some(border_style) = self.border_style { target.border_style = Some(border_style); }
                 Ok(())
             }
         }
     };
 }
 declarations! {
-    width: Pixels, height: Pixels,
+    width: Pixels, height: Pixels, font_size: Pixels,
     padding_top: Pixels, padding_right: Pixels, padding_bottom: Pixels, padding_left: Pixels,
     gap: Pixels, radius: Pixels, border_width: Pixels,
     background: Hsla, foreground: Hsla, border_color: Hsla, opacity: f32,
@@ -70,6 +104,7 @@ declarations! {
 impl ComputedStyle {
     pub(super) fn validate(&self) -> Result<(), StyleError> {
         for (name, property) in [
+            ("font_size", &self.font_size),
             ("width", &self.width),
             ("height", &self.height),
             ("padding_top", &self.padding_top),
@@ -101,6 +136,10 @@ impl ComputedStyle {
     pub fn to_gpui(&self) -> gpui::StyleRefinement {
         use gpui::Styled as _;
         let mut style = gpui::StyleRefinement::default();
+        style.border_style = self.border_style.map(|border| match border {
+            BorderStyle::Solid => gpui::BorderStyle::Solid,
+            BorderStyle::Dashed => gpui::BorderStyle::Dashed,
+        });
         macro_rules! set {
             ($field:ident, $method:ident, $clear:expr) => {
                 match &self.$field {
@@ -114,6 +153,7 @@ impl ComputedStyle {
                 }
             };
         }
+        set!(font_size, text_size, gpui::px(14.));
         set!(width, w, gpui::Length::Auto);
         set!(height, h, gpui::Length::Auto);
         set!(padding_top, pt, gpui::px(0.));
@@ -129,11 +169,16 @@ impl ComputedStyle {
         if let Resolved::Value(value) = self.foreground {
             style = style.text_color(value);
         }
+        if let Some(background) = &self.background_gradient {
+            style.background = Some(background.clone().into());
+        }
+        style.border_gradient = self.border_gradient.clone();
         style
     }
 
     pub fn changes_from(&self, previous: &Self) -> StyleChanges {
-        let layout = self.width != previous.width
+        let layout = self.font_size != previous.font_size
+            || self.width != previous.width
             || self.height != previous.height
             || self.padding_top != previous.padding_top
             || self.padding_right != previous.padding_right

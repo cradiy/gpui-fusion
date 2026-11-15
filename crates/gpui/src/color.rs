@@ -734,6 +734,13 @@ impl From<Rgba> for Hsla {
             delta / (2.0 - 2.0 * l)
         };
 
+        // Unit RGB channels can produce saturation just above one through rounding.
+        let s = if [r, g, b].iter().all(|channel| (0. ..=1.).contains(channel)) {
+            s.clamp(0., 1.)
+        } else {
+            s
+        };
+
         let h = if delta == 0.0 {
             0.0
         } else if max == r {

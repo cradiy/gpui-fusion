@@ -46,12 +46,40 @@ pub trait Styled: Sized {
     fn style_mut(&mut self) -> &mut StylePatch;
 
     property_methods! {
-        w => width: Pixels, h => height: Pixels,
+        w => width: Pixels, h => height: Pixels, text_size => font_size: Pixels,
         pt => padding_top: Pixels, pr => padding_right: Pixels,
         pb => padding_bottom: Pixels, pl => padding_left: Pixels,
         gap => gap: Pixels, rounded => radius: Pixels, border => border_width: Pixels,
-        bg => background: Hsla, text_color => foreground: Hsla,
-        border_color => border_color: Hsla, opacity => opacity: f32,
+        text_color => foreground: Hsla,
+        opacity => opacity: f32,
+    }
+    fn bg(mut self, value: impl Into<StyleValue<Hsla>>) -> Self {
+        let properties = &mut self.style_mut().properties;
+        properties.background = Property::Set(value.into());
+        properties.background_gradient = None;
+        self
+    }
+    fn bg_gradient(mut self, gradient: super::Gradient) -> Self {
+        let properties = &mut self.style_mut().properties;
+        properties.background = Property::Unset;
+        properties.background_gradient = Some(gradient);
+        self
+    }
+    fn border_color(mut self, value: impl Into<StyleValue<Hsla>>) -> Self {
+        let properties = &mut self.style_mut().properties;
+        properties.border_color = Property::Set(value.into());
+        properties.border_gradient = None;
+        self
+    }
+    fn border_gradient(mut self, gradient: super::Gradient) -> Self {
+        let properties = &mut self.style_mut().properties;
+        properties.border_color = Property::Unset;
+        properties.border_gradient = Some(gradient);
+        self
+    }
+    fn border_motion(mut self, motion: super::BorderMotion) -> Self {
+        self.style_mut().properties.border_motion = Some(motion);
+        self
     }
     fn p(self, value: impl Into<StyleValue<Pixels>>) -> Self {
         let value = value.into();
@@ -68,8 +96,23 @@ pub trait Styled: Sized {
         let value = value.into();
         self.pt(value.clone()).pb(value)
     }
+    fn material(mut self, material: super::Material) -> Self {
+        self.style_mut().properties.material = Some(material);
+        self
+    }
+    fn border_style(mut self, style: super::BorderStyle) -> Self {
+        self.style_mut().properties.border_style = Some(style);
+        self
+    }
+    fn border_dashed(self) -> Self {
+        self.border_style(super::BorderStyle::Dashed)
+    }
+    fn border_solid(self) -> Self {
+        self.border_style(super::BorderStyle::Solid)
+    }
     fn clear_bg(mut self) -> Self {
         self.style_mut().properties.background = Property::Clear;
+        self.style_mut().properties.background_gradient = None;
         self
     }
     fn clear_text_color(mut self) -> Self {

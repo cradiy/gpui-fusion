@@ -55,9 +55,10 @@ overrides. Recipes are selected through `resolve_recipe`.
 
 `ThemeStore` owns a validated theme and active mode. Successful changes increment
 its revision. `replace_json` validates the replacement before changing either the
-theme or revision, and rejects replacements that omit the active mode. Host
-components must notify dependent views after a successful update and resolve
-styles again; the store does not install GPUI observers or file watchers.
+theme or revision, and rejects replacements that omit the active mode. The
+`ThemeRuntime` GPUI entity wraps this store and notifies subscribed Fusion
+components after successful changes. Standalone store users supply their own
+invalidation. Neither type installs file watchers.
 
 ## JSON and validation
 
@@ -76,7 +77,7 @@ limited to 64 levels. Theme inheritance and token cycles are rejected.
 ## GPUI integration
 
 `ComputedStyle::to_gpui` produces a fresh `gpui::StyleRefinement`. The supported
-properties are width, height, padding, gap, radius, border width and color,
+properties are width, height, text size, padding, gap, radius, border width and color,
 background, foreground, and opacity. Length properties currently use logical
 pixels. A cleared foreground leaves the fresh refinement unset so GPUI text
 inheritance applies. Cleared backgrounds and borders use transparent colors;
@@ -86,3 +87,69 @@ cleared dimensions return to auto sizing.
 also require paint. Theme resolution does not rebuild component state, schedule
 frames, or manage caches. Consumers decide invalidation and reuse policy using
 the computed differences and theme revision.
+
+## Buttons
+
+`Button::new` creates a persistent control inside `cx.new`. It takes a label,
+shared `Entity<ThemeRuntime>`, style-set name, window, and entity context. The
+`button` recipe declares `label` and `icon` parts. `variant` selects a named
+recipe variant; `scope` adds local token overrides. `ButtonPart` provides typed
+part selectors through Fusion's `Styled` trait.
+
+`default_theme()` supplies the `neutral` style set in `light` and `dark` modes.
+Its base button uses a neutral surface and solid border. `primary`, `dashed`,
+`text`, and `link` variants use ordinary painting; `glass` and `frosted` variants
+use backdrop materials. The `link` variant changes appearance only; applications
+supply navigation through the activation callback.
+`Material::Plain` explicitly removes an inherited material. Glass parameters
+accept typed expressions, including theme tokens, and serialize with the recipe.
+Material resolution failures are available through `Button::style_error`.
+
+`on_click` receives mouse, keyboard, and accessibility activations. Disabling a
+button clears pending visual press state and removes activation handlers and its
+tab stop. Labels and monochrome SVG icons render above the material and remain
+sharp. `icon` takes a GPUI asset path; the host supplies the asset source.
+
+Material transitions interpolate blur, refraction, edge thickness, and frost.
+Glass contours expand with separate horizontal and vertical damped springs on
+hover, grow on press, and return on release or pointer leave. Directional edge
+lighting follows the pointer. Foreground content, layout, and hit regions retain
+their original geometry. Animations stop requesting frames on completion.
+`transition_duration(Duration::ZERO)` disables material transitions and elastic
+motion, and border flow. Other properties update immediately. Backdrop
+sampling requires content painted earlier in the same window.
+
+Run the component example with `cargo run -p gpui-fusion --example buttons`.
+
+`border_dashed()` and `border_solid()` select border rendering independently of
+width and color. The `border_style` declaration serializes as `dashed` or `solid`
+and follows normal style-layer precedence.
+
+## Gradient surfaces and borders
+
+`bg_gradient` and `border_gradient` accept a `Gradient` with an angle and between
+2 and 64 ordered stops. Each stop contains a position in `0..=1` and a typed color
+expression, so gradients follow theme changes and local token scopes. Background
+angles control the linear fill direction; border angles set the initial phase
+around the contour. Gradient declarations serialize as JSON with the style.
+
+Setting `bg` or `clear_bg` removes an inherited background gradient. Setting
+`border_color` removes an inherited border gradient. Gradient setters replace the
+corresponding solid declaration. State rules and style layers use the same
+precedence as other properties.
+
+`BorderMotion::Flow` advances the border gradient around the contour at the
+configured positive `seconds_per_cycle`. Place it in a `pressed` rule for motion
+only while pressed; `BorderMotion::Still` removes inherited motion. Disabled
+buttons, zero-width borders, and controls without a border gradient do not request
+flow frames. Setting the transition duration to zero disables flow as well.
+
+Glass buttons paint their fill and border over the backdrop material, with labels
+and icons above both. Use translucent gradient colors to retain visible backdrop
+refraction. Plain buttons use the same fill and border declarations without a
+glass pass.
+
+The `buttons` example switches material, fill, border, shape, enabled state, and
+theme on persistent preview controls. A dedicated optical control remains in the preview alongside the switchable
+buttons; surface-free controls occupy a separate section. `Button::set_style` replaces the instance patch and
+`Button::set_variant` changes its recipe variant without replacing the entity.

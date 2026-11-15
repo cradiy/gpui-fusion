@@ -433,3 +433,89 @@ fn partial_mode_overrides_inherit_missing_modes_through_scopes_and_style_sets() 
         .unwrap();
     assert_eq!(value.resolve(&b).unwrap(), px(41.));
 }
+
+#[test]
+fn gradients_preserve_tokens_layer_precedence_and_state_motion() {
+    use gpui_fusion::style::{BorderMotion, Gradient};
+    let theme = theme();
+    let context = ResolveContext::new(&theme, "a", "base").unwrap();
+    let gradient = Gradient::new(
+        70.,
+        [
+            (0., Token::<Hsla>::new("pigment").into()),
+            (1., StyleValue::from(rgb(0x315d45))),
+        ],
+    );
+    let patch = StylePatch::default()
+        .bg_gradient(gradient.clone())
+        .border_gradient(gradient)
+        .border(px(2.))
+        .pressed(|s| {
+            s.border_motion(BorderMotion::Flow {
+                seconds_per_cycle: 1.8,
+            })
+        });
+    let loaded = StylePatch::from_json(&serde_json::to_string(&patch).unwrap()).unwrap();
+    loaded.validate(&context, &[]).unwrap();
+    let resolve =
+        |layers: &[&StylePatch], states| resolve_style(layers, &context, &states, None).unwrap();
+    let resting = resolve(&[&loaded], StateSelector::default());
+    let pressed = resolve(&[&loaded], State::Pressed.into());
+    assert!(resting.background_gradient.is_some());
+    assert!(resting.border_gradient.is_some());
+    assert!(resting.border_motion.is_none());
+    assert!(matches!(
+        pressed.border_motion,
+        Some(BorderMotion::Flow { .. })
+    ));
+    assert!(!pressed.changes_from(&resting).layout);
+    let overridden = resolve(
+        &[
+            &loaded,
+            &StylePatch::default().clear_bg().border_color(rgb(0x123456)),
+        ],
+        State::Pressed.into(),
+    );
+    assert!(overridden.background_gradient.is_none());
+    assert!(overridden.border_gradient.is_none());
+    let other_mode = resolve_style(
+        &[&loaded],
+        &ResolveContext::new(&theme, "b", "base").unwrap(),
+        &StateSelector::default(),
+        None,
+    )
+    .unwrap();
+    assert_ne!(resting.background_gradient, other_mode.background_gradient);
+    assert_ne!(resting.border_gradient, other_mode.border_gradient);
+}
+
+#[test]
+fn invalid_gradients_and_inactive_motion_are_rejected_before_paint() {
+    use gpui_fusion::style::{BorderMotion, Gradient};
+    let theme = theme();
+    let context = ResolveContext::new(&theme, "a", "base").unwrap();
+    for positions in [vec![0.], vec![0.8, 0.2], vec![-0.1, 1.], vec![0., f32::NAN]] {
+        let gradient = Gradient::new(
+            0.,
+            positions
+                .into_iter()
+                .map(|p| (p, StyleValue::from(rgb(0x123456)))),
+        );
+        assert!(
+            StylePatch::default()
+                .hover(|s| s.bg_gradient(gradient))
+                .validate(&context, &[])
+                .is_err()
+        );
+    }
+    for duration in [0., -2., f32::INFINITY] {
+        assert!(
+            StylePatch::default()
+                .pressed(|s| s.border_motion(BorderMotion::Flow {
+                    seconds_per_cycle: duration
+                }))
+                .validate(&context, &[])
+                .is_err()
+        );
+    }
+}

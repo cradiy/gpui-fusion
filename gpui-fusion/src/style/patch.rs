@@ -258,12 +258,14 @@ pub fn resolve_style(
 pub struct Recipe {
     pub parts: BTreeSet<String>,
     pub base: StylePatch,
+    pub glass: StylePatch,
     pub variants: BTreeMap<String, StylePatch>,
 }
 impl Recipe {
     pub fn validate(&self, context: &ResolveContext<'_>) -> Result<(), StyleError> {
         let parts: Vec<_> = self.parts.iter().map(String::as_str).collect();
         self.base.validate(context, &parts)?;
+        self.glass.validate(context, &parts)?;
         for (name, variant) in &self.variants {
             variant
                 .validate(context, &parts)
@@ -274,6 +276,7 @@ impl Recipe {
     pub fn resolve(
         &self,
         variant: Option<&str>,
+        material: super::MaterialMode,
         instance: &StylePatch,
         context: &ResolveContext<'_>,
         states: &StateSelector,
@@ -289,6 +292,9 @@ impl Recipe {
                     StyleError::new(format!("variants.{name}"), "unknown variant")
                 })?,
             );
+        }
+        if material == super::MaterialMode::Glass {
+            layers.push(&self.glass);
         }
         layers.push(instance);
         resolve_style(&layers, context, states, part)

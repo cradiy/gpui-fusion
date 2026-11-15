@@ -2,7 +2,9 @@ use gpui::{
     AppContext, Context, Entity, Focusable, IntoElement, Render, TestAppContext, VisualTestContext,
     Window, div, prelude::*, px, size,
 };
-use gpui_fusion::{button::Button, default_theme, runtime::ThemeRuntime, theme::ThemeStore};
+use gpui_fusion::{
+    components::button::Button, default_theme, theme::ThemeStore, theme::runtime::ThemeRuntime,
+};
 use std::{cell::Cell, rc::Rc};
 
 struct Harness {
@@ -20,11 +22,14 @@ fn activation_theme_reload_and_disabling_preserve_control_identity(cx: &mut Test
     let count = Rc::new(Cell::new(0));
     let counter = count.clone();
     let view = cx.open_window(size(px(400.), px(180.)), |window, cx| {
-        let theme =
-            cx.new(|_| ThemeRuntime::new(ThemeStore::new(default_theme(), "light").unwrap()));
+        let theme = ThemeRuntime::install(
+            ThemeStore::new(default_theme(), "light").unwrap(),
+            "neutral",
+            cx,
+        )
+        .unwrap();
         let button = cx.new(|cx| {
-            Button::new("Confirm", theme.clone(), "neutral", window, cx)
-                .on_click(move |_, _| counter.set(counter.get() + 1))
+            Button::new("Confirm", window, cx).on_click(move |_, _| counter.set(counter.get() + 1))
         });
         Harness { button, theme }
     });
@@ -69,21 +74,25 @@ fn glass_recipe_roundtrips_and_instance_can_remove_material() {
     };
     let theme = Theme::from_json(&serde_json::to_string(&default_theme()).unwrap()).unwrap();
     let context = ResolveContext::new(&theme, "dark", "neutral").unwrap();
+    let styles = gpui_fusion::default_styles();
+    let recipe = styles.recipe("button").unwrap();
     let plain = StylePatch::default();
-    let rest = context
-        .resolve_recipe(
-            "button",
-            Some("frosted"),
+    let rest = recipe
+        .resolve(
+            None,
+            gpui_fusion::style::MaterialMode::Glass,
             &plain,
+            &context,
             &StateSelector::default(),
             None,
         )
         .unwrap();
-    let pressed = context
-        .resolve_recipe(
-            "button",
-            Some("frosted"),
+    let pressed = recipe
+        .resolve(
+            None,
+            gpui_fusion::style::MaterialMode::Glass,
             &plain,
+            &context,
             &State::Pressed.into(),
             None,
         )
@@ -94,11 +103,12 @@ fn glass_recipe_roundtrips_and_instance_can_remove_material() {
     assert_eq!(rest_material.blur_radius, pressed_material.blur_radius);
     assert!(pressed_material.refraction > rest_material.refraction);
     let instance = plain.material(Material::Plain);
-    let result = context
-        .resolve_recipe(
-            "button",
-            Some("glass"),
+    let result = recipe
+        .resolve(
+            None,
+            gpui_fusion::style::MaterialMode::Glass,
             &instance,
+            &context,
             &State::Pressed.into(),
             None,
         )
@@ -121,12 +131,15 @@ fn dashed_border_survives_json_and_explicit_solid_override() {
     };
     let theme = Theme::from_json(&serde_json::to_string(&default_theme()).unwrap()).unwrap();
     let context = ResolveContext::new(&theme, "light", "neutral").unwrap();
+    let styles = gpui_fusion::default_styles();
+    let recipe = styles.recipe("button").unwrap();
     let resolve = |patch: &StylePatch| {
-        context
-            .resolve_recipe(
-                "button",
+        recipe
+            .resolve(
                 Some("dashed"),
+                gpui_fusion::style::MaterialMode::Plain,
                 patch,
+                &context,
                 &StateSelector::default(),
                 None,
             )

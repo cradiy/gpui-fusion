@@ -4,6 +4,11 @@ Import `gpui_fusion::prelude::Styled` for Fusion's symbolic style builders.
 Components implement this trait by exposing their `StylePatch` and a typed
 `Part` identifier. GPUI's `Styled` is used only by the final style adapter.
 
+Controls are grouped under `gpui_fusion::components::{button, switch, slider}`.
+Theme models live in `gpui_fusion::theme`; its `catalog`, `runtime`, and `session`
+modules provide directory discovery, application injection, and synchronization.
+Symbolic values and component recipes live in `gpui_fusion::style`.
+
 ## Values
 
 `StyleValue<T>` stores a literal, a typed token reference, or a derived expression.
@@ -30,10 +35,9 @@ introduce implicit specificity. Higher layers override both the base and state
 properties of lower layers.
 
 `Recipe` contains a base patch, named variants, and declared part names. Recipe
-resolution applies base, variant, then instance. Across inherited style sets,
-parent recipe layers precede child recipe layers; instance overrides remain last.
-A requested variant may be inherited. Unknown variants and undeclared parts are
-errors. Components must validate recipes against their actual supported parts
+resolution applies base, variant, the active glass adaptation, then instance.
+Instance overrides remain last. `ComponentStyles` owns the recipes independently
+of theme palettes. Unknown variants and undeclared parts are errors. Components must validate recipes against their actual supported parts
 before accepting externally supplied part declarations.
 
 Parts resolve independently from root properties. Repeated `part` builders
@@ -44,26 +48,172 @@ active state set; style resolution does not change component behavior.
 ## Themes and local scopes
 
 `Theme` contains named modes and named `StyleSet` values. Each style set can
-inherit from one parent and register tokens and component recipes. A token's
+inherit from one parent and register semantic tokens. Themes do not contain
+component names, parts, or recipes. A token's
 mode-specific value precedes its default. A definition without either continues
 lookup through outer scopes and parent style sets.
 
 `ResolveContext` binds a theme, mode, and selected style set. `scoped` introduces
 local token overrides and optionally selects another style set. Inner scopes
 precede outer scopes. Inherited aliases resolve against the selected child's
-overrides. Recipes are selected through `resolve_recipe`.
+overrides. Component recipes resolve their symbolic values through this context.
 
 `ThemeStore` owns a validated theme and active mode. Successful changes increment
 its revision. `replace_json` validates the replacement before changing either the
 theme or revision, and rejects replacements that omit the active mode. The
 `ThemeRuntime` GPUI entity wraps this store and notifies subscribed Fusion
-components after successful changes. Standalone store users supply their own
-invalidation. Neither type installs file watchers.
+components after successful changes. Install it in the application context before
+creating components:
+
+```rust,ignore
+ThemeRuntime::install(
+    ThemeStore::new(default_theme(), "light")?,
+    "neutral",
+    cx,
+)?;
+let button = cx.new(|cx| Button::new("Apply", window, cx));
+```
+
+`ThemeRuntime::global(cx)` returns the injected entity for mode changes and JSON
+replacement. `install` uses `default_styles()`; `install_with_styles` accepts a
+separate `ComponentStyles` registry. `replace_styles_json` replaces that registry
+after validating it against the active theme. `set_style_set` changes the application default; explicit component
+scopes retain their style-set selection. Reinstalling updates the same entity,
+including existing observers, without resetting component values or focus.
+Invalid installations and replacements leave the active theme unchanged.
+Components use the runtime revision for caches, including across reinstallations.
+Standalone store users supply their own invalidation. `ThemeRuntime` performs
+explicit updates; `ThemeSession` optionally owns a file subscription.
+
+## Semantic colors
+
+`default_theme()` supplies the following roles in both light and dark modes.
+They describe visual purpose independently of component recipes. Custom style
+sets can override individual roles or inherit them from another set.
+
+| Group | Tokens | Purpose |
+| --- | --- | --- |
+| Surfaces | `canvas`, `surface`, `muted_surface`, `surface_raised`, `surface_sunken` | Page background, content surfaces, quiet surfaces, elevated surfaces, and inset regions |
+| Inverse | `surface_inverse`, `foreground_inverse` | A contrasting surface and its readable foreground |
+| Foregrounds | `foreground`, `foreground_secondary`, `foreground_muted`, `foreground_disabled` | Primary content, secondary content, supporting content, and unavailable content |
+| Edges | `edge`, `edge_subtle`, `edge_strong`, `divider` | Default, quiet, strong, and separating boundaries |
+| Fills | `fill_hover`, `fill_pressed`, `fill_disabled` | Neutral interaction and unavailable fills |
+| Contrast | `surface_contrast`, `edge_contrast` | High-luminance surfaces and their edges, including opaque or frosted handles |
+| Roles | `primary`, `accent`, `success`, `warning`, `error`, `info` | Brand, secondary emphasis, and semantic status colors |
+| Links | `link`, `link_hover`, `link_pressed` | Linked text in each interaction state |
+| Selection | `selection`, `on_selection`, `selection_edge` | Selected background, content, and boundary |
+| Other | `placeholder`, `focus`, `scrim`, `shadow` | Input hints, focus indicators, translucent occlusion, and shadows |
+
+Each role has `<role>_hover`, `<role>_pressed`, `<role>_subtle`,
+`<role>_foreground`, `<role>_edge`, and `on_<role>` companions. Use `on_<role>`
+over the strong role fill; use `<role>_foreground` over the subtle fill. Strong
+fills are not interchangeable with text colors, particularly in dark mode.
+
+`divider` references `edge_subtle`; `placeholder` references `foreground_muted`.
+`link` references `primary_foreground`, with hover and pressed colors derived
+by mixing toward `foreground`. Selection roles reference the primary subtle,
+foreground, and edge colors. These references follow scoped and inherited
+overrides without copying colors. Any alias can also be replaced independently.
+`scrim` and `shadow` include alpha; disabling content does not require reducing
+the whole component's opacity.
+
+## Material selection and files
+
+`Theme.material` selects `MaterialMode::Plain` or `MaterialMode::Glass` globally.
+The component recipe supplies geometry and its glass adaptation. Generic tokens
+such as `glass_blur`, `glass_refraction`, `glass_thickness`, and `glass_frost`
+control material parameters through the same theme file. Components
+follow the theme by default. `.material_mode(mode)` fixes a component's material;
+`set_material_mode(None, cx)` resumes following. Fixed controls unsubscribe from
+material changes while continuing to receive color, metric, and typography
+updates. Instance `Styled` patches remain the final override, including explicit
+material parameters.
+
+`ThemeConfig` combines the theme, active color mode, and selected style set in one
+JSON document. `ThemeRuntime::install_file(path, cx)` installs it;
+`reload_file(path, cx)` and `replace_json(source, cx)` atomically apply a complete
+configuration to existing controls. Invalid files preserve the current colors,
+material, mode, and style-set selection. `configuration()` returns a serializable
+snapshot. `set_material_mode` also updates this configuration, so saved files
+include programmatic changes. Material-only changes do not invalidate fixed
+controls' style caches.
+
+`ThemeRuntime` file reads are explicit and synchronous. Hosts can also read
+asynchronously and call `replace_json` or `apply_config` with a loaded document.
+
+## Theme directories and catalogs
+
+`ThemeRepository::discover()` uses the nonempty `GPUI_FUSION_THEME` environment
+variable as the complete theme root. Otherwise it uses the platform's configuration
+directory followed by `org.gpui.fusion`. On Linux, this is under `XDG_CONFIG_HOME`,
+or the user's `.config` directory when that variable is unavailable. An explicit
+root can be supplied with `ThemeRepository::from_root`. Discovery does not create
+directories or write configuration.
+
+The root `index.toml` registers global themes. Each application can have a separate
+`<app-id>/index.toml`. Application IDs are stable directory names, not window titles
+or process IDs. Both indexes use the same `ThemeIndex` format:
+
+| TOML field | Meaning |
+| --- | --- |
+| `default` | Optional registered theme ID used by followers |
+| `themes.<id>.name` | Display name for a registered theme |
+| `themes.<id>.file` | JSON document path relative to this index's directory |
+
+Theme files contain `ThemeConfig`, including the theme, mode, and selected style
+set. Nested relative paths are supported. Absolute paths and parent components
+are rejected; native filesystem symlinks are followed normally. Unknown fields,
+unregistered defaults, invalid documents, and unreadable files are errors.
+
+`ThemeCatalog::open`, `index`, and `load` support application-owned theme pickers.
+Loading a catalog does not select a theme or start a subscription. A catalog is a
+snapshot; reopen it to refresh the list. Applications persist their own manual
+selection separately from the catalog.
+
+## Theme sessions
+
+`ThemeSession::install(repository, source, cx)` loads the source and injects the
+runtime before constructing components. Retain the returned entity while using
+the source. `runtime()` gives access to its `ThemeRuntime`.
+
+| `ThemeSource` | Selection |
+| --- | --- |
+| `Follow { app_id }` | Application catalog default, then global catalog default |
+| `Application { app_id, theme_id }` | A specific theme from the application's catalog |
+| `Global { theme_id }` | A specific theme from the global catalog |
+
+A missing application index or an index without a default allows `Follow` to use
+the global default. If neither catalog selects a default, `Follow` uses the built-in
+theme. An invalid index or a selected theme that cannot load produces an error;
+it does not silently select another theme. Explicit selections never fall back.
+
+`set_source` changes the selection, and `reload` reads it again. Updates validate
+the complete theme and current component recipes before replacing the active
+configuration. Failed reloads preserve the last valid appearance and expose an
+error through `ThemeSession::error`. Failed selection changes preserve the previous
+source. Component instance styles, scopes, values, and focus remain intact. Direct
+runtime changes to the mode or material last until the source is applied again.
+
+Selection and synchronization are independent. The default `theme-watch` feature
+provides `start_watching` and `stop_watching`; no subscription starts until requested.
+Watching a pinned theme updates its files without following catalog default changes.
+Subscriptions use native filesystem events, including atomic file replacement and
+creation of missing theme directories, without periodic polling. Change-triggered
+file reads run on the background executor. Unchanged effective configurations do
+not notify components. Dropping the session or stopping its subscription cancels
+pending automatic updates. Disable default features to omit the watcher dependency.
+
+Run `cargo run -p gpui-fusion --example themes` to compare following and fixed-material
+controls. The example uses application ID `org.gpui.fusion.themes`, lists indexed
+themes at startup, and offers selection, reload, and subscription controls. It uses
+`GPUI_FUSION_THEME` with the same root-directory semantics as the library.
 
 ## JSON and validation
 
 The Rust data model is serializable as standard JSON. `Theme::from_json` parses
-and validates the theme's declared modes, references, inheritance, and recipes.
+and validates the theme's declared modes, references, and inheritance.
+`ComponentStyles::from_json` parses component recipes separately; `validate`
+checks all recipe branches against a theme.
 `StylePatch::from_json` parses a patch; call `validate` with its resolution context
 and component part schema to validate all branches, including inactive states.
 Unknown fields are rejected. Parse errors include line and column information;
@@ -91,15 +241,17 @@ the computed differences and theme revision.
 ## Buttons
 
 `Button::new` creates a persistent control inside `cx.new`. It takes a label,
-shared `Entity<ThemeRuntime>`, style-set name, window, and entity context. The
+window, and entity context. The theme and default style set come from the injected
+`ThemeRuntime`. The
 `button` recipe declares `label` and `icon` parts. `variant` selects a named
 recipe variant; `scope` adds local token overrides. `ButtonPart` provides typed
 part selectors through Fusion's `Styled` trait.
 
 `default_theme()` supplies the `neutral` style set in `light` and `dark` modes.
 Its base button uses a neutral surface and solid border. `primary`, `dashed`,
-`text`, and `link` variants use ordinary painting; `glass` and `frosted` variants
-use backdrop materials. The `link` variant changes appearance only; applications
+`text`, and `link` variants use ordinary painting. Surface-bearing buttons can
+follow the theme material or select a fixed material; text and link buttons stay
+surface-free. The `link` variant changes appearance only; applications
 supply navigation through the activation callback.
 `Material::Plain` explicitly removes an inherited material. Glass parameters
 accept typed expressions, including theme tokens, and serialize with the recipe.
@@ -162,7 +314,7 @@ initial checked value. It uses the shared `ThemeRuntime` and `switch` recipe.
 `on_change` receives user changes; `set_checked` updates application state without
 emitting this callback. Theme updates preserve the value and keyboard focus.
 
-The default recipe paints a solid track and thumb. The `glass` variant uses a
+The default recipe paints a solid track and thumb. Glass mode uses a
 white frosted thumb at rest and an expanded refractive lens while pressed or
 travelling. Track color follows the animated thumb position, including during
 dragging before the checked value is committed. The root style controls the track; `SwitchPart::Thumb` controls thumb
@@ -209,8 +361,7 @@ height and paint, `Fill` controls the filled rail paint, and `Thumb` controls th
 size, radius, border, and material. Set the thumb part to `border(px(0.))`
 to remove its outline, or combine `border` with `border_color` to customize it.
 The optical material's edge highlight is independent of this painted outline.
-Fill follows the animated position. The
-`glass` variant rests as a frosted thumb. Pressing expands it into a clear
+Fill follows the animated position. Glass mode rests as a frosted thumb. Pressing expands it into a clear
 refractive lens; releasing restores the frosted surface. A glass thumb uses
 material tint and frost colors instead of its solid background. `animated(false)`
 changes the position and pressed geometry immediately. Settled sliders do not

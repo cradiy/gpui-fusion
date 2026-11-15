@@ -1,17 +1,12 @@
 //! Theme-aware styles for GPUI components.
 
-pub mod button;
-pub mod runtime;
-pub mod slider;
+pub mod components;
 pub mod style;
-pub mod switch;
 pub mod theme;
+
+pub use style::default_styles;
+pub use theme::default_theme;
 
 pub mod prelude {
     pub use crate::style::Styled;
 }
-
-mod default_theme;
-pub use default_theme::default_theme;
-
-mod button_motion;

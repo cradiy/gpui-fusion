@@ -13,3 +13,9 @@ pub use material::*;
 
 mod gradient;
 pub use gradient::*;
+
+mod components;
+pub use components::*;
+
+mod defaults;
+pub use defaults::default_styles;

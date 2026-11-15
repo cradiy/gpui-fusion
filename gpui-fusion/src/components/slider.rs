@@ -1,7 +1,10 @@
 use crate::{
-    button_motion::Spring,
-    runtime::ThemeRuntime,
-    style::{ComputedStyle, Part, Resolved, State, StateSelector, StylePatch, Styled},
+    components::motion::Spring,
+    style::{
+        ComputedStyle, MaterialMode, Part, Resolved, State, StateSelector, StylePatch, Styled,
+    },
+    theme::material_binding::MaterialBinding,
+    theme::runtime::ThemeRuntime,
     theme::{ResolveContext, StyleError, ThemeScope},
 };
 use gpui::{Styled as _, prelude::*, *};
@@ -113,7 +116,7 @@ struct Geometry {
 /// A horizontal numeric control. The default range is 0..=100 with a step of 1.
 pub struct Slider {
     theme: Entity<ThemeRuntime>,
-    style_set: String,
+    material_binding: MaterialBinding,
     variant: Option<String>,
     scopes: Vec<ThemeScope>,
     style: StylePatch,
@@ -141,14 +144,17 @@ impl Slider {
     pub fn new(
         label: impl Into<SharedString>,
         value: f64,
-        theme: Entity<ThemeRuntime>,
-        style_set: impl Into<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let theme = ThemeRuntime::global(cx);
         let focus = cx.focus_handle();
         let subscriptions = vec![
-            cx.observe(&theme, |_, _, cx| cx.notify()),
+            cx.observe(&theme, |this, theme, cx| {
+                if this.validated_revision != Some(theme.read(cx).revision()) {
+                    cx.notify();
+                }
+            }),
             cx.on_focus(&focus, window, |_, _, cx| cx.notify()),
             cx.on_blur(&focus, window, |this, _, cx| {
                 this.drag = None;
@@ -160,7 +166,7 @@ impl Slider {
         let value = if value.is_finite() { value } else { range.min };
         Self {
             theme,
-            style_set: style_set.into(),
+            material_binding: MaterialBinding::new(cx),
             variant: None,
             scopes: Vec::new(),
             style: StylePatch::default(),
@@ -195,6 +201,15 @@ impl Slider {
             velocity: 0.,
         };
         self
+    }
+    /// Fixes the material and unsubscribes from application material changes.
+    pub fn material_mode(mut self, mode: MaterialMode) -> Self {
+        self.material_binding.fix(mode);
+        self
+    }
+    /// None follows the application's material; Some fixes this component's material.
+    pub fn set_material_mode(&mut self, mode: Option<MaterialMode>, cx: &mut Context<Self>) {
+        self.material_binding.set(mode, cx);
     }
     pub fn variant(mut self, name: impl Into<String>) -> Self {
         self.validated_revision = None;
@@ -276,8 +291,11 @@ impl Slider {
         }
     }
     fn resolve(&mut self, window: &Window, cx: &App) -> Result<[ComputedStyle; 4], StyleError> {
-        let store = self.theme.read(cx).store();
-        let revision = store.revision();
+        let runtime = self.theme.read(cx);
+        let store = runtime.store();
+        let recipe = runtime.styles().recipe("slider")?;
+        let material = self.material_binding.mode(cx);
+        let revision = runtime.revision();
         let flags = [
             (State::Disabled, self.disabled),
             (State::Hovered, !self.disabled && self.hovered),
@@ -290,12 +308,13 @@ impl Slider {
                 !self.disabled && self.focus.is_focused(window) && window.last_input_was_keyboard(),
             ),
         ];
-        let key = flags
-            .iter()
-            .enumerate()
-            .fold(0u8, |key, (bit, (_, active))| {
-                key | (u8::from(*active) << bit)
-            });
+        let key = (u8::from(material == MaterialMode::Glass) << 6)
+            | flags
+                .iter()
+                .enumerate()
+                .fold(0u8, |key, (bit, (_, active))| {
+                    key | (u8::from(*active) << bit)
+                });
         if self.validated_revision == Some(revision) {
             if let Some((cached_revision, cached_key, styles)) = &self.resolved {
                 if *cached_revision == revision && *cached_key == key {
@@ -304,7 +323,7 @@ impl Slider {
             }
         }
         self.resolved = None;
-        let mut context = ResolveContext::new(store.theme(), store.mode(), &self.style_set)?;
+        let mut context = ResolveContext::new(store.theme(), store.mode(), runtime.style_set())?;
         for scope in &self.scopes {
             context = context.scoped(scope)?;
         }
@@ -319,10 +338,11 @@ impl Slider {
                 .collect(),
         );
         let resolve = |part| {
-            context.resolve_recipe(
-                "slider",
+            recipe.resolve(
                 self.variant.as_deref(),
+                material,
                 &self.style,
+                &context,
                 &states,
                 part,
             )
@@ -391,14 +411,16 @@ impl Render for Slider {
         }
         let fraction = self.position.value.clamp(0., 1.);
         let expansion = self.expansion.value.clamp(0., 1.1);
+        let left_inset = length(&root.padding_left, px(0.)).max(px(0.));
+        let right_inset = length(&root.padding_right, px(0.)).max(px(0.));
         let geometry = self.geometry.clone();
         let events = cx.weak_entity();
         let mut element = div()
             .on_paint_before_children(move |bounds, _, window, _| {
                 let width = length(&thumb.width, px(22.)).min(bounds.size.width);
                 let height = length(&thumb.height, px(22.)).min(bounds.size.height);
-                let start = bounds.left() + width / 2.;
-                let travel = (bounds.size.width - width).max(px(0.));
+                let start = bounds.left() + left_inset.min(bounds.size.width);
+                let travel = (bounds.right() - right_inset - start).max(px(0.));
                 let center = point(start + travel * fraction, bounds.center().y);
                 let track_height = length(&track.height, px(6.)).min(bounds.size.height);
                 let rail = Bounds::new(

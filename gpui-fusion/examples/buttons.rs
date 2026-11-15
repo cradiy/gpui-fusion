@@ -1,10 +1,10 @@
 use gpui::{prelude::*, *};
 use gpui_fusion::{
-    button::Button,
+    components::button::Button,
     default_theme,
-    runtime::ThemeRuntime,
     style::{BorderMotion, Gradient, Material, StylePatch, Styled as FusionStyled, Token},
     theme::ThemeStore,
+    theme::runtime::ThemeRuntime,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -482,21 +482,26 @@ fn main() {
                         ),
                     );
                 }
-                let theme = cx.new(|_| ThemeRuntime::new(ThemeStore::new(theme, "light").unwrap()));
+                let theme =
+                    ThemeRuntime::install(ThemeStore::new(theme, "light").unwrap(), "neutral", cx)
+                        .unwrap();
                 cx.new(|cx| {
                     let owner = cx.weak_entity();
                     let mut make = |label, variant: Option<&str>| {
                         let owner = owner.clone();
                         cx.new(|cx| {
-                            let button = Button::new(label, theme.clone(), "neutral", window, cx)
-                                .on_click(move |_, cx| {
-                                    let _ = owner.update(cx, |view: &mut Gallery, cx| {
-                                        view.activations += 1;
-                                        cx.notify();
-                                    });
+                            let button = Button::new(label, window, cx).on_click(move |_, cx| {
+                                let _ = owner.update(cx, |view: &mut Gallery, cx| {
+                                    view.activations += 1;
+                                    cx.notify();
                                 });
+                            });
                             if let Some(variant) = variant {
-                                button.variant(variant)
+                                if variant == "glass" {
+                                    button.material_mode(gpui_fusion::style::MaterialMode::Glass)
+                                } else {
+                                    button.variant(variant)
+                                }
                             } else {
                                 button
                             }

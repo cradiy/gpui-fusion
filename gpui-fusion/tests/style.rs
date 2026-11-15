@@ -10,12 +10,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 fn theme() -> Theme {
     Theme {
+        material: gpui_fusion::style::MaterialMode::Plain,
         modes: BTreeSet::from(["a".into(), "b".into()]),
         style_sets: BTreeMap::from([(
             "base".into(),
             StyleSet {
                 extends: None,
-                recipes: BTreeMap::new(),
                 tokens: BTreeMap::from([
                     (
                         "measure".into(),
@@ -84,13 +84,21 @@ fn instance_base_and_clear_override_lower_layer_states() {
     };
     let instance = StylePatch::default().w(px(13.)).clear_bg();
     let result = recipe
-        .resolve(None, &instance, &context, &State::Hovered.into(), None)
+        .resolve(
+            None,
+            gpui_fusion::style::MaterialMode::Plain,
+            &instance,
+            &context,
+            &State::Hovered.into(),
+            None,
+        )
         .unwrap();
     assert_eq!(result.width, Resolved::Value(px(13.)));
     assert_eq!(result.background, Resolved::Clear);
     let inherited = recipe
         .resolve(
             None,
+            gpui_fusion::style::MaterialMode::Plain,
             &StylePatch::default(),
             &context,
             &State::Hovered.into(),
@@ -167,7 +175,6 @@ fn inherited_aliases_follow_child_and_scope_but_qualified_tokens_do_not() {
         "child".into(),
         StyleSet {
             extends: Some("base".into()),
-            recipes: BTreeMap::new(),
             tokens: BTreeMap::from([(
                 "measure".into(),
                 TokenDefinition::Length(ModeValues::constant(px(23.))),
@@ -327,42 +334,44 @@ fn a_scope_can_derive_a_token_from_the_same_qualified_theme_token() {
 }
 
 #[test]
-fn inherited_recipes_and_variants_apply_before_instance_overrides() {
+fn recipes_and_materials_are_separate_from_inherited_theme_values() {
+    use gpui_fusion::style::{ComponentStyles, MaterialMode};
     let mut theme = theme();
-    theme.style_sets.get_mut("base").unwrap().recipes.insert(
-        "test-component".into(),
-        Recipe {
-            base: StylePatch::default().w(Token::<Pixels>::new("measure")),
-            variants: BTreeMap::from([(
-                "compact".into(),
-                StylePatch::default().h(px(24.)).hover(|s| s.opacity(0.5)),
-            )]),
-            ..Default::default()
-        },
-    );
     theme.style_sets.insert(
         "child".into(),
         StyleSet {
             extends: Some("base".into()),
-            recipes: BTreeMap::from([(
-                "test-component".into(),
-                Recipe {
-                    base: StylePatch::default().rounded(px(3.)),
-                    ..Default::default()
-                },
-            )]),
             ..Default::default()
         },
     );
+    let styles = ComponentStyles {
+        recipes: BTreeMap::from([(
+            "indicator".into(),
+            Recipe {
+                base: StylePatch::default().w(Token::<Pixels>::new("measure")),
+                glass: StylePatch::default().rounded(px(3.)),
+                variants: BTreeMap::from([(
+                    "compact".into(),
+                    StylePatch::default().h(px(24.)).hover(|s| s.opacity(0.5)),
+                )]),
+                ..Default::default()
+            },
+        )]),
+    };
     let encoded = serde_json::to_string(&theme).unwrap();
+    assert!(!encoded.contains("recipes"));
     let theme = Theme::from_json(&encoded).unwrap();
+    let styles = ComponentStyles::from_json(&serde_json::to_string(&styles).unwrap()).unwrap();
+    styles.validate(&theme).unwrap();
     let context = ResolveContext::new(&theme, "b", "child").unwrap();
     let instance = StylePatch::default().opacity(0.9);
-    let result = context
-        .resolve_recipe(
-            "test-component",
+    let recipe = styles.recipe("indicator").unwrap();
+    let result = recipe
+        .resolve(
             Some("compact"),
+            MaterialMode::Glass,
             &instance,
+            &context,
             &State::Hovered.into(),
             None,
         )
@@ -371,23 +380,36 @@ fn inherited_recipes_and_variants_apply_before_instance_overrides() {
     assert_eq!(result.height, Resolved::Value(px(24.)));
     assert_eq!(result.radius, Resolved::Value(px(3.)));
     assert_eq!(result.opacity, Resolved::Value(0.9));
+    let plain = recipe
+        .resolve(
+            Some("compact"),
+            MaterialMode::Plain,
+            &instance,
+            &context,
+            &StateSelector::default(),
+            None,
+        )
+        .unwrap();
+    assert_eq!(plain.radius, Resolved::Unset);
     assert!(
-        context
-            .resolve_recipe(
-                "test-component",
+        recipe
+            .resolve(
                 Some("missing"),
+                MaterialMode::Plain,
                 &instance,
+                &context,
                 &StateSelector::default(),
                 None
             )
             .is_err()
     );
     assert!(
-        context
-            .resolve_recipe(
-                "test-component",
+        recipe
+            .resolve(
                 None,
+                MaterialMode::Glass,
                 &instance,
+                &context,
                 &StateSelector::default(),
                 Some("missing")
             )
@@ -409,7 +431,6 @@ fn partial_mode_overrides_inherit_missing_modes_through_scopes_and_style_sets() 
                     modes: BTreeMap::from([("b".into(), px(41.).into())]),
                 }),
             )]),
-            ..Default::default()
         },
     );
     theme.validate().unwrap();

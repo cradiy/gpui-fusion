@@ -1,6 +1,7 @@
 use crate::{
-    runtime::ThemeRuntime,
-    style::{Part, State, StateSelector, StylePatch, Styled},
+    style::{MaterialMode, Part, State, StateSelector, StylePatch, Styled},
+    theme::material_binding::MaterialBinding,
+    theme::runtime::ThemeRuntime,
     theme::{ResolveContext, StyleError, ThemeScope},
 };
 use gpui::{
@@ -29,7 +30,7 @@ impl Part for ButtonPart {
 /// A persistent, focusable action control using the `button` theme recipe.
 pub struct Button {
     theme: Entity<ThemeRuntime>,
-    style_set: String,
+    material_binding: MaterialBinding,
     variant: Option<String>,
     scopes: Vec<ThemeScope>,
     style: StylePatch,
@@ -44,9 +45,9 @@ pub struct Button {
     error: Option<StyleError>,
     _subscriptions: Vec<Subscription>,
     validated_revision: Option<u64>,
-    transition: Option<crate::button_motion::MaterialTransition>,
+    transition: Option<super::motion::MaterialTransition>,
     transition_duration: std::time::Duration,
-    glass_motion: crate::button_motion::GlassMotion,
+    glass_motion: super::motion::GlassMotion,
     pointer: Option<gpui::Point<gpui::Pixels>>,
     border_flow_started: Option<std::time::Instant>,
 }
@@ -54,14 +55,17 @@ pub struct Button {
 impl Button {
     pub fn new(
         label: impl Into<SharedString>,
-        theme: Entity<ThemeRuntime>,
-        style_set: impl Into<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let theme = ThemeRuntime::global(cx);
         let focus = cx.focus_handle();
         let subscriptions = vec![
-            cx.observe(&theme, |_, _, cx| cx.notify()),
+            cx.observe(&theme, |this, theme, cx| {
+                if this.validated_revision != Some(theme.read(cx).revision()) {
+                    cx.notify();
+                }
+            }),
             cx.on_focus(&focus, window, |_, _, cx| cx.notify()),
             cx.on_blur(&focus, window, |this, _, cx| {
                 this.key_pressed = None;
@@ -71,7 +75,7 @@ impl Button {
         ];
         Self {
             theme,
-            style_set: style_set.into(),
+            material_binding: MaterialBinding::new(cx),
             variant: None,
             scopes: Vec::new(),
             style: StylePatch::default(),
@@ -88,7 +92,7 @@ impl Button {
             validated_revision: None,
             transition: None,
             transition_duration: std::time::Duration::from_millis(160),
-            glass_motion: crate::button_motion::GlassMotion::new(std::time::Instant::now()),
+            glass_motion: super::motion::GlassMotion::new(std::time::Instant::now()),
             pointer: None,
             border_flow_started: None,
         }
@@ -98,6 +102,15 @@ impl Button {
     pub fn transition_duration(mut self, duration: std::time::Duration) -> Self {
         self.transition_duration = duration;
         self
+    }
+    /// Fixes the material and unsubscribes from application material changes.
+    pub fn material_mode(mut self, mode: MaterialMode) -> Self {
+        self.material_binding.fix(mode);
+        self
+    }
+    /// None follows the application's material; Some fixes this component's material.
+    pub fn set_material_mode(&mut self, mode: Option<MaterialMode>, cx: &mut Context<Self>) {
+        self.material_binding.set(mode, cx);
     }
     pub fn variant(mut self, name: impl Into<String>) -> Self {
         self.variant = Some(name.into());
@@ -151,34 +164,28 @@ impl Button {
         window: &Window,
         cx: &App,
     ) -> Result<[crate::style::ComputedStyle; 3], StyleError> {
-        let store = self.theme.read(cx).store();
-        let mut context = ResolveContext::new(store.theme(), store.mode(), &self.style_set)?;
+        let runtime = self.theme.read(cx);
+        let store = runtime.store();
+        let recipe = runtime.styles().recipe("button")?;
+        let material = if matches!(self.variant.as_deref(), Some("text" | "link")) {
+            MaterialMode::Plain
+        } else {
+            self.material_binding.mode(cx)
+        };
+        let mut context = ResolveContext::new(store.theme(), store.mode(), runtime.style_set())?;
         for scope in &self.scopes {
             context = context.scoped(scope)?;
         }
-        if self.validated_revision != Some(store.revision()) {
+        if self.validated_revision != Some(runtime.revision()) {
             self.style.validate(&context, &["label", "icon"])?;
-            let selected_style = self
-                .scopes
+            if recipe
+                .parts
                 .iter()
-                .rev()
-                .find_map(|scope| scope.style_set.as_deref())
-                .unwrap_or(&self.style_set);
-            let mut current = Some(selected_style);
-            while let Some(name) = current {
-                let set = &store.theme().style_sets[name];
-                if let Some(recipe) = set.recipes.get("button") {
-                    if recipe
-                        .parts
-                        .iter()
-                        .any(|part| part != "label" && part != "icon")
-                    {
-                        return Err(StyleError::new("button.parts", "unsupported button part"));
-                    }
-                }
-                current = set.extends.as_deref();
+                .any(|part| part != "label" && part != "icon")
+            {
+                return Err(StyleError::new("button.parts", "unsupported button part"));
             }
-            self.validated_revision = Some(store.revision());
+            self.validated_revision = Some(runtime.revision());
         }
         let mut states = StateSelector::default();
         if self.disabled {
@@ -195,10 +202,11 @@ impl Button {
             }
         }
         let resolve = |part| {
-            context.resolve_recipe(
-                "button",
+            recipe.resolve(
                 self.variant.as_deref(),
+                material,
                 &self.style,
+                &context,
                 &states,
                 part,
             )
@@ -265,7 +273,7 @@ impl Render for Button {
             let now = std::time::Instant::now();
             let transition = self
                 .transition
-                .get_or_insert_with(|| crate::button_motion::MaterialTransition::new(target, now));
+                .get_or_insert_with(|| super::motion::MaterialTransition::new(target, now));
             let (material, active) = transition.sample(target, now, self.transition_duration);
             if active {
                 window.request_animation_frame();

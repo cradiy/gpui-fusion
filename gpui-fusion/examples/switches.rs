@@ -1,10 +1,10 @@
 use gpui::{prelude::*, *};
 use gpui_fusion::style::Styled as FusionStyled;
 use gpui_fusion::{
+    components::switch::{Switch, SwitchContent, SwitchPart},
     default_theme,
-    runtime::ThemeRuntime,
-    switch::{Switch, SwitchContent, SwitchPart},
     theme::ThemeStore,
+    theme::runtime::ThemeRuntime,
 };
 use gpui_icons::{GpuiIcons, IconAssets};
 
@@ -133,9 +133,12 @@ fn main() {
                     ..Default::default()
                 },
                 |window, cx| {
-                    let theme = cx.new(|_| {
-                        ThemeRuntime::new(ThemeStore::new(default_theme(), "light").unwrap())
-                    });
+                    let theme = ThemeRuntime::install(
+                        ThemeStore::new(default_theme(), "light").unwrap(),
+                        "neutral",
+                        cx,
+                    )
+                    .unwrap();
                     cx.new(|cx| {
                         let owner = cx.weak_entity();
                         let switches = [None, Some("glass"), None, Some("glass"), Some("glass")]
@@ -144,22 +147,13 @@ fn main() {
                             .map(|(index, variant)| {
                                 let owner = owner.clone();
                                 cx.new(|cx| {
-                                    let control = Switch::new(
-                                        "Enable updates",
-                                        false,
-                                        theme.clone(),
-                                        "neutral",
-                                        window,
-                                        cx,
-                                    )
-                                    .on_change(
-                                        move |_, _, cx| {
+                                    let control = Switch::new("Enable updates", false, window, cx)
+                                        .on_change(move |_, _, cx| {
                                             let _ = owner.update(cx, |view: &mut Gallery, cx| {
                                                 view.changes += 1;
                                                 cx.notify();
                                             });
-                                        },
-                                    );
+                                        });
                                     let control = match index {
                                         2 | 3 => control
                                             .content(
@@ -179,7 +173,11 @@ fn main() {
                                         _ => control,
                                     };
                                     if let Some(variant) = variant {
-                                        control.variant(variant)
+                                        control.material_mode(if variant == "glass" {
+                                            gpui_fusion::style::MaterialMode::Glass
+                                        } else {
+                                            gpui_fusion::style::MaterialMode::Plain
+                                        })
                                     } else {
                                         control
                                     }

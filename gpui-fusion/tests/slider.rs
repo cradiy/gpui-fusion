@@ -3,11 +3,11 @@ use gpui::{
     Window, div, prelude::*, px, size,
 };
 use gpui_fusion::{
+    components::slider::{Slider, SliderRange},
     default_theme,
-    runtime::ThemeRuntime,
-    slider::{Slider, SliderRange},
     style::{StylePatch, Styled as FusionStyled},
     theme::ThemeStore,
+    theme::runtime::ThemeRuntime,
 };
 use std::{cell::RefCell, rc::Rc};
 
@@ -44,10 +44,14 @@ fn slider_drag_keyboard_range_and_cancellation(cx: &mut TestAppContext) {
     let changes = Rc::new(RefCell::new(Vec::new()));
     let events = changes.clone();
     let view = cx.open_window(size(px(420.), px(200.)), |window, cx| {
-        let theme =
-            cx.new(|_| ThemeRuntime::new(ThemeStore::new(default_theme(), "light").unwrap()));
+        let theme = ThemeRuntime::install(
+            ThemeStore::new(default_theme(), "light").unwrap(),
+            "neutral",
+            cx,
+        )
+        .unwrap();
         let slider = cx.new(|cx| {
-            Slider::new("Level", -7., theme.clone(), "neutral", window, cx)
+            Slider::new("Level", -7., window, cx)
                 .range(SliderRange::new(-7., 14., Some(4.)).unwrap())
                 .animated(false)
                 .on_change(move |value, _, _| events.borrow_mut().push(value))
@@ -142,11 +146,15 @@ fn slider_drag_keyboard_range_and_cancellation(cx: &mut TestAppContext) {
 #[gpui::test]
 fn slider_theme_and_instance_styles_refresh_without_resetting_value(cx: &mut TestAppContext) {
     let view = cx.open_window(size(px(420.), px(200.)), |window, cx| {
-        let theme =
-            cx.new(|_| ThemeRuntime::new(ThemeStore::new(default_theme(), "light").unwrap()));
+        let theme = ThemeRuntime::install(
+            ThemeStore::new(default_theme(), "light").unwrap(),
+            "neutral",
+            cx,
+        )
+        .unwrap();
         let slider = cx.new(|cx| {
-            Slider::new("Level", 37., theme.clone(), "neutral", window, cx)
-                .variant("glass")
+            Slider::new("Level", 37., window, cx)
+                .material_mode(gpui_fusion::style::MaterialMode::Glass)
                 .animated(false)
         });
         Harness { slider, theme }
@@ -185,4 +193,69 @@ fn slider_theme_and_instance_styles_refresh_without_resetting_value(cx: &mut Tes
         assert_eq!(h.slider.read(cx).value(), 37.);
     })
     .unwrap();
+}
+
+#[gpui::test]
+fn slider_track_mapping_is_independent_of_thumb_material_and_width(cx: &mut TestAppContext) {
+    use gpui_fusion::style::{MaterialMode, PartName};
+
+    let view = cx.open_window(size(px(420.), px(200.)), |window, cx| {
+        let theme = ThemeRuntime::install(
+            ThemeStore::new(default_theme(), "light").unwrap(),
+            "neutral",
+            cx,
+        )
+        .unwrap();
+        let slider = cx.new(|cx| {
+            Slider::new("Level", 0., window, cx)
+                .range(SliderRange::new(0., 1., None).unwrap())
+                .animated(false)
+        });
+        Harness { slider, theme }
+    });
+    let mut visual = VisualTestContext::from_window(view.into(), cx);
+    visual.update(|window, cx| {
+        window.activate_window();
+        window.draw(cx).clear();
+    });
+    let bounds = visual.debug_bounds("fusion-slider").unwrap();
+    for fraction in [0.18, 0.82] {
+        let position = gpui::point(
+            bounds.left() + bounds.size.width * fraction,
+            bounds.center().y,
+        );
+        let mut baseline = None;
+        for (mode, thumb_width) in [
+            (MaterialMode::Plain, None),
+            (MaterialMode::Glass, None),
+            (MaterialMode::Glass, Some(px(44.))),
+        ] {
+            view.update(&mut visual.cx, |h, _, cx| {
+                h.theme.update(cx, |t, cx| t.set_material_mode(mode, cx));
+                h.slider.update(cx, |s, cx| {
+                    s.set_value(0.5, cx);
+                    let style = match thumb_width {
+                        Some(width) => {
+                            StylePatch::default().part(PartName("thumb".into()), |s| s.w(width))
+                        }
+                        None => StylePatch::default(),
+                    };
+                    s.set_style(style, cx);
+                });
+            })
+            .unwrap();
+            visual.update(|window, cx| window.draw(cx).clear());
+            assert_eq!(visual.debug_bounds("fusion-slider").unwrap(), bounds);
+            visual.simulate_click(position, Default::default());
+            let value = view
+                .update(&mut visual.cx, |h, _, cx| h.slider.read(cx).value())
+                .unwrap();
+            if let Some(expected) = baseline {
+                assert_eq!(value, expected);
+            } else {
+                assert!((value - 0.5).abs() > 0.1);
+                baseline = Some(value);
+            }
+        }
+    }
 }

@@ -67,7 +67,6 @@ pub enum TokenDefinition {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct StyleSet {
-    pub recipes: BTreeMap<String, crate::style::Recipe>,
     pub extends: Option<String>,
     pub tokens: BTreeMap<String, TokenDefinition>,
 }
@@ -75,6 +74,7 @@ pub struct StyleSet {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Theme {
+    pub material: crate::style::MaterialMode,
     pub modes: BTreeSet<String>,
     pub style_sets: BTreeMap<String, StyleSet>,
 }
@@ -168,19 +168,6 @@ impl Theme {
                     }
                 }
 
-                let mut style = Some(name.as_str());
-                while let Some(style_name) = style {
-                    let definition = &self.style_sets[style_name];
-                    for (recipe_name, recipe) in &definition.recipes {
-                        recipe.validate(&context).map_err(|error| {
-                            StyleError::new(
-                                format!("{name}.recipes.{recipe_name}.{mode}"),
-                                error.to_string(),
-                            )
-                        })?;
-                    }
-                    style = definition.extends.as_deref();
-                }
                 for token in &inherited_tokens {
                     // Resolve inherited aliases against the selected child's overrides.
                     let definitions = context.definitions(name, token, false)?;
@@ -278,59 +265,6 @@ impl<'a> ResolveContext<'a> {
             return Err(StyleError::new(format!("{style}.{token}"), "unknown token"));
         }
         Ok(definitions)
-    }
-
-    pub fn resolve_recipe(
-        &self,
-        component: &str,
-        variant: Option<&str>,
-        instance: &crate::style::StylePatch,
-        states: &crate::style::StateSelector,
-        part: Option<&str>,
-    ) -> Result<crate::style::ComputedStyle, StyleError> {
-        let mut chain = Vec::new();
-        let mut current = Some(self.style_set);
-        let mut visited = BTreeSet::new();
-        while let Some(name) = current {
-            if !visited.insert(name) {
-                return Err(StyleError::new(name, "style inheritance cycle"));
-            }
-            let style = self
-                .theme
-                .style_sets
-                .get(name)
-                .ok_or_else(|| StyleError::new(name, "unknown style set"))?;
-            if let Some(recipe) = style.recipes.get(component) {
-                chain.push(recipe);
-            }
-            current = style.extends.as_deref();
-        }
-        if chain.is_empty() {
-            return Err(StyleError::new(component, "unknown component recipe"));
-        }
-        let mut layers = Vec::new();
-        let mut found_variant = variant.is_none();
-        let mut found_part = part.is_none();
-        for recipe in chain.into_iter().rev() {
-            if part.is_some_and(|name| recipe.parts.contains(name)) {
-                found_part = true;
-            }
-            layers.push(&recipe.base);
-            if let Some(name) = variant {
-                if let Some(patch) = recipe.variants.get(name) {
-                    layers.push(patch);
-                    found_variant = true;
-                }
-            }
-        }
-        if !found_variant {
-            return Err(StyleError::new(component, "unknown variant"));
-        }
-        if !found_part {
-            return Err(StyleError::new(component, "unknown component part"));
-        }
-        layers.push(instance);
-        crate::style::resolve_style(&layers, self, states, part)
     }
 
     pub fn resolve<T: StyleType>(&self, value: &StyleValue<T>) -> Result<T, StyleError> {
@@ -436,6 +370,14 @@ impl ThemeStore {
     pub fn revision(&self) -> u64 {
         self.revision
     }
+    pub fn set_material_mode(&mut self, material: crate::style::MaterialMode) -> bool {
+        if self.theme.material == material {
+            return false;
+        }
+        self.theme.material = material;
+        self.revision = self.revision.wrapping_add(1);
+        true
+    }
     pub fn set_mode(&mut self, mode: impl Into<String>) -> Result<bool, StyleError> {
         let mode = mode.into();
         if !self.theme.modes.contains(&mode) {
@@ -461,5 +403,32 @@ impl ThemeStore {
         self.theme = theme;
         self.revision = self.revision.wrapping_add(1);
         Ok(())
+    }
+}
+
+/// A complete application appearance selection, loadable from one JSON document.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeConfig {
+    pub theme: Theme,
+    pub mode: String,
+    pub style_set: String,
+}
+impl ThemeConfig {
+    pub fn from_json(source: &str) -> Result<Self, StyleError> {
+        let config: Self = serde_json::from_str(source)
+            .map_err(|error| StyleError::new("$", error.to_string()))?;
+        config.theme.validate()?;
+        ResolveContext::new(&config.theme, &config.mode, &config.style_set)?;
+        Ok(config)
+    }
+    pub fn from_file(path: impl AsRef<std::path::Path>) -> Result<Self, StyleError> {
+        let path = path.as_ref();
+        let source = std::fs::read_to_string(path)
+            .map_err(|error| StyleError::new(path.display().to_string(), error.to_string()))?;
+        Self::from_json(&source)
+    }
+    pub fn json_schema() -> schemars::Schema {
+        schemars::schema_for!(Self)
     }
 }

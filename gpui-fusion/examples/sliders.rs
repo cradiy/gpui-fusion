@@ -1,10 +1,10 @@
 use gpui::{prelude::*, *};
 use gpui_fusion::{
+    components::slider::{Slider, SliderRange},
     default_theme,
-    runtime::ThemeRuntime,
-    slider::{Slider, SliderRange},
     style::{StylePatch, Styled as FusionStyled, Token},
     theme::ThemeStore,
+    theme::runtime::ThemeRuntime,
 };
 
 struct Gallery {
@@ -171,8 +171,12 @@ fn main() {
                 ..Default::default()
             },
             |window, cx| {
-                let theme = cx
-                    .new(|_| ThemeRuntime::new(ThemeStore::new(default_theme(), "light").unwrap()));
+                let theme = ThemeRuntime::install(
+                    ThemeStore::new(default_theme(), "light").unwrap(),
+                    "neutral",
+                    cx,
+                )
+                .unwrap();
                 cx.new(|cx| {
                     let owner = cx.weak_entity();
                     let values = vec![38., 62., -5., 10.];
@@ -182,28 +186,21 @@ fn main() {
                         .map(|(index, value)| {
                             let owner = owner.clone();
                             cx.new(|cx| {
-                                let slider = Slider::new(
-                                    "Level",
-                                    *value,
-                                    theme.clone(),
-                                    "neutral",
-                                    window,
-                                    cx,
-                                )
-                                .range(if index < 2 {
-                                    SliderRange::new(0., 100., None).unwrap()
-                                } else {
-                                    SliderRange::new(-20., 20., Some(5.)).unwrap()
-                                })
-                                .w(px(400.))
-                                .on_change(move |value, _, cx| {
-                                    let _ = owner.update(cx, |view: &mut Gallery, cx| {
-                                        view.values[index] = value;
-                                        cx.notify();
+                                let slider = Slider::new("Level", *value, window, cx)
+                                    .range(if index < 2 {
+                                        SliderRange::new(0., 100., None).unwrap()
+                                    } else {
+                                        SliderRange::new(-20., 20., Some(5.)).unwrap()
+                                    })
+                                    .w(px(400.))
+                                    .on_change(move |value, _, cx| {
+                                        let _ = owner.update(cx, |view: &mut Gallery, cx| {
+                                            view.values[index] = value;
+                                            cx.notify();
+                                        });
                                     });
-                                });
                                 if index % 2 == 1 {
-                                    slider.variant("glass")
+                                    slider.material_mode(gpui_fusion::style::MaterialMode::Glass)
                                 } else {
                                     slider
                                 }

@@ -55,3 +55,14 @@ impl Material {
         Ok(Some(glass))
     }
 }
+
+/// Application-wide surface mode, independent of the color theme.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MaterialMode {
+    #[default]
+    Plain,
+    Glass,
+}

@@ -3,10 +3,10 @@ use gpui::{
     Window, div, prelude::*, px, size,
 };
 use gpui_fusion::{
+    components::switch::{Switch, SwitchContent},
     default_theme,
-    runtime::ThemeRuntime,
-    switch::{Switch, SwitchContent},
     theme::ThemeStore,
+    theme::runtime::ThemeRuntime,
 };
 use std::{cell::RefCell, rc::Rc};
 
@@ -24,11 +24,15 @@ fn switch_activation_drag_cancellation_and_theme_preserve_state(cx: &mut TestApp
     let changes = Rc::new(RefCell::new(Vec::new()));
     let events = changes.clone();
     let view = cx.open_window(size(px(360.), px(200.)), |window, cx| {
-        let theme =
-            cx.new(|_| ThemeRuntime::new(ThemeStore::new(default_theme(), "light").unwrap()));
+        let theme = ThemeRuntime::install(
+            ThemeStore::new(default_theme(), "light").unwrap(),
+            "neutral",
+            cx,
+        )
+        .unwrap();
         let switch = cx.new(|cx| {
-            Switch::new("Sync", false, theme.clone(), "neutral", window, cx)
-                .variant("glass")
+            Switch::new("Sync", false, window, cx)
+                .material_mode(gpui_fusion::style::MaterialMode::Glass)
                 .content(
                     SwitchContent::Text("0".into()),
                     SwitchContent::Text("1".into()),
@@ -107,11 +111,13 @@ fn switch_activation_drag_cancellation_and_theme_preserve_state(cx: &mut TestApp
 fn style_cache_refreshes_for_theme_instance_and_invalid_variants(cx: &mut TestAppContext) {
     use gpui_fusion::style::{StylePatch, Styled};
     let view = cx.open_window(size(px(360.), px(200.)), |window, cx| {
-        let theme =
-            cx.new(|_| ThemeRuntime::new(ThemeStore::new(default_theme(), "light").unwrap()));
-        let switch = cx.new(|cx| {
-            Switch::new("Sync", false, theme.clone(), "neutral", window, cx).animated(false)
-        });
+        let theme = ThemeRuntime::install(
+            ThemeStore::new(default_theme(), "light").unwrap(),
+            "neutral",
+            cx,
+        )
+        .unwrap();
+        let switch = cx.new(|cx| Switch::new("Sync", false, window, cx).animated(false));
         Harness { switch, theme }
     });
     let mut visual = VisualTestContext::from_window(view.into(), cx);
@@ -131,17 +137,11 @@ fn style_cache_refreshes_for_theme_instance_and_invalid_variants(cx: &mut TestAp
     view.update(&mut visual.cx, |h, _, cx| {
         h.switch
             .update(cx, |s, cx| s.set_style(StylePatch::default(), cx));
-        let mut theme = default_theme();
-        let recipe = theme
-            .style_sets
-            .get_mut("neutral")
-            .unwrap()
-            .recipes
-            .get_mut("switch")
-            .unwrap();
+        let mut styles = gpui_fusion::default_styles();
+        let recipe = styles.recipes.get_mut("switch").unwrap();
         recipe.base = std::mem::take(&mut recipe.base).w(px(86.));
         h.theme.update(cx, |t, cx| {
-            t.replace_json(&serde_json::to_string(&theme).unwrap(), cx)
+            t.replace_styles_json(&serde_json::to_string(&styles).unwrap(), cx)
                 .unwrap()
         });
     })
@@ -160,8 +160,10 @@ fn style_cache_refreshes_for_theme_instance_and_invalid_variants(cx: &mut TestAp
     visual.update(|window, cx| window.draw(cx).clear());
     view.update(&mut visual.cx, |h, _, cx| {
         assert!(h.switch.read(cx).style_error().is_some());
-        h.switch
-            .update(cx, |s, cx| s.set_variant(Some("glass".into()), cx));
+        h.switch.update(cx, |s, cx| {
+            s.set_variant(None, cx);
+            s.set_material_mode(Some(gpui_fusion::style::MaterialMode::Glass), cx);
+        });
     })
     .unwrap();
     visual.update(|window, cx| window.draw(cx).clear());

@@ -1,7 +1,10 @@
 use crate::{
-    button_motion::Spring,
-    runtime::ThemeRuntime,
-    style::{ComputedStyle, Part, Resolved, State, StateSelector, StylePatch, Styled},
+    components::motion::Spring,
+    style::{
+        ComputedStyle, MaterialMode, Part, Resolved, State, StateSelector, StylePatch, Styled,
+    },
+    theme::material_binding::MaterialBinding,
+    theme::runtime::ThemeRuntime,
     theme::{ResolveContext, StyleError, ThemeScope},
 };
 use gpui::{Styled as _, prelude::*, *};
@@ -36,7 +39,7 @@ struct Drag {
 /// A binary control with a draggable thumb and a theme-defined track.
 pub struct Switch {
     theme: Entity<ThemeRuntime>,
-    style_set: String,
+    material_binding: MaterialBinding,
     variant: Option<String>,
     scopes: Vec<ThemeScope>,
     style: StylePatch,
@@ -62,14 +65,17 @@ impl Switch {
     pub fn new(
         label: impl Into<SharedString>,
         checked: bool,
-        theme: Entity<ThemeRuntime>,
-        style_set: impl Into<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let theme = ThemeRuntime::global(cx);
         let focus = cx.focus_handle();
         let subscriptions = vec![
-            cx.observe(&theme, |_, _, cx| cx.notify()),
+            cx.observe(&theme, |this, theme, cx| {
+                if this.validated_revision != Some(theme.read(cx).revision()) {
+                    cx.notify();
+                }
+            }),
             cx.on_focus(&focus, window, |_, _, cx| cx.notify()),
             cx.on_blur(&focus, window, |this, _, cx| {
                 this.drag = None;
@@ -79,7 +85,7 @@ impl Switch {
         ];
         Self {
             theme,
-            style_set: style_set.into(),
+            material_binding: MaterialBinding::new(cx),
             variant: None,
             scopes: Vec::new(),
             style: StylePatch::default(),
@@ -104,6 +110,15 @@ impl Switch {
             validated_revision: None,
             resolved: None,
         }
+    }
+    /// Fixes the material and unsubscribes from application material changes.
+    pub fn material_mode(mut self, mode: MaterialMode) -> Self {
+        self.material_binding.fix(mode);
+        self
+    }
+    /// None follows the application's material; Some fixes this component's material.
+    pub fn set_material_mode(&mut self, mode: Option<MaterialMode>, cx: &mut Context<Self>) {
+        self.material_binding.set(mode, cx);
     }
     pub fn variant(mut self, name: impl Into<String>) -> Self {
         self.validated_revision = None;
@@ -181,8 +196,11 @@ impl Switch {
         }
     }
     fn resolve(&mut self, window: &Window, cx: &App) -> Result<[ComputedStyle; 4], StyleError> {
-        let store = self.theme.read(cx).store();
-        let revision = store.revision();
+        let runtime = self.theme.read(cx);
+        let store = runtime.store();
+        let recipe = runtime.styles().recipe("switch")?;
+        let material = self.material_binding.mode(cx);
+        let revision = runtime.revision();
         let flags = [
             (State::Selected, self.checked),
             (State::Disabled, self.disabled),
@@ -196,12 +214,13 @@ impl Switch {
                 !self.disabled && self.focus.is_focused(window) && window.last_input_was_keyboard(),
             ),
         ];
-        let key = flags
-            .iter()
-            .enumerate()
-            .fold(0u8, |key, (bit, (_, active))| {
-                key | (u8::from(*active) << bit)
-            });
+        let key = (u8::from(material == MaterialMode::Glass) << 6)
+            | flags
+                .iter()
+                .enumerate()
+                .fold(0u8, |key, (bit, (_, active))| {
+                    key | (u8::from(*active) << bit)
+                });
         if self.validated_revision == Some(revision) {
             if let Some((cached_revision, cached_key, styles)) = &self.resolved {
                 if *cached_revision == revision && *cached_key == key {
@@ -210,7 +229,7 @@ impl Switch {
             }
         }
         self.resolved = None;
-        let mut context = ResolveContext::new(store.theme(), store.mode(), &self.style_set)?;
+        let mut context = ResolveContext::new(store.theme(), store.mode(), runtime.style_set())?;
         for scope in &self.scopes {
             context = context.scoped(scope)?;
         }
@@ -229,22 +248,38 @@ impl Switch {
         let mut on = states.clone();
         on.0.insert(State::Selected);
         let styles = [
-            context.resolve_recipe(
-                "switch",
+            recipe.resolve(
                 self.variant.as_deref(),
+                material,
                 &self.style,
+                &context,
                 &states,
                 None,
             )?,
-            context.resolve_recipe(
-                "switch",
+            recipe.resolve(
                 self.variant.as_deref(),
+                material,
                 &self.style,
+                &context,
                 &states,
                 Some("thumb"),
             )?,
-            context.resolve_recipe("switch", self.variant.as_deref(), &self.style, &off, None)?,
-            context.resolve_recipe("switch", self.variant.as_deref(), &self.style, &on, None)?,
+            recipe.resolve(
+                self.variant.as_deref(),
+                material,
+                &self.style,
+                &context,
+                &off,
+                None,
+            )?,
+            recipe.resolve(
+                self.variant.as_deref(),
+                material,
+                &self.style,
+                &context,
+                &on,
+                None,
+            )?,
         ];
         self.resolved = Some((revision, key, styles.clone()));
         Ok(styles)

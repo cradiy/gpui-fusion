@@ -105,7 +105,7 @@ pub fn default_theme() -> Theme {
         ("on_primary", 0xffffff, 0xffffff),
         ("focus", 0x2866c7, 0x8cb7ff),
     ];
-    Theme {
+    let mut theme = Theme {
         modes: BTreeSet::from(["light".into(), "dark".into()]),
         style_sets: BTreeMap::from([(
             "neutral".into(),
@@ -132,5 +132,46 @@ pub fn default_theme() -> Theme {
                 )]),
             },
         )]),
-    }
+    };
+    let switch = Recipe {
+        parts: BTreeSet::from(["thumb".into()]),
+        base: StylePatch::default()
+            .w(px(52.))
+            .h(px(28.))
+            .rounded(px(14.))
+            .bg(color("edge"))
+            .border(px(1.))
+            .border_color(gpui::transparent_black())
+            .state(State::Selected, |s| s.bg(color("primary")))
+            .focus_visible(|s| s.border_color(color("focus")))
+            .state(State::Disabled, |s| s.opacity(0.4))
+            .part(crate::style::PartName("thumb".into()), |s| {
+                s.bg(gpui::rgb(0xffffff))
+            }),
+        variants: BTreeMap::from([(
+            "glass".into(),
+            StylePatch::default()
+                .w(px(64.))
+                .h(px(28.))
+                .rounded(px(14.))
+                .part(crate::style::PartName("thumb".into()), |s| {
+                    s.material(Material::Glass {
+                        blur: px(1.).into(),
+                        refraction: px(12.).into(),
+                        thickness: px(19.).into(),
+                        frost: 1.0.into(),
+                        tint: gpui::transparent_black().into(),
+                        frost_center: gpui::rgb(0xffffff).into(),
+                        frost_edge: gpui::rgb(0xe9ebef).into(),
+                    })
+                }),
+        )]),
+    };
+    theme
+        .style_sets
+        .get_mut("neutral")
+        .unwrap()
+        .recipes
+        .insert("switch".into(), switch);
+    theme
 }

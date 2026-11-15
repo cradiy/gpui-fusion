@@ -3,6 +3,7 @@
 pub mod button;
 pub mod runtime;
 pub mod style;
+pub mod switch;
 pub mod theme;
 
 pub mod prelude {

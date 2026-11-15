@@ -3548,6 +3548,7 @@ version = "0.1.0"
 dependencies = [
  "gpui",
  "gpui_effects",
+ "gpui_icons",
  "gpui_platform",
  "schemars 1.0.4",
  "serde",

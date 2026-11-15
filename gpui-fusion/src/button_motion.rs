@@ -79,12 +79,12 @@ mod tests {
 }
 
 #[derive(Default)]
-struct Spring {
-    value: f32,
-    velocity: f32,
+pub(crate) struct Spring {
+    pub(crate) value: f32,
+    pub(crate) velocity: f32,
 }
 impl Spring {
-    fn advance(&mut self, target: f32, seconds: f32, frequency: f32, damping: f32) {
+    pub(crate) fn advance(&mut self, target: f32, seconds: f32, frequency: f32, damping: f32) {
         let displacement = self.value - target;
         let decay = (-frequency * damping * seconds).exp();
         let angular = frequency * (1. - damping * damping).sqrt();

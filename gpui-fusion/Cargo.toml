@@ -17,5 +17,6 @@ serde_json.workspace = true
 schemars.workspace = true
 
 [dev-dependencies]
+gpui_icons = { workspace = true, features = ["lucide-core"] }
 gpui = { workspace = true, features = ["test-support"] }
 gpui_platform = { workspace = true, features = ["wayland", "font-kit"] }

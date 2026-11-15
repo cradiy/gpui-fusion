@@ -153,3 +153,34 @@ The `buttons` example switches material, fill, border, shape, enabled state, and
 theme on persistent preview controls. A dedicated optical control remains in the preview alongside the switchable
 buttons; surface-free controls occupy a separate section. `Button::set_style` replaces the instance patch and
 `Button::set_variant` changes its recipe variant without replacing the entity.
+
+
+## Switches
+
+`Switch::new` creates a persistent binary control with an accessible label and
+initial checked value. It uses the shared `ThemeRuntime` and `switch` recipe.
+`on_change` receives user changes; `set_checked` updates application state without
+emitting this callback. Theme updates preserve the value and keyboard focus.
+
+The default recipe paints a solid track and thumb. The `glass` variant uses a
+white frosted thumb at rest and an expanded refractive lens while pressed or
+travelling. Track color follows the animated thumb position, including during
+dragging before the checked value is committed. The root style controls the track; `SwitchPart::Thumb` controls thumb
+size, radius, fill, border, and material. A glass thumb uses its material's tint
+and frost colors instead of a solid fill. Selected-state rules style the checked
+state. Instance styles, scopes, and variants use normal Fusion precedence.
+
+Click, Space, Enter, and accessibility activation toggle the value. Dragging
+releases to the nearest end, including outside the track. Disabling or losing
+focus cancels an active drag. `animated(false)` snaps directly to the target and
+keeps the resting lens geometry. Settled controls do not schedule animation frames.
+
+`content(unchecked, checked)` accepts `SwitchContent::Text` or an SVG asset path
+through `SwitchContent::Icon`. Content is centered above the thumb material,
+follows its movement, and changes at the midpoint. It remains sharp and retains
+its size during lens expansion. Thumb foreground and text size style both text
+and monochrome icons. The host provides SVG assets. The accessible label remains
+independent of this decorative content.
+
+Run `cargo run -p gpui-fusion --example switches` to compare plain and glass
+controls, change theme, and exercise disabled states.

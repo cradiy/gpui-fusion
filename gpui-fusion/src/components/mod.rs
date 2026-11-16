@@ -7,6 +7,7 @@ pub mod segmented;
 pub mod select;
 pub mod slider;
 pub mod switch;
+pub mod tooltip;
 
 mod motion;
 mod selection_surface;

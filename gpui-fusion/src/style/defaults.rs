@@ -615,12 +615,46 @@ pub fn default_styles() -> crate::style::ComponentStyles {
             }),
         variants: BTreeMap::new(),
     };
+    let tooltip = Recipe {
+        parts: BTreeSet::from(["shortcut".into()]),
+        base: StylePatch::default()
+            .px(px(10.))
+            .py(px(7.))
+            .gap(px(10.))
+            .rounded(px(9.))
+            .bg(color("surface_raised"))
+            .border(px(1.))
+            .border_color(color("edge_subtle"))
+            .text_color(color("foreground"))
+            .text_size(px(13.))
+            .part(crate::style::PartName("shortcut".into()), |s| {
+                s.text_color(color("foreground_muted")).text_size(px(12.))
+            }),
+        glass: StylePatch::default()
+            .border_color(gpui::transparent_black())
+            .bg(color("surface").opacity(0.3))
+            .material(Material::Glass {
+                blur: length("glass_blur").scale(24.),
+                refraction: length("glass_refraction").into(),
+                thickness: length("glass_thickness").scale(0.75),
+                edge_light: Token::<f32>::new("glass_edge_light").into(),
+                reflection: Token::<f32>::new("glass_reflection").into(),
+                edge_color: color("glass_edge_color").into(),
+                frost: Token::<f32>::new("glass_frost").scale(0.55),
+                tint: gpui::transparent_black().into(),
+                transmission: Token::<f32>::new("glass_transmission").into(),
+                frost_center: color("surface_raised").into(),
+                frost_edge: color("surface").into(),
+            }),
+        variants: BTreeMap::new(),
+    };
     crate::style::ComponentStyles {
         recipes: BTreeMap::from([
             ("button".into(), button),
             ("checkbox".into(), checkbox),
             ("radio".into(), radio),
             ("select".into(), select),
+            ("tooltip".into(), tooltip),
             ("switch".into(), switch),
             ("slider".into(), slider),
             ("segmented".into(), segmented),

@@ -630,3 +630,33 @@ zero disables the transition. Theme changes preserve selection, query, and focus
 
 Run `cargo run -p gpui-fusion --example selects` for ordinary and searchable
 fields, fixed materials, disabled options, and a large virtual list.
+
+## Tooltips
+
+`Tooltip::new(text, &control, window, cx)` wraps a persistent view that implements
+`Render` and `Focusable`. Render the tooltip entity in place of the control; the
+wrapped control retains its own focus and activation handlers. `shortcut` adds
+a trailing shortcut label. Hints contain descriptive text, not interactive
+content.
+
+Pointer hover shows the hint after 500 ms; keyboard focus shows it immediately.
+Moving into the bubble keeps it visible. Leaving both surfaces hides it after
+120 ms. Escape or clicking the control dismisses it until hover and focus leave.
+Window deactivation dismisses pending and visible hints. `disabled` suppresses
+only the hint, so a disabled control can still have an enabled tooltip.
+
+`side` accepts `TooltipSide::{Top, Bottom, Left, Right}` and defaults to top.
+The popup flips to the opposite side when necessary and stays within the
+viewport. `gap` sets the anchor spacing, and `max_width` limits wrapping width.
+`show_delay`, `hide_delay`, and `transition_duration` configure timing; a zero
+transition duration disables the 120 ms fade-in. Hidden hints have no popup or
+animation frames, and leaving during the show delay cancels the pending task.
+
+The `tooltip` recipe and Fusion `Styled` configure the bubble;
+`TooltipPart::Shortcut` configures the trailing label. `scope`, `variant`, and
+`material_mode` use the same theme model as other components. `set_material_mode`
+with `None` resumes following the global material. Theme and material changes
+update visible hints without replacing or refocusing the wrapped control.
+
+Run `cargo run -p gpui-fusion --example tooltips` for placement, shortcut labels,
+disabled controls, and plain/glass material switching.

@@ -51,7 +51,7 @@ impl DropdownPlacement {
         self.offset = offset;
         self
     }
-    pub(super) fn bounds(
+    pub(crate) fn bounds(
         self,
         anchor: Bounds<Pixels>,
         size: Size<Pixels>,

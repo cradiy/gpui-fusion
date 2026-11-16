@@ -259,7 +259,12 @@ impl Button {
         };
         let mut content = div().flex().items_center().gap(gap);
         if let Some(path) = &self.icon {
-            let mut graphic = gpui::svg().path(path.clone()).size(px(16.));
+            let mut graphic = gpui::svg().path(path.clone()).size(px(16.)).text_color(
+                root.to_gpui()
+                    .text
+                    .color
+                    .unwrap_or(window.text_style().color),
+            );
             graphic.style().refine(&icon.to_gpui());
             content = content.child(graphic);
         }
@@ -602,6 +607,12 @@ impl Render for Button {
                     let mut graphic = gpui::svg()
                         .path(path.clone())
                         .size(px(16.))
+                        .text_color(
+                            root.to_gpui()
+                                .text
+                                .color
+                                .unwrap_or(window.text_style().color),
+                        )
                         .with_transformation(gpui::Transformation::scale(gpui::size(
                             motion.label_scale,
                             motion.label_scale,

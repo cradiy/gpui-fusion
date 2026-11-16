@@ -2,6 +2,7 @@ pub mod accordion;
 pub mod badge;
 pub mod button;
 pub mod checkbox;
+pub mod dialog;
 pub mod dropdown;
 pub mod input;
 pub mod progress;

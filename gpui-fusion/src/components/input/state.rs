@@ -588,7 +588,7 @@ impl InputState {
 
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
-            focus_handle: cx.focus_handle(),
+            focus_handle: cx.focus_handle().tab_stop(true),
             content: "".into(),
             committed_content: "".into(),
             placeholder: "".into(),
@@ -2001,6 +2001,11 @@ impl Render for InputState {
                 "InputState"
             })
             .track_focus(&self.focus_handle(cx))
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+                if this.is_composing() && matches!(event.keystroke.key.as_str(), "escape" | "tab") {
+                    cx.stop_propagation();
+                }
+            }))
             .cursor(if self.disabled {
                 CursorStyle::Arrow
             } else {

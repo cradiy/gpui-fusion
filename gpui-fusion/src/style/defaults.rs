@@ -709,6 +709,48 @@ pub fn default_styles() -> crate::style::ComponentStyles {
         })
         .collect(),
     };
+    let dialog = Recipe {
+        parts: ["backdrop", "title", "body", "footer", "close"]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        base: StylePatch::default()
+            .w(px(480.))
+            .p(px(24.))
+            .rounded(px(24.))
+            .bg(color("surface_raised"))
+            .text_color(color("foreground"))
+            .text_size(length("font_body"))
+            .border(px(1.))
+            .border_color(color("edge_subtle"))
+            .part(crate::style::PartName("backdrop".into()), |s| {
+                s.bg(gpui::black().opacity(0.32))
+            })
+            .part(crate::style::PartName("title".into()), |s| {
+                s.text_size(px(20.))
+            })
+            .part(crate::style::PartName("close".into()), |s| {
+                s.text_color(color("foreground_secondary"))
+                    .border_color(color("focus"))
+            }),
+        glass: StylePatch::default()
+            .bg(color("surface_raised").opacity(0.72))
+            .border_color(gpui::transparent_black())
+            .material(Material::Glass {
+                blur: length("glass_blur").scale(22.),
+                refraction: length("glass_refraction").scale(0.8),
+                thickness: length("glass_thickness").scale(0.65),
+                edge_light: Token::<f32>::new("glass_edge_light").scale(0.5),
+                reflection: Token::<f32>::new("glass_reflection").scale(0.4),
+                edge_color: color("glass_edge_color").into(),
+                frost: Token::<f32>::new("glass_frost").scale(0.45),
+                tint: gpui::transparent_black().into(),
+                transmission: Token::<f32>::new("glass_transmission").into(),
+                frost_center: color("surface_raised").into(),
+                frost_edge: color("surface").into(),
+            }),
+        variants: BTreeMap::new(),
+    };
     let mut badge_variants = BTreeMap::new();
     for (name, foreground) in [
         ("success", "on_success"),
@@ -921,6 +963,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
             ("accordion".into(), accordion),
             ("badge".into(), badge),
             ("toast".into(), toast),
+            ("dialog".into(), dialog),
             ("switch".into(), switch),
             ("slider".into(), slider),
             ("segmented".into(), segmented),

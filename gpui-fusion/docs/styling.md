@@ -832,3 +832,41 @@ preserve messages, identifiers, and remaining time.
 
 Run `cargo run -p gpui-fusion --example toasts` for message types, queued delivery,
 loading-to-success updates, placement, and theme/material switching.
+
+## Dialog
+
+Create `Dialog::new(title, content, window, cx)` as an entity and mount it once
+alongside the window content. Keep one independent dialog open per window.
+The content callback returns an element or an existing view; `footer` supplies
+custom actions. Retain editor entities to preserve their values between openings.
+
+`open(window, cx)` presents the dialog. `close(window, cx)` requests dismissal
+and returns whether it was accepted. `is_open` excludes the closing transition;
+`is_visible` includes it. `DialogClosed` is emitted once after dismissal completes.
+`on_close_request` can veto requests from the close button, Escape, backdrop, or
+application code. `close_on_escape`, `close_on_backdrop`, and `close_button` are
+enabled by default and can be configured independently.
+
+The dialog takes focus after its first frame. `initial_focus` selects a descendant;
+otherwise the first available control receives focus. Tab and Shift-Tab cycle
+within the dialog, and closing restores the previous focus. Enter belongs to the
+focused control and does not trigger a dialog-wide confirmation. Fusion inputs
+consume Escape and Tab during IME composition. Background pointer and scroll
+input stays blocked through the closing transition. Long content scrolls inside
+the body while the header and footer remain visible.
+
+The `dialog` recipe and `DialogPart::{Backdrop, Title, Body, Footer, Close}` use
+Fusion `Styled`. Colors and material follow the theme; `material_mode` fixes
+material locally, and `set_material_mode(None, cx)` resumes following it. Width,
+padding, corners, and part styles are configurable; the panel is constrained to
+the viewport. Theme changes preserve content and focus. An invalid style prevents
+opening; invalidating an active style closes the dialog with `StyleError` and
+restores focus. Inspect `style_error` for the resolution error.
+
+Opening and closing slide and fade over 320 ms by default. `transition_duration`
+sets the full transition duration. Reopening during dismissal continues from the
+displayed position without emitting `DialogClosed`. `animated(false)` and system
+reduced motion disable transitions. Settled dialogs do not request animation frames.
+
+Run `cargo run -p gpui-fusion --example dialogs` for an editable form, confirmation,
+long scrolling content, and theme/material switching.

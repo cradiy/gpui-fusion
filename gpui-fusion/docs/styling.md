@@ -722,3 +722,33 @@ Scopes, variants, and part overrides use the shared style model.
 
 Run `cargo run -p gpui-fusion --example tabs` for retained panels, disabled tabs,
 manual activation, overflow, and theme/material switching.
+
+## Accordion
+
+`Accordion::new(label, items, window, cx)` creates collapsed disclosure sections.
+`AccordionItem::new(value, label, content)` accepts a retained view entity and a
+unique, nonempty value. `icon` adds a leading icon; `disabled` prevents activation.
+`AccordionMode::Single` permits zero or one open section. Set `mode` to `Multiple`
+to allow several sections to remain open.
+
+`set_expanded(values, window, cx)` validates the complete selection before changing
+it. Unknown, disabled, or duplicate values are rejected, as are multiple values in
+single mode. Programmatic changes do not invoke `on_change`; user toggles emit the
+expanded values in section order. Closing focused content returns focus to its
+header. Up/Down navigate enabled headers; Home/End jump to the endpoints, and
+Enter/Space toggle the focused section.
+
+Content entities retain state while closed. Fully collapsed content is not built,
+laid out, or painted. Opening, closing, and content height changes use measured
+height transitions; interruptions continue from the displayed height. The chevron
+rotates with the transition. `transition_duration` defaults to 320 ms;
+`animated(false)` or system reduced motion makes transitions immediate.
+
+The `accordion` recipe and `AccordionPart::{Item, Header, Label, Icon, Indicator,
+Content}` use the shared Fusion `Styled` model. Expanded sections expose
+`State::Selected`. Glass material covers the whole section, including its content.
+`material_mode` fixes material locally; `set_material_mode(None, cx)` resumes
+following the theme. Theme changes preserve expansion and content state.
+
+Run `cargo run -p gpui-fusion --example accordion` for single and multiple expansion,
+retained inputs, content resizing, disabled sections, and material switching.

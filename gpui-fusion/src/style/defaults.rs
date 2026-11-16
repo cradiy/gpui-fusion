@@ -648,6 +648,63 @@ pub fn default_styles() -> crate::style::ComponentStyles {
             }),
         variants: BTreeMap::new(),
     };
+    let accordion = Recipe {
+        parts: BTreeSet::from([
+            "item".into(),
+            "header".into(),
+            "label".into(),
+            "icon".into(),
+            "indicator".into(),
+            "content".into(),
+        ]),
+        base: StylePatch::default()
+            .gap(px(10.))
+            .part(crate::style::PartName("item".into()), |s| {
+                s.bg(color("surface"))
+                    .rounded(px(14.))
+                    .border(px(1.))
+                    .border_color(color("edge"))
+            })
+            .part(crate::style::PartName("header".into()), |s| {
+                s.h(px(48.))
+                    .px(px(16.))
+                    .gap(px(10.))
+                    .rounded(px(13.))
+                    .border(px(1.))
+                    .border_color(gpui::transparent_black())
+                    .text_size(length("font_body"))
+                    .text_color(color("foreground"))
+                    .hover(|s| s.bg(color("fill_hover").opacity(0.6)))
+                    .pressed(|s| s.bg(color("fill_pressed").opacity(0.6)))
+                    .focus_visible(|s| s.border_color(color("focus")))
+                    .state(State::Disabled, |s| {
+                        s.text_color(color("foreground_disabled"))
+                    })
+            })
+            .part(crate::style::PartName("content".into()), |s| {
+                s.p(px(16.))
+                    .text_size(length("font_body"))
+                    .text_color(color("foreground"))
+            }),
+        glass: StylePatch::default().part(crate::style::PartName("item".into()), |s| {
+            s.bg(color("surface").opacity(0.24))
+                .border_color(gpui::transparent_black())
+                .material(Material::Glass {
+                    blur: length("glass_blur").scale(12.),
+                    refraction: length("glass_refraction").scale(1.2),
+                    thickness: length("glass_thickness").scale(0.8),
+                    edge_light: Token::<f32>::new("glass_edge_light").scale(0.6),
+                    reflection: Token::<f32>::new("glass_reflection").scale(0.5),
+                    edge_color: color("glass_edge_color").into(),
+                    frost: Token::<f32>::new("glass_frost").scale(0.32),
+                    tint: gpui::transparent_black().into(),
+                    transmission: Token::<f32>::new("glass_transmission").into(),
+                    frost_center: color("surface_raised").into(),
+                    frost_edge: color("surface").into(),
+                })
+        }),
+        ..Recipe::default()
+    };
     let tabs = Recipe {
         parts: BTreeSet::from([
             "list".into(),
@@ -757,6 +814,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
             ("tooltip".into(), tooltip),
             ("progress".into(), progress),
             ("tabs".into(), tabs),
+            ("accordion".into(), accordion),
             ("switch".into(), switch),
             ("slider".into(), slider),
             ("segmented".into(), segmented),

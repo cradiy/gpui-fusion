@@ -1625,13 +1625,14 @@ impl MetalRenderer {
         }
     }
 
-    fn update_backdrop_textures(&mut self, viewport_size: Size<DevicePixels>) {
+    fn update_backdrop_textures(&mut self, viewport_size: Size<DevicePixels>, mip_levels: usize) {
         let width = viewport_size.width.0.max(1) as usize;
         let height = viewport_size.height.0.max(1) as usize;
-        let needs_update = self
-            .backdrop_source_texture
-            .as_ref()
-            .is_none_or(|texture| texture.width() != width || texture.height() != height);
+        let needs_update = self.backdrop_source_texture.as_ref().is_none_or(|texture| {
+            texture.width() != width
+                || texture.height() != height
+                || texture.mipmapLevelCount() < mip_levels
+        });
         if !needs_update {
             return;
         }
@@ -1645,11 +1646,13 @@ impl MetalRenderer {
                 | metal::MTLTextureUsage::RenderTarget,
         );
         descriptor.setStorageMode(metal::MTLStorageMode::Private);
+        unsafe { descriptor.setMipmapLevelCount(mip_levels) };
         self.backdrop_source_texture = Some(
             self.device
                 .newTextureWithDescriptor(&descriptor)
                 .expect("Metal newTextureWithDescriptor failed"),
         );
+        unsafe { descriptor.setMipmapLevelCount(1) };
         self.backdrop_blurred_texture = Some(
             self.device
                 .newTextureWithDescriptor(&descriptor)
@@ -1666,7 +1669,26 @@ impl MetalRenderer {
         command_buffer: &metal::CommandBufferRef,
         target: &metal::TextureRef,
     ) -> bool {
-        self.update_backdrop_textures(viewport_size);
+        let mip_levels = backdrops
+            .iter()
+            .filter(|backdrop| {
+                backdrop
+                    .shader
+                    .as_ref()
+                    .is_some_and(|shader| shader.uses_mipmapped_backdrop())
+            })
+            .map(|backdrop| 1 + backdrop.blur_radius.0.max(1.).log2().ceil() as usize)
+            .max()
+            .unwrap_or(1)
+            .min(
+                1 + viewport_size
+                    .width
+                    .0
+                    .max(viewport_size.height.0)
+                    .max(1)
+                    .ilog2() as usize,
+            );
+        self.update_backdrop_textures(viewport_size, mip_levels);
         let (Some(source), Some(blurred)) = (
             self.backdrop_source_texture.as_ref(),
             self.backdrop_blurred_texture.as_ref(),
@@ -1675,6 +1697,10 @@ impl MetalRenderer {
         };
         let default_shader = BackdropShader::wgsl(DEFAULT_BACKDROP_EFFECT);
         for backdrop in backdrops {
+            let mipmapped = backdrop
+                .shader
+                .as_ref()
+                .is_some_and(|shader| shader.uses_mipmapped_backdrop());
             let blit = command_buffer
                 .blitCommandEncoder()
                 .expect("Metal blitCommandEncoder failed");
@@ -1687,27 +1713,32 @@ impl MetalRenderer {
             unsafe {
                 blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(target, 0, 0, origin, size, source, 0, 0, origin)
             };
+            if mipmapped && mip_levels > 1 {
+                blit.generateMipmapsForTexture(source);
+            }
             blit.endEncoding();
 
             // MPSImageGaussianBlur is available on every macOS version supported by GPUI.
             // Calling it dynamically keeps MetalPerformanceShaders out of the public API.
-            unsafe {
-                let Some(class) = objc2::runtime::AnyClass::get(c"MPSImageGaussianBlur") else {
-                    return true;
-                };
-                let filter: *mut objc2::runtime::AnyObject = msg_send![class, alloc];
-                let filter: *mut objc2::runtime::AnyObject = msg_send![
-                    filter,
-                    initWithDevice: &*self.device,
-                    sigma: (backdrop.blur_radius.0 * if backdrop.shader.as_ref().is_some_and(|shader| shader.uses_gaussian_blur()) { 1.0 / 3.0 } else { 1.0 }).max(0.01)
-                ];
-                let _: () = msg_send![
-                    filter,
-                    encodeToCommandBuffer: command_buffer,
-                    sourceTexture: &**source,
-                    destinationTexture: &**blurred
-                ];
-                let _: () = msg_send![filter, release];
+            if !mipmapped {
+                unsafe {
+                    let Some(class) = objc2::runtime::AnyClass::get(c"MPSImageGaussianBlur") else {
+                        return true;
+                    };
+                    let filter: *mut objc2::runtime::AnyObject = msg_send![class, alloc];
+                    let filter: *mut objc2::runtime::AnyObject = msg_send![
+                        filter,
+                        initWithDevice: &*self.device,
+                        sigma: (backdrop.blur_radius.0 * if backdrop.shader.as_ref().is_some_and(|shader| shader.uses_gaussian_blur()) { 1.0 / 3.0 } else { 1.0 }).max(0.01)
+                    ];
+                    let _: () = msg_send![
+                        filter,
+                        encodeToCommandBuffer: command_buffer,
+                        sourceTexture: &**source,
+                        destinationTexture: &**blurred
+                    ];
+                    let _: () = msg_send![filter, release];
+                }
             }
 
             let shader = backdrop.shader.as_ref().unwrap_or(&default_shader);
@@ -1802,7 +1833,12 @@ impl MetalRenderer {
                 )
             };
             unsafe { encoder.setFragmentTexture_atIndex(Some(source), 0_usize) };
-            unsafe { encoder.setFragmentTexture_atIndex(Some(blurred), 1_usize) };
+            unsafe {
+                encoder.setFragmentTexture_atIndex(
+                    Some(if mipmapped { source } else { blurred }),
+                    1_usize,
+                )
+            };
             unsafe { encoder.setFragmentSamplerState_atIndex(Some(&self.effect_sampler), 0_usize) };
             unsafe {
                 encoder.drawPrimitives_vertexStart_vertexCount_instanceCount(

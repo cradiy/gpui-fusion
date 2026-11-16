@@ -1,6 +1,6 @@
 use gpui::{prelude::*, *};
 use gpui_fusion::{
-    components::segmented::{Segment, Segmented},
+    components::segmented::{Segment, Segmented, SegmentedPart},
     default_theme,
     style::{MaterialMode, Styled as FusionStyled, Token},
     theme::{ResolveContext, ThemeStore, runtime::ThemeRuntime},
@@ -242,7 +242,11 @@ fn main() {
                                     });
                                 match index {
                                     3 => control.material_mode(MaterialMode::Plain),
-                                    4 => control.material_mode(MaterialMode::Glass),
+                                    4 => control
+                                        .material_mode(MaterialMode::Glass)
+                                        .part(SegmentedPart::Indicator, |s| {
+                                            s.text_color(Token::<Hsla>::new("primary"))
+                                        }),
                                     _ => control,
                                 }
                             }));

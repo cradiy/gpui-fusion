@@ -8,9 +8,10 @@ pub fn default_styles() -> crate::style::ComponentStyles {
     let length = |name| Token::<Pixels>::new(name);
     let glass = |pressed: bool| Material::Glass {
         blur: length("glass_blur").into(),
-        refraction: length("glass_refraction").scale(if pressed { 1. } else { 0.1875 }),
-        thickness: length("glass_thickness").scale(if pressed { 1. } else { 0.75 }),
+        refraction: length("glass_refraction").scale(if pressed { 1.125 } else { 1. }),
+        thickness: length("glass_thickness").into(),
         edge_light: Token::<f32>::new("glass_edge_light").into(),
+        reflection: Token::<f32>::new("glass_reflection").into(),
         edge_color: Token::<Hsla>::new("glass_edge_color").into(),
         frost: Token::<f32>::new("glass_frost").scale(0.08),
         tint: color("surface").opacity(0.08),
@@ -112,6 +113,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
                     refraction: length("glass_refraction").scale(1.5),
                     thickness: length("glass_thickness").scale(1.1875),
                     edge_light: Token::<f32>::new("glass_edge_light").into(),
+                    reflection: 0.0.into(),
                     edge_color: Token::<Hsla>::new("glass_edge_color").into(),
                     frost: Token::<f32>::new("glass_frost").into(),
                     tint: gpui::transparent_black().into(),
@@ -154,6 +156,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
                     refraction: length("glass_refraction").scale(1.75),
                     thickness: length("glass_thickness").scale(1.25),
                     edge_light: Token::<f32>::new("glass_edge_light").into(),
+                    reflection: 0.0.into(),
                     edge_color: Token::<Hsla>::new("glass_edge_color").into(),
                     frost: Token::<f32>::new("glass_frost").into(),
                     tint: color("surface").opacity(0.04),
@@ -191,29 +194,39 @@ pub fn default_styles() -> crate::style::ComponentStyles {
                     .focus_visible(|s| s.border(px(2.)))
                     .state(State::Disabled, |s| s.bg(color("fill_disabled")))
             }),
-        glass: StylePatch::default().part(crate::style::PartName("indicator".into()), |s| {
-            s.material(Material::Glass {
-                blur: length("glass_blur").into(),
-                refraction: length("glass_refraction").into(),
-                thickness: length("glass_thickness").into(),
-                edge_light: Token::<f32>::new("glass_edge_light").into(),
-                edge_color: Token::<Hsla>::new("glass_edge_color").into(),
-                frost: Token::<f32>::new("glass_frost").scale(0.92),
-                tint: color("surface").opacity(0.025),
-                frost_center: color("surface_raised").into(),
-                frost_edge: color("surface").into(),
+        glass: StylePatch::default()
+            .part(crate::style::PartName("item".into()), |s| {
+                s.state(State::Selected, |s| s.text_color(color("foreground_muted")))
+                    .hover(|s| s.text_color(color("foreground_muted")))
+                    .state(State::Disabled, |s| {
+                        s.text_color(color("foreground_disabled"))
+                    })
             })
-            .state(State::Disabled, |s| s.material(Material::Plain))
-        }),
+            .part(crate::style::PartName("indicator".into()), |s| {
+                s.material(Material::Glass {
+                    blur: length("glass_blur").into(),
+                    refraction: length("glass_refraction").into(),
+                    thickness: length("glass_thickness").into(),
+                    edge_light: Token::<f32>::new("glass_edge_light").into(),
+                    reflection: 0.0.into(),
+                    edge_color: Token::<Hsla>::new("glass_edge_color").into(),
+                    frost: Token::<f32>::new("glass_frost").scale(0.92),
+                    tint: color("surface").opacity(0.025),
+                    frost_center: color("surface_raised").into(),
+                    frost_edge: color("surface").into(),
+                })
+                .state(State::Disabled, |s| s.material(Material::Plain))
+            }),
         variants: BTreeMap::new(),
     };
     let input_glass = |focused: bool| Material::Glass {
-        blur: length("glass_blur").scale(14.),
-        refraction: length("glass_refraction").scale(0.5),
-        thickness: length("glass_thickness").scale(0.5),
+        blur: length("glass_blur").scale(6.),
+        refraction: length("glass_refraction").scale(0.875),
+        thickness: length("glass_thickness").scale(0.875),
         edge_light: Token::<f32>::new("glass_edge_light").scale(if focused { 0.55 } else { 0.4 }),
+        reflection: Token::<f32>::new("glass_reflection").into(),
         edge_color: Token::<Hsla>::new("glass_edge_color").into(),
-        frost: Token::<f32>::new("glass_frost").scale(0.55),
+        frost: Token::<f32>::new("glass_frost").scale(0.24),
         tint: color("surface").opacity(0.08),
         frost_center: color("surface").into(),
         frost_edge: color("muted_surface").into(),
@@ -301,6 +314,41 @@ pub fn default_styles() -> crate::style::ComponentStyles {
                 }),
         )]),
     };
+    let dropdown = Recipe {
+        parts: BTreeSet::from(["item".into(), "icon".into(), "separator".into()]),
+        base: StylePatch::default()
+            .p(px(6.))
+            .gap(px(2.))
+            .rounded(px(20.))
+            .border(px(1.))
+            .border_color(color("edge_subtle"))
+            .bg(color("surface_raised"))
+            .text_color(color("foreground"))
+            .text_size(length("font_body"))
+            .part(crate::style::PartName("item".into()), |s| {
+                s.px(px(12.))
+                    .py(px(8.))
+                    .rounded(px(14.))
+                    .hover(|s| {
+                        s.bg(color("primary").opacity(0.12))
+                            .text_color(color("primary"))
+                    })
+                    .state(State::Disabled, |s| {
+                        s.text_color(color("foreground_disabled"))
+                    })
+            })
+            .part(crate::style::PartName("icon".into()), |s| {
+                s.text_color(color("foreground_muted"))
+                    .state(State::Disabled, |s| {
+                        s.text_color(color("foreground_disabled"))
+                    })
+            })
+            .part(crate::style::PartName("separator".into()), |s| {
+                s.bg(color("edge_subtle"))
+            }),
+        glass: StylePatch::default(),
+        variants: BTreeMap::new(),
+    };
     crate::style::ComponentStyles {
         recipes: BTreeMap::from([
             ("button".into(), button),
@@ -308,6 +356,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
             ("slider".into(), slider),
             ("segmented".into(), segmented),
             ("input".into(), input),
+            ("dropdown".into(), dropdown),
         ]),
     }
 }

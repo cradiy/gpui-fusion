@@ -783,13 +783,23 @@ fn paint_line(
                     size: max_glyph_size,
                 };
 
+                let transform = transforms
+                    .iter()
+                    .find(|transform| transform.range.contains(&glyph.index));
+                let visible_bounds = if let Some(transform) = transform {
+                    let matrix = transform
+                        .transformation
+                        .into_matrix(aligned_line_origin + transform.anchor, 1.);
+                    matrix
+                        .transform_bounds(max_glyph_bounds.scale(1.))
+                        .map(|value| px(value.0))
+                } else {
+                    max_glyph_bounds
+                };
                 let content_mask = window.content_mask();
-                if max_glyph_bounds.intersects(&content_mask.bounds) {
+                if visible_bounds.intersects(&content_mask.bounds) {
                     let vertical_offset = point(px(0.0), glyph.position.y);
                     let paint_origin = glyph_origin + baseline_offset + vertical_offset;
-                    let transform = transforms
-                        .iter()
-                        .find(|transform| transform.range.contains(&glyph.index));
                     if glyph.is_emoji {
                         if let Some(transform) = transform {
                             window.paint_emoji_with_transformation(

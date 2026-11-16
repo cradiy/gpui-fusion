@@ -29,6 +29,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+mod backdrop_mips;
 #[cfg(target_family = "wasm")]
 mod browser_surface;
 #[cfg(target_os = "macos")]
@@ -251,6 +252,7 @@ struct WgpuResources {
     path_msaa_texture: Option<wgpu::Texture>,
     path_msaa_view: Option<wgpu::TextureView>,
     presentation: Option<presentation::PresentationTarget>,
+    backdrop_mips: Option<backdrop_mips::BackdropMips>,
     backdrop_source_texture: Option<wgpu::Texture>,
     backdrop_source_view: Option<wgpu::TextureView>,
     backdrop_horizontal_texture: Option<wgpu::Texture>,
@@ -291,6 +293,7 @@ impl WgpuResources {
         self.path_msaa_texture = None;
         self.path_msaa_view = None;
         self.presentation = None;
+        self.backdrop_mips = None;
         self.backdrop_source_texture = None;
         self.backdrop_source_view = None;
         self.backdrop_horizontal_texture = None;
@@ -813,6 +816,7 @@ impl WgpuRenderer {
             path_msaa_texture: None,
             path_msaa_view: None,
             presentation: None,
+            backdrop_mips: None,
             backdrop_source_texture: None,
             backdrop_source_view: None,
             backdrop_horizontal_texture: None,
@@ -1787,6 +1791,7 @@ impl WgpuRenderer {
         width: u32,
         height: u32,
         usage: wgpu::TextureUsages,
+        mip_level_count: u32,
     ) -> (wgpu::Texture, wgpu::TextureView) {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
@@ -1795,7 +1800,7 @@ impl WgpuRenderer {
                 height: height.max(1),
                 depth_or_array_layers: 1,
             },
-            mip_level_count: 1,
+            mip_level_count,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format,
@@ -1896,9 +1901,26 @@ impl WgpuRenderer {
         let mut needs_paths = false;
         let mut needs_backdrop = false;
         let mut full_resolution_blur = false;
+        let mut needs_blur_targets = false;
+        let mut mip_levels = 1;
         self.visit_rendered_scenes(scene, &mut |scene| {
             needs_paths |= !scene.paths.is_empty();
             needs_backdrop |= !scene.backdrop_blurs.is_empty();
+            for backdrop in &scene.backdrop_blurs {
+                needs_blur_targets |= backdrop.blur_radius.0 > 0.
+                    && !backdrop
+                        .shader
+                        .as_ref()
+                        .is_some_and(|shader| shader.uses_mipmapped_backdrop());
+                if backdrop
+                    .shader
+                    .as_ref()
+                    .is_some_and(|shader| shader.uses_mipmapped_backdrop())
+                {
+                    mip_levels =
+                        mip_levels.max(1 + backdrop.blur_radius.0.max(1.).log2().ceil() as u32);
+                }
+            }
             full_resolution_blur |= scene.backdrop_blurs.iter().any(|backdrop| {
                 backdrop
                     .shader
@@ -1927,6 +1949,7 @@ impl WgpuRenderer {
         if self.unused_backdrop_frames >= 120 {
             let resources = self.resources_mut();
             resources.presentation = None;
+            resources.backdrop_mips = None;
             resources.backdrop_source_texture = None;
             resources.backdrop_source_view = None;
             resources.backdrop_horizontal_texture = None;
@@ -1936,12 +1959,32 @@ impl WgpuRenderer {
         }
         let needs_path_texture =
             needs_paths && self.resources().path_intermediate_texture.is_none();
+        mip_levels = mip_levels.min(
+            1 + self
+                .surface_config
+                .width
+                .max(self.surface_config.height)
+                .max(1)
+                .ilog2(),
+        );
         let blur_divisor = if full_resolution_blur { 1 } else { 2 };
-        let blur_width = self.surface_config.width.div_ceil(blur_divisor);
-        let blur_height = self.surface_config.height.div_ceil(blur_divisor);
+        let blur_width = if needs_blur_targets {
+            self.surface_config.width.div_ceil(blur_divisor)
+        } else {
+            1
+        };
+        let blur_height = if needs_blur_targets {
+            self.surface_config.height.div_ceil(blur_divisor)
+        } else {
+            1
+        };
         let needs_backdrop_textures = needs_backdrop
             && self.backdrop_blur_supported
-            && (self.resources().backdrop_source_texture.is_none()
+            && (self
+                .resources()
+                .backdrop_source_texture
+                .as_ref()
+                .is_none_or(|texture| texture.mip_level_count() < mip_levels)
                 || self
                     .resources()
                     .backdrop_horizontal_texture
@@ -1987,7 +2030,8 @@ impl WgpuRenderer {
                 format,
                 width,
                 height,
-                sampled | wgpu::TextureUsages::COPY_DST,
+                rendered | wgpu::TextureUsages::COPY_DST,
+                mip_levels,
             );
             let (horizontal, horizontal_view) = Self::create_backdrop_intermediate(
                 &resources.device,
@@ -1996,6 +2040,7 @@ impl WgpuRenderer {
                 blur_width,
                 blur_height,
                 rendered,
+                1,
             );
             let (result, result_view) = Self::create_backdrop_intermediate(
                 &resources.device,
@@ -2004,7 +2049,10 @@ impl WgpuRenderer {
                 blur_width,
                 blur_height,
                 rendered,
+                1,
             );
+            resources.backdrop_mips = (mip_levels > 1)
+                .then(|| backdrop_mips::BackdropMips::new(&resources.device, &source));
             resources.backdrop_source_texture = Some(source);
             resources.backdrop_source_view = Some(source_view);
             resources.backdrop_horizontal_texture = Some(horizontal);
@@ -4806,6 +4854,10 @@ impl WgpuRenderer {
         let blur_scale_x = blur_size[0] / viewport_size[0];
         let blur_scale_y = blur_size[1] / viewport_size[1];
         for backdrop in backdrops {
+            let mipmapped = backdrop
+                .shader
+                .as_ref()
+                .is_some_and(|shader| shader.uses_mipmapped_backdrop());
             let gaussian = backdrop
                 .shader
                 .as_ref()
@@ -4823,7 +4875,11 @@ impl WgpuRenderer {
             // The blur shaders sample with viewport-normalised coordinates, so limiting
             // the written region does not change the UV mapping: pixels inside the region
             // read exactly the texels this frame copied.
-            let padding = backdrop.blur_radius.0.abs().max(0.0) * 2.0 + 2.0;
+            let padding = if mipmapped {
+                2.0_f32.powf(backdrop.blur_radius.0.max(1.).log2().ceil()) * 4.0 + 4.0
+            } else {
+                backdrop.blur_radius.0.abs().max(0.0) * 2.0 + 2.0
+            };
             let left = (backdrop.bounds.origin.x.0 - padding).floor().max(0.0);
             let top = (backdrop.bounds.origin.y.0 - padding).floor().max(0.0);
             let right = (backdrop.bounds.origin.x.0 + backdrop.bounds.size.width.0 + padding)
@@ -4879,7 +4935,18 @@ impl WgpuRenderer {
                 extent,
             );
 
-            if radius > 0.0 {
+            if mipmapped {
+                if let Some(mips) = &resources.backdrop_mips {
+                    let levels = (1 + backdrop.blur_radius.0.max(1.).log2().ceil() as u32)
+                        .min(source_texture.mip_level_count());
+                    mips.generate(
+                        encoder,
+                        source_texture,
+                        [left as u32, top as u32, right as u32, bottom as u32],
+                        levels,
+                    );
+                }
+            } else if radius > 0.0 {
                 let mut horizontal =
                     BackdropInstance::blur(viewport_size, blur_size, radius, [1.0, 0.0]);
                 horizontal.uniforms[0][0] = if gaussian { 1.0 / 3.0 } else { 0.4375 };
@@ -4952,7 +5019,7 @@ impl WgpuRenderer {
                     }
                 }
             }
-            let result_view = if radius > 0.0 {
+            let result_view = if !mipmapped && radius > 0.0 {
                 result_view
             } else {
                 source_view

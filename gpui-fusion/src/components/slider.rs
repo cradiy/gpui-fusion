@@ -452,8 +452,14 @@ impl Render for Slider {
                 if let Some(mut material) = thumb.material {
                     let press = expansion.min(1.);
                     material.frost *= 1. - press;
-                    material.refraction *= press;
-                    material.thickness = material.thickness.min(lens.size.height / 2.);
+                    let optical_scale = if material.thickness > px(0.) {
+                        ((lens.size.width.min(lens.size.height) / 2.) / material.thickness)
+                            .clamp(0., 1.)
+                    } else {
+                        1.
+                    };
+                    material.refraction *= press * optical_scale;
+                    material.thickness *= optical_scale;
                     material.shadow.strength *= 0.25 + 0.75 * press;
                     let radius =
                         length(&thumb.radius, lens.size.height / 2.).min(lens.size.height / 2.);

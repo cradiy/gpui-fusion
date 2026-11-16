@@ -8,7 +8,7 @@ use smallvec::SmallVec;
 use crate::{
     AtlasTextureId, AtlasTile, BackdropShader, Background, BorderGradient, Bounds, ContentMask,
     Corners, Edges, EffectShader, EffectUniforms, GpuBackground, GradientBuffer, Hsla, Pixels,
-    Point, Radians, ScaledPixels, Size, SurfaceSource, bounds_tree::BoundsTree, point,
+    Point, Radians, ScaledPixels, Size, SurfaceSource, bounds_tree::BoundsTree, point, px,
 };
 use std::{
     fmt::Debug,
@@ -144,7 +144,7 @@ impl Scene {
             return;
         }
         let clipped_bounds = primitive
-            .bounds()
+            .paint_bounds()
             .intersect(&primitive.content_mask().bounds);
 
         if clipped_bounds.is_empty() {
@@ -602,6 +602,17 @@ impl Primitive {
             Primitive::PolychromeSprite(sprite) => &sprite.bounds,
             Primitive::Surface(surface) => &surface.bounds,
         }
+    }
+
+    fn paint_bounds(&self) -> Bounds<ScaledPixels> {
+        let transform = match self {
+            Self::Effect(effect) => effect.transformation,
+            Self::MonochromeSprite(sprite) => sprite.transformation,
+            Self::SubpixelSprite(sprite) => sprite.transformation,
+            Self::PolychromeSprite(sprite) => sprite.transformation,
+            _ => return *self.bounds(),
+        };
+        transform.transform_bounds(*self.bounds())
     }
 
     pub fn content_mask(&self) -> &ContentMask<ScaledPixels> {
@@ -1281,6 +1292,26 @@ impl TransformationMatrix {
             }
         }
         Point::new(output[0].into(), output[1].into())
+    }
+
+    pub(crate) fn transform_bounds(&self, bounds: Bounds<ScaledPixels>) -> Bounds<ScaledPixels> {
+        if *self == Self::unit() {
+            return bounds;
+        }
+        let corners = [
+            bounds.origin,
+            bounds.top_right(),
+            bounds.bottom_left(),
+            bounds.bottom_right(),
+        ]
+        .map(|corner| self.apply(corner.map(|value| px(value.0))));
+        let min = corners
+            .iter()
+            .fold(corners[0], |a, b| point(a.x.min(b.x), a.y.min(b.y)));
+        let max = corners
+            .iter()
+            .fold(corners[0], |a, b| point(a.x.max(b.x), a.y.max(b.y)));
+        Bounds::from_corners(min, max).scale(1.)
     }
 
     /// Returns the inverse of a finite, nonsingular matrix, if representable in `f32`.

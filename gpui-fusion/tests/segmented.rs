@@ -11,6 +11,56 @@ use gpui_fusion::{
 };
 use std::{cell::RefCell, rc::Rc};
 
+#[test]
+fn glass_item_colors_stay_stable_across_selection_and_pointer_states() {
+    use gpui_fusion::{
+        default_styles,
+        style::{PartName, State, StateSelector, Token},
+        theme::ResolveContext,
+    };
+    let theme = default_theme();
+    let styles = default_styles();
+    let recipe = styles.recipe("segmented").unwrap();
+    let instance = StylePatch::default().part(PartName("indicator".into()), |s| {
+        s.text_color(Token::<gpui::Hsla>::new("primary"))
+    });
+    for mode in ["light", "dark"] {
+        let context = ResolveContext::new(&theme, mode, "neutral").unwrap();
+        let resolve = |material, states: &StateSelector, part| {
+            recipe
+                .resolve(None, material, &instance, &context, states, Some(part))
+                .unwrap()
+        };
+        let idle = StateSelector::default();
+        let outside = resolve(MaterialMode::Glass, &idle, "item").foreground;
+        let inside = resolve(MaterialMode::Glass, &idle, "indicator").foreground;
+        assert_ne!(inside, outside);
+        for states in [
+            State::Hovered.into(),
+            State::Selected.into(),
+            StateSelector([State::Selected, State::Hovered, State::Pressed].into()),
+        ] {
+            assert_eq!(
+                resolve(MaterialMode::Glass, &states, "item").foreground,
+                outside
+            );
+            assert_eq!(
+                resolve(MaterialMode::Glass, &states, "indicator").foreground,
+                inside
+            );
+        }
+        let disabled = StateSelector([State::Disabled, State::Selected, State::Hovered].into());
+        assert_eq!(
+            resolve(MaterialMode::Glass, &disabled, "item").foreground,
+            resolve(MaterialMode::Plain, &disabled, "item").foreground,
+        );
+        assert_ne!(
+            resolve(MaterialMode::Plain, &State::Selected.into(), "item").foreground,
+            resolve(MaterialMode::Plain, &idle, "item").foreground,
+        );
+    }
+}
+
 struct Harness {
     control: Entity<Segmented>,
     theme: Entity<ThemeRuntime>,

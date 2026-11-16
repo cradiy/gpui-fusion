@@ -90,8 +90,12 @@ impl WgpuRenderer {
 }
 
 fn texture_bytes(texture: &wgpu::Texture) -> u64 {
-    u64::from(texture.width())
-        * u64::from(texture.height())
+    (0..texture.mip_level_count())
+        .map(|level| {
+            u64::from((texture.width() >> level).max(1))
+                * u64::from((texture.height() >> level).max(1))
+        })
+        .sum::<u64>()
         * u64::from(texture.format().block_copy_size(None).unwrap_or(0))
         * u64::from(texture.sample_count())
 }

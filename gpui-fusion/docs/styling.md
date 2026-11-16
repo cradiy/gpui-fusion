@@ -121,7 +121,8 @@ the whole component's opacity.
 
 `Theme.material` selects `MaterialMode::Plain` or `MaterialMode::Glass` globally.
 The component recipe supplies geometry and its glass adaptation. Generic tokens
-such as `glass_blur`, `glass_refraction`, `glass_thickness`, `glass_edge_light`, `glass_edge_color`, and `glass_frost`
+such as `glass_blur`, `glass_refraction`, `glass_thickness`, `glass_reflection`,
+`glass_edge_light`, `glass_edge_color`, and `glass_frost`
 control material parameters through the same theme file. Components
 follow the theme by default. `.material_mode(mode)` fixes a component's material;
 `set_material_mode(None, cx)` resumes following. Fixed controls unsubscribe from
@@ -262,13 +263,16 @@ button clears pending visual press state and removes activation handlers and its
 tab stop. Labels and monochrome SVG icons render above the material and remain
 sharp. `icon` takes a GPUI asset path; the host supplies the asset source.
 
-Material transitions interpolate blur, refraction, edge thickness, and frost.
-Glass contours expand with separate horizontal and vertical damped springs on
-hover, grow on press, and return on release or pointer leave. Directional edge
-lighting follows the pointer. Foreground content, layout, and hit regions retain
-their original geometry. Animations stop requesting frames on completion.
-`transition_duration(Duration::ZERO)` disables material transitions and elastic
-motion, and border flow. Other properties update immediately. Backdrop
+Material transitions interpolate blur, refraction, edge thickness, frost, and
+environment reflection. Glass contours and foreground content animate through
+paint transforms while layout and hit regions retain their original geometry.
+Animations stop requesting frames on completion.
+`set_label` crossfades the old and new labels and interpolates their measured
+widths. The button surface, including its glass contour, follows the resulting
+layout. Retargeting an active transition preserves the visible text layers.
+`transition_duration(Duration::ZERO)` disables label transitions, material
+transitions, elastic motion, and border flow. `set_transition_duration` changes
+this setting at runtime. Other properties update immediately. Backdrop
 sampling requires content painted earlier in the same window.
 
 Run the component example with `cargo run -p gpui-fusion --example buttons`.
@@ -296,10 +300,19 @@ only while pressed; `BorderMotion::Still` removes inherited motion. Disabled
 buttons, zero-width borders, and controls without a border gradient do not request
 flow frames. Setting the transition duration to zero disables flow as well.
 
-Glass buttons paint their fill and border over the backdrop material, with labels
-and icons above both. Use translucent gradient colors to retain visible backdrop
-refraction. Plain buttons use the same fill and border declarations without a
-glass pass.
+Glass buttons blend solid fills into the material tint. Gradients and borders
+are composited above the material, with labels and icons in the foreground. Use
+translucent gradient colors to retain visible backdrop refraction. Plain buttons
+use the same fill and border declarations without a glass pass.
+
+Hover expands each side of a glass button by 8% of its resting height. Width and
+height use independent springs; pressing adds 8% body growth. Labels and icons
+scale independently to 104% on hover and 108% on press. These paint transforms
+leave layout and hit bounds unchanged and stop requesting frames after settling.
+Dropdown triggers use the menu's surface transition instead.
+Visible glass buttons track the window pointer with a fading directional reflection.
+The light shifts across the curved surface without animating a border gradient;
+it stops requesting frames once the pointer and fade are stationary.
 
 The `buttons` example switches material, fill, border, shape, enabled state, and
 theme on persistent preview controls. A dedicated optical control remains in the preview alongside the switchable
@@ -387,8 +400,10 @@ The `segmented` recipe declares `Item` and `Indicator` parts through `SegmentedP
 Root width, height, and padding determine the shared cell geometry. Material choice
 follows the theme unless fixed with `material_mode`. Glass rests as a frosted pill
 with crisp foreground content; holding or moving it reveals a refractive lens.
-The indicator's foreground colors content inside the active lens. Its border can
-supply a focus outline. `animated(false)` applies position and pressure immediately.
+The indicator's foreground colors text and monochrome SVGs inside the glass at
+rest and while moving. Use `.part(SegmentedPart::Indicator, |s| s.text_color(...))`
+to set that color independently of the item foreground outside the glass.
+Its border can supply a focus outline. `animated(false)` applies position and pressure immediately.
 Settled controls do not request animation frames.
 
 Run `cargo run -p gpui-fusion --example segmented` for text, icon, mixed-content,
@@ -418,6 +433,8 @@ of the body tint, including in state and variant rules. The shared glass materia
 resolves `edge_color` from the `glass_edge_color` theme token by default. Explicit instance
 border colors or gradients can provide an outline. The material's
 `edge_light` value scales rim, reflection, and caustic lighting in `0..=1`.
+`reflection` controls neutral environment reflection from the curved surface in
+`0..=1`, independently of rim lighting and body tint.
 Disabled fields use the neutral disabled surface and text colors.
 Theme changes preserve the editor entity, focus, selection, and IME
 composition. Resolved styles and unchanged text layouts are cached; the field
@@ -473,3 +490,51 @@ unfinished composition without emitting a committed edit.
 
 Run `cargo run -p gpui-fusion --example inputs` for theme/material switching,
 multiline, password, read-only, disabled, and validation styling.
+
+## Dropdown menus
+
+`Dropdown::new(label, items, window, cx)` creates a button and anchored command
+menu. `presentation(DropdownPresentation::Popover)` keeps the trigger visible;
+`open_label` supplies its expanded text and closing restores the original label.
+`presentation(DropdownPresentation::Morph)` hides the trigger as the menu opens.
+Glass transitions carry the button’s capsule outline into the menu. `Popover`
+joins the travelling pane to the retained trigger with a shared contour; `Morph`
+carries the trigger’s surface itself. Closing reverses this motion.
+The shared contour also controls refraction, highlights, and shadows. The trigger's layout slot remains reserved, and interrupted
+spring transitions preserve their current position and velocity when reversed. Its closed label is retained
+while hidden. Selecting an item invokes `on_action` with its stable value and
+closes the menu. Selection does not replace the button label.
+
+`MenuItem::new(value, label)` creates a command. `icon` takes an SVG asset path;
+`disabled` prevents activation and keyboard selection. `MenuItem::Separator`
+divides groups. The trigger remains the same `Button` entity across open, close,
+and theme changes. `trigger` exposes it for button-specific style or variant
+updates. `open`, `close`, and `set_disabled` support application-controlled state.
+
+The menu shares the trigger's resolved material and surface fill, including
+local button material overrides. Both follow the injected theme by default.
+`set_material_mode` fixes both to a material, or resumes theme following with
+`None`. Configure glass parameters on the trigger; the `dropdown` recipe and
+Fusion `Styled` configure menu geometry, text, and item states;
+`DropdownPart::Item`, `Icon`, and `Separator` style its contents. `set_style`
+replaces the menu's instance patch. `transition_duration` controls the menu
+spring response (600 ms by default) as well as trigger label and material motion; zero disables those
+transitions. Closing uses a quicker response while retaining velocity on reversal. Animations request frames only until completion.
+
+`placement(DropdownPlacement::new(side))` selects `Top`, `Bottom`, `Left`,
+`Right`, or `Overlay`. `align` selects `Start`, `Center`, or `End`; `gap` sets the
+separation from the trigger and `offset` adds a logical-pixel displacement.
+The menu tries the opposite side if it reduces overflow, then fits within the
+viewport. Morph transitions travel from the trigger to this fitted destination.
+Without an explicit placement, both presentations use Bottom/Start. `set_placement(Some(placement), cx)` updates it at runtime;
+`None` restores the presentation's default.
+
+Arrow keys open the menu and navigate enabled items; Home and End move to the
+first and last enabled command. Long menus scroll the active item into view.
+Enter or Space activates, Escape closes and restores trigger focus, and Tab
+closes and advances focus. Clicking outside closes without stealing focus.
+The deferred overlay follows the trigger's current position, fits the viewport,
+and closes when its anchor is no longer visible.
+
+Run `cargo run -p gpui-fusion --example dropdown` to try theme and material
+switching, animated labels, and command activation.

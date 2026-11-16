@@ -449,6 +449,112 @@ fn backdrop_srgb_colors_match_on_native_and_srgb_targets() -> anyhow::Result<()>
                 "{format:?}: {actual} != {expected}"
             );
         }
+        let mip_shader = gpui::BackdropShader::wgsl(
+            r#"
+            fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
+                return sample_backdrop_lod(input, vec2<f32>(0.0), params.slots[0].x);
+            }
+        "#,
+        )
+        .with_mipmapped_backdrop();
+        for lod in [1.0_f32, 0.0, 0.5, 2.0] {
+            let mut scene = Scene::default();
+            for x in 0..16 {
+                scene.insert_primitive(gpui::Quad {
+                    bounds: bounds(x as f32, 0., 1., 16.),
+                    content_mask: ContentMask { bounds: viewport },
+                    background: rgba(if x % 2 == 0 { 0x000000ff } else { 0xffffffff }).into(),
+                    ..Default::default()
+                });
+            }
+            scene.insert_primitive(gpui::BackdropBlur {
+                bounds: viewport,
+                content_mask: ContentMask { bounds: viewport },
+                blur_radius: ScaledPixels(lod.exp2()),
+                opacity: 1.,
+                shader: Some(mip_shader.clone()),
+                uniforms: gpui::EffectUniforms::new().with_slot(0, [lod, 0., 0., 0.]),
+                order: 0,
+                corner_radii: Default::default(),
+                time: 0.,
+                pointer: point(0., 0.),
+                pointer_active: false,
+            });
+            scene.finish();
+            let pixels = renderer.render_rgba(&scene)?;
+            for x in 2..14 {
+                let sharp = if x % 2 == 0 { 0. } else { 255. };
+                let expected = (sharp * (1. - lod.min(1.)) + 127.5 * lod.min(1.)).round() as u8;
+                let offset = (8 * 16 + x) * 4;
+                for channel in 0..3 {
+                    assert!(
+                        pixels[offset + channel].abs_diff(expected) <= 2,
+                        "{format:?} mip={lod} x={x}: {} != {expected}",
+                        pixels[offset + channel]
+                    );
+                }
+                assert_eq!(pixels[offset + 3], 255);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn backdrop_mips_refresh_partial_regions_on_odd_viewports() -> anyhow::Result<()> {
+    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(353), DevicePixels(193)))?;
+    let viewport = bounds(0., 0., 353., 193.);
+    let shader = gpui::BackdropShader::wgsl(
+        r#"
+        fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
+            return sample_backdrop_lod(input, params.slots[0].yz, params.slots[0].x);
+        }
+    "#,
+    )
+    .with_mipmapped_backdrop();
+    for color in [0x2874c0ff, 0xe4a038ff, 0x2874c0ff] {
+        let mut scene = Scene::default();
+        scene.insert_primitive(gpui::Quad {
+            bounds: viewport,
+            content_mask: ContentMask { bounds: viewport },
+            background: rgba(color).into(),
+            ..Default::default()
+        });
+        for (x, y, lod) in [(0., 0., 2.5), (154., 89., 1.5), (322., 172., 3.)] {
+            scene.insert_primitive(gpui::BackdropBlur {
+                order: 0,
+                bounds: bounds(x, y, 31., 21.),
+                content_mask: ContentMask { bounds: viewport },
+                corner_radii: Default::default(),
+                blur_radius: ScaledPixels(2.0_f32.powf(lod)),
+                opacity: 1.,
+                shader: Some(shader.clone()),
+                uniforms: gpui::EffectUniforms::new().with_slot(0, [lod, 3., -2., 0.]),
+                time: 0.,
+                pointer: point(0., 0.),
+                pointer_active: false,
+            });
+        }
+        scene.finish();
+        let pixels = renderer.render_rgba(&scene)?;
+        let expected = &pixels[(150 * 353 + 100) * 4..][..4];
+        for (x, y) in [
+            (1, 1),
+            (28, 19),
+            (155, 90),
+            (182, 108),
+            (323, 173),
+            (351, 191),
+        ] {
+            for (channel, expected) in expected.iter().enumerate() {
+                let actual = pixels[(y * 353 + x) * 4 + channel];
+                assert!(
+                    actual.abs_diff(*expected) <= 2,
+                    "stale or uncaptured mip texels at ({x}, {y}), channel {channel}: {actual} != {expected}"
+                );
+            }
+        }
     }
     Ok(())
 }

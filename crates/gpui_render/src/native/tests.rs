@@ -38,7 +38,7 @@ fn effect_translation_preserves_image_bindings() {
 #[test]
 fn backdrop_sampling_selects_native_resource_contracts() {
     let shader = BackdropShader::wgsl(
-        "fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> { return mix(sample_raw_backdrop(input, input.pointer), sample_blurred_backdrop(input, -input.pointer), params.slots[0].x); }",
+        "fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> { return mix(sample_raw_backdrop(input, input.pointer), sample_blurred_backdrop(input, -input.pointer), params.slots[0].x) + sample_backdrop_lod(input, vec2<f32>(0.0), params.slots[0].y); }",
     );
     let hardware = gpui::compose_backdrop_shader_wgsl(&shader);
     let manual =

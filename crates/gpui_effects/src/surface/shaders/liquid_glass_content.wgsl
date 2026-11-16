@@ -2,7 +2,7 @@ fn effect(input: EffectInput, params: EffectParams) -> vec4<f32> {
     let region = params.slots[0];
     let source = params.slots[4];
     let distance = glass_material_contour(input.position - region.xy, region.zw,
-        params.slots[1], params.slots[2], params.slots[5].x, params.slots[5].y, params.slots[6]);
+        params.slots[1], params.slots[2], params.slots[5].x, params.slots[5].y, params.slots[6], vec3<f32>(0.0));
     let coverage = 1.0 - smoothstep(-0.5, 0.5, distance);
     let covered_color = params.slots[3];
     let original_weight = 1.0 - coverage;

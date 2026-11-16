@@ -94,6 +94,30 @@ fn sample_blurred_backdrop(input: BackdropInput, displacement_pixels: vec2<f32>)
     ));
 }
 
+fn backdrop_mip_color(position: vec2<i32>, level: i32) -> vec4<f32> {
+    let c = textureLoad(t_raw_backdrop, position, level);
+    return vec4<f32>(backdrop_to_srgb(c.rgb), c.a);
+}
+
+fn backdrop_mip_sample(uv: vec2<f32>, level: i32) -> vec4<f32> {
+    let dimensions = vec2<i32>(textureDimensions(t_raw_backdrop, level));
+    let at = clamp(uv * vec2<f32>(dimensions) - 0.5, vec2<f32>(0.0), vec2<f32>(dimensions - 1));
+    let low = vec2<i32>(floor(at));
+    let high = min(low + 1, dimensions - 1);
+    let f = fract(at);
+    return mix(mix(backdrop_mip_color(low, level), backdrop_mip_color(vec2<i32>(high.x, low.y), level), f.x),
+        mix(backdrop_mip_color(vec2<i32>(low.x, high.y), level), backdrop_mip_color(high, level), f.x), f.y);
+}
+
+// Mip filtering uses encoded color values on both native and hardware-sRGB targets.
+fn sample_backdrop_lod(input: BackdropInput, displacement_pixels: vec2<f32>, lod: f32) -> vec4<f32> {
+    let uv = backdrop_sample_uv(input, displacement_pixels);
+    let level = clamp(lod, 0.0, f32(textureNumLevels(t_raw_backdrop) - 1u));
+    let color = mix(backdrop_mip_sample(uv, i32(floor(level))),
+        backdrop_mip_sample(uv, i32(ceil(level))), fract(level));
+    return backdrop_straight_color(vec4<f32>(backdrop_from_srgb(color.rgb), color.a));
+}
+
 // __GPUI_BACKDROP_SOURCE__
 
 struct BackdropVarying {

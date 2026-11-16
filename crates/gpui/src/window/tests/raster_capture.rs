@@ -450,3 +450,85 @@ fn raster_capture_updates_glyph_atlas_and_cached_paint_without_moving_layout_or_
     .unwrap();
     assert_eq!(&*clicks.borrow(), &[point(px(30.), px(40.))]);
 }
+
+struct TransformedLabel(crate::Transformation);
+impl Render for TransformedLabel {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let transformation = self.0;
+        canvas(
+            |_, _, _| {},
+            move |_, _, window, cx| {
+                let line = window.text_system().shape_line(
+                    "v".into(),
+                    px(16.),
+                    &[crate::TextRun {
+                        len: 1,
+                        font: Font::default(),
+                        color: rgb(0xffffff).into(),
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                    }],
+                    None,
+                );
+                window.with_content_mask(
+                    Some(crate::ContentMask {
+                        bounds: Bounds::new(point(px(10.), px(0.)), size(px(40.), px(40.))),
+                    }),
+                    |window| {
+                        line.paint_with_transforms(
+                            point(px(100.), px(10.)),
+                            px(20.),
+                            crate::TextAlign::Left,
+                            None,
+                            &[crate::GlyphRunTransform::new(
+                                0..1,
+                                point(px(-100.), px(-10.)),
+                                transformation,
+                            )],
+                            window,
+                            cx,
+                        )
+                        .unwrap();
+                    },
+                );
+            },
+        )
+        .size_full()
+    }
+}
+
+#[crate::test]
+fn transformed_text_culling_uses_visible_glyph_positions(cx: &mut TestAppContext) {
+    let handle = cx.open_window(size(px(200.), px(80.)), |window, _| {
+        window.text_system = Arc::new(WindowTextSystem::new(Arc::new(TextSystem::new(Arc::new(
+            RasterText,
+        )))));
+        TransformedLabel(crate::Transformation::default())
+    });
+    for (transform, visible) in [
+        (crate::Transformation::default(), 0),
+        (crate::Transformation::translate(point(px(-80.), px(0.))), 1),
+        (crate::Transformation::scale(size(0.2, 0.2)), 1),
+        (
+            crate::Transformation::translate(point(px(-300.), px(0.))),
+            0,
+        ),
+    ] {
+        handle
+            .update(cx, |view, _, cx| {
+                view.0 = transform;
+                cx.notify();
+            })
+            .unwrap();
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.draw(cx).clear();
+            assert_eq!(
+                window.rendered_frame.scene.monochrome_sprites.len(),
+                visible,
+                "transform: {transform:?}"
+            );
+        })
+        .unwrap();
+    }
+}

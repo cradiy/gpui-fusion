@@ -22,6 +22,7 @@ impl PresentationTarget {
             wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_SRC
                 | wgpu::TextureUsages::TEXTURE_BINDING,
+            1,
         );
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gpui_presentation"),

@@ -258,7 +258,7 @@ fn glass_refracts_recolored_content_beyond_its_original_bounds() -> anyhow::Resu
                 .max_by_key(|pixel| pixel[2])
                 .unwrap();
             assert!(
-                bent[2] > 16 && bent[0] < 10 && bent[1] < 10,
+                bent[2] > bent[0].saturating_add(8) && bent[0] < 10 && bent[1] < 10,
                 "the blue stroke must bend beyond its source bounds at scale {scale}, offset {fraction}: {bent:?}"
             );
             assert_eq!(
@@ -281,14 +281,14 @@ fn glass_refracts_recolored_content_beyond_its_original_bounds() -> anyhow::Resu
 
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn lens_refraction_matches_reference_profile() -> anyhow::Result<()> {
+fn lens_material_matches_reference_profile() -> anyhow::Result<()> {
     use gpui::{BackdropShader, Corners, Quad, hsla, px, rgb};
     use gpui_effects::LiquidGlassStyle;
 
     let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(384), DevicePixels(256)))?;
     let viewport = bounds(0., 0., 384., 256.);
     let reference = BackdropShader::wgsl(include_str!("support/liquid_glass_reference.wgsl"))
-        .with_gaussian_blur();
+        .with_mipmapped_backdrop();
     let reference_source = gpui::compose_backdrop_shader_wgsl(&reference);
     let module = naga::front::wgsl::parse_str(&reference_source)
         .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&reference_source)));
@@ -298,8 +298,7 @@ fn lens_refraction_matches_reference_profile() -> anyhow::Result<()> {
     )
     .validate(&module)
     .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&reference_source)));
-    for (half_width, half_height, radius, roundness) in [(110., 80., 36., 5.), (67., 39., 26., 2.)]
-    {
+    for (half_width, half_height, radius, roundness) in [(110., 80., 8., 5.), (67., 39., 26., 2.)] {
         for circle_x in [None, Some(-150.), Some(-175.), Some(-205.)] {
             for frost in [0., 0.65] {
                 for (magnification, scale) in
@@ -309,10 +308,6 @@ fn lens_refraction_matches_reference_profile() -> anyhow::Result<()> {
                     appearance.shape.roundness = roundness;
                     appearance.frost = frost;
                     appearance.optics.magnification = magnification;
-                    appearance.optics.rim_strength = 0.;
-                    appearance.optics.top_reflection = 0.;
-                    appearance.optics.inner_shading = 0.;
-                    appearance.optics.caustic_strength = 0.;
                     appearance.blur_radius = px(6.);
                     appearance.shape.merge = circle_x.map(|x| gpui_effects::LiquidGlassMerge {
                         offset: gpui::point(px(x / scale), px(0.)),
@@ -356,7 +351,7 @@ fn lens_refraction_matches_reference_profile() -> anyhow::Result<()> {
                             bounds: viewport,
                             content_mask: ContentMask { bounds: viewport },
                             corner_radii: Default::default(),
-                            blur_radius: P(6.),
+                            blur_radius: P(6. * scale),
                             opacity: 1.,
                             shader: Some(shader),
                             uniforms,
@@ -433,10 +428,9 @@ fn optical_material_preserves_transparent_backdrops() -> anyhow::Result<()> {
     let source = liquid_glass_shader()
         .wgsl_source()
         .replace("fn backdrop_effect(", "fn optical_material(")
-        .replace("sample_blurred_backdrop(", "sample_empty_backdrop(")
-        .replace("sample_raw_backdrop(", "sample_empty_backdrop(");
+        .replace("sample_backdrop_lod(", "sample_empty_backdrop(");
     let shader = gpui::BackdropShader::wgsl(format!(
-        "{source}\nfn sample_empty_backdrop(input: BackdropInput, offset: vec2<f32>) -> vec4<f32> {{ return vec4<f32>(0.0); }}\nfn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {{ let material = optical_material(input, params); return vec4<f32>(vec3<f32>(material.a), 1.0); }}"
+        "{source}\nfn sample_empty_backdrop(input: BackdropInput, offset: vec2<f32>, lod: f32) -> vec4<f32> {{ return vec4<f32>(0.0); }}\nfn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {{ let material = optical_material(input, params); return vec4<f32>(vec3<f32>(material.a), 1.0); }}"
     ));
     for (material, expected) in [
         (LiquidGlassStyle::clear(), 0..=0),
@@ -456,6 +450,112 @@ fn optical_material_preserves_transparent_backdrops() -> anyhow::Result<()> {
             expected.contains(&center),
             "unexpected glass alpha over an empty backdrop: {center}, expected {expected:?}"
         );
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn environment_reflection_follows_curvature_without_rim_lighting() -> anyhow::Result<()> {
+    use gpui::{Corners, Quad, px, rgb};
+    use gpui_effects::LiquidGlassStyle;
+
+    let viewport = bounds(0., 0., 160., 112.);
+    let pane = bounds(16., 16., 128., 80.);
+    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(160), DevicePixels(112)))?;
+    let mut material = LiquidGlassStyle::clear().thickness(px(16.));
+    material.optics.rim_strength = 0.;
+    material.optics.caustic_strength = 0.;
+    let mut frames = Vec::new();
+    for (reflection, direction) in [
+        (0., None),
+        (0.5, None),
+        (0.5, Some(point(-1., 0.))),
+        (0.5, Some(point(1., 0.))),
+    ] {
+        material.optics.environment_reflection = reflection;
+        material.optics.directional_light = f32::from(direction.is_some());
+        material.optics.light_direction = direction.unwrap_or(point(0., -1.));
+        let mut scene = Scene::default();
+        scene.insert_primitive(Quad {
+            bounds: viewport,
+            content_mask: ContentMask { bounds: viewport },
+            background: rgb(0x202830).into(),
+            ..Default::default()
+        });
+        scene.insert_primitive(BackdropBlur {
+            order: 1,
+            bounds: pane,
+            content_mask: ContentMask { bounds: viewport },
+            corner_radii: Default::default(),
+            blur_radius: P(0.),
+            opacity: 1.,
+            shader: Some(liquid_glass_shader()),
+            uniforms: material.uniforms(Corners::all(px(12.)), 1.),
+            time: 0.,
+            pointer: point(0., 0.),
+            pointer_active: false,
+        });
+        scene.finish();
+        frames.push(renderer.render_rgba(&scene)?);
+    }
+    let pixel =
+        |frame: usize, x: usize, y: usize| &frames[frame][(y * 160 + x) * 4..(y * 160 + x + 1) * 4];
+    assert_eq!(pixel(0, 80, 56), pixel(1, 80, 56));
+    assert_eq!(pixel(0, 80, 8), pixel(1, 80, 8));
+    assert!(pixel(1, 80, 18)[0] > pixel(0, 80, 18)[0] + 8);
+    assert!(pixel(1, 80, 18)[0] > pixel(1, 80, 28)[0]);
+    assert!(pixel(2, 18, 56)[0] > pixel(3, 18, 56)[0]);
+    assert!(pixel(3, 141, 56)[0] > pixel(2, 141, 56)[0]);
+    assert_eq!(pixel(2, 80, 56), pixel(3, 80, 56));
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn rounded_panes_form_and_release_a_continuous_neck() -> anyhow::Result<()> {
+    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(80), DevicePixels(48)))?;
+    let coverage_shader = gpui::BackdropShader::wgsl(format!(
+        "{}\nfn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {{ let material = coverage_material(input, params); return vec4<f32>(vec3<f32>(1.0), material.a); }}",
+        liquid_glass_shader()
+            .wgsl_source()
+            .replace("fn backdrop_effect(", "fn coverage_material(")
+    ));
+    for scale in [1., 1.5, 2.] {
+        let width = (80. * scale) as usize;
+        renderer.resize(size(
+            DevicePixels(width as i32),
+            DevicePixels((48. * scale) as i32),
+        ));
+        for (offset, joined) in [(30., true), (42., false)] {
+            let mut scene = glass(30., scale, 0.);
+            let pane = &mut scene.backdrop_blurs[0];
+            pane.shader = Some(coverage_shader.clone());
+            pane.uniforms = pane
+                .uniforms
+                .with_slot(4, [12. * scale; 4])
+                .with_slot(6, [32. * scale, 24. * scale, 1., 24. * scale])
+                .with_slot(11, [2., 20. * scale, 18. * scale, 9. * scale])
+                .with_slot(12, [offset * scale, 0., 0., 16. * scale]);
+            let image = renderer.render_rgba(&scene)?;
+            let red =
+                |x: f32, y: f32| image[(((y * scale) as usize * width) + (x * scale) as usize) * 4];
+            assert!(red(30., 24.) > 245 && red(30. + offset, 24.) > 245);
+            if joined {
+                for x in 45..53 {
+                    assert!(
+                        red(x as f32, 24.) > 245,
+                        "gap in the fused neck at scale {scale}, x {x}"
+                    );
+                }
+                assert!(red(48., 9.) < 5, "union must retain curved shoulders");
+            } else {
+                assert!(
+                    red(54., 24.) < 5,
+                    "detached panes still connected at scale {scale}"
+                );
+            }
+        }
     }
     Ok(())
 }

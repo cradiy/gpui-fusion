@@ -46,7 +46,9 @@ pub struct LiquidGlassOptics {
     pub top_reflection: f32,
     pub inner_shading: f32,
     pub caustic_strength: f32,
-    /// Fraction of the background blur used in the flat center, in `0..=1`.
+    /// Neutral environment reflection weighted by the lens normal, in `0..=1`.
+    pub environment_reflection: f32,
+    /// Fraction of the edge mip level used in the flat center, in `0..=1`.
     pub center_blur: f32,
     /// Direction toward the light in downward-Y coordinates.
     pub light_direction: Point<f32>,
@@ -58,11 +60,12 @@ impl Default for LiquidGlassOptics {
     fn default() -> Self {
         Self {
             magnification: 0.,
-            rim_strength: 0.55,
-            top_reflection: 0.3,
-            inner_shading: 0.1,
-            caustic_strength: 0.08,
-            center_blur: 0.16,
+            rim_strength: 0.,
+            top_reflection: 0.16,
+            inner_shading: 0.04,
+            caustic_strength: 0.,
+            environment_reflection: 0.,
+            center_blur: 0.35 / 2.2,
             light_direction: point(0., -1.),
             directional_light: 0.,
         }
@@ -134,7 +137,8 @@ pub struct LiquidGlassStyle {
     pub optics: LiquidGlassOptics,
     pub shape: LiquidGlassShape,
     pub shadow: LiquidGlassShadow,
-    /// Blur radius of the background, in logical pixels.
+    /// Largest background sampling footprint, in logical pixels.
+    /// Each doubling selects the next mip level; values at or below one remain sharp.
     pub blur_radius: Pixels,
     /// Maximum inward edge displacement, in logical pixels.
     pub refraction: Pixels,
@@ -160,10 +164,10 @@ impl LiquidGlassStyle {
             shape: LiquidGlassShape::default(),
             shadow: LiquidGlassShadow {
                 spread: px(34.),
-                strength: 0.12,
+                strength: 0.07,
                 offset: point(px(0.), px(22.)),
             },
-            blur_radius: px(2.2),
+            blur_radius: px(2.2_f32.exp2()),
             refraction: px(37.),
             thickness: px(62.),
             dispersion: 0.12,
@@ -211,8 +215,8 @@ impl LiquidGlassStyle {
             .with_slot(
                 OPTICS_SLOT,
                 [
-                    1.0,
-                    1.0,
+                    self.blur_radius.as_f32().clamp(1.0, 200.0).log2(),
+                    if self.blur_radius > px(0.) { 1. } else { 0. },
                     self.refraction.as_f32().max(0.0) * scale,
                     self.thickness.as_f32().max(0.0) * scale,
                 ],
@@ -252,7 +256,7 @@ impl LiquidGlassStyle {
                     self.optics.light_direction.x,
                     self.optics.light_direction.y,
                     self.optics.directional_light.clamp(0., 1.),
-                    0.,
+                    self.optics.environment_reflection.clamp(0., 1.),
                 ],
             )
             .with_slot(10, [0., 0., 0., scale])
@@ -387,6 +391,83 @@ pub fn paint_liquid_glass(
     );
 }
 
+/// A uniformly rounded pane in logical window coordinates.
+#[derive(Clone, Copy, Debug)]
+pub struct LiquidGlassPane {
+    pub bounds: Bounds<Pixels>,
+    pub radius: Pixels,
+}
+
+/// Paints two panes as one smooth-union lens with a shared backdrop and contour.
+/// Smoothness sets the neck's reach in logical pixels; zero gives a hard union.
+/// Empty panes are omitted. Foreground content is painted separately.
+pub fn paint_liquid_glass_union(
+    panes: [LiquidGlassPane; 2],
+    smoothness: Pixels,
+    appearance: LiquidGlassStyle,
+    window: &mut Window,
+) {
+    let [first, second] = panes;
+    let empty = |pane: LiquidGlassPane| {
+        pane.bounds.size.width <= px(0.) || pane.bounds.size.height <= px(0.)
+    };
+    if empty(first) || empty(second) {
+        let pane = if empty(first) { second } else { first };
+        if !empty(pane) {
+            paint_liquid_glass(pane.bounds, Corners::all(pane.radius), appearance, window);
+        }
+        return;
+    }
+    let scale = window.raster_scale_factor();
+    let offset = second.bounds.center() - first.bounds.center();
+    let radius = second
+        .radius
+        .max(px(0.))
+        .min(second.bounds.size.width.min(second.bounds.size.height) * 0.5);
+    let uniforms = appearance
+        .uniforms(
+            Corners::all(first.radius).clamp_radii_for_quad_size(first.bounds.size),
+            scale,
+        )
+        .with_slot(
+            11,
+            [
+                appearance.shape.roundness.clamp(2., 7.),
+                second.bounds.size.width.as_f32() * scale,
+                second.bounds.size.height.as_f32() * scale,
+                radius.as_f32() * scale,
+            ],
+        )
+        .with_slot(
+            12,
+            [
+                offset.x.as_f32() * scale,
+                offset.y.as_f32() * scale,
+                0.,
+                smoothness.as_f32().max(0.) * scale,
+            ],
+        );
+    let sampling_reach = appearance.refraction.max(px(0.))
+        * (1. + appearance.dispersion.clamp(0., 1.) * 0.35)
+        + first
+            .bounds
+            .size
+            .width
+            .max(first.bounds.size.height)
+            .max(second.bounds.size.width)
+            .max(second.bounds.size.height)
+            * appearance.optics.magnification.clamp(0., 1.);
+    paint_glass_shader(
+        first.bounds,
+        LiquidGlassDeformation::default(),
+        appearance.blur_radius.clamp(px(0.), px(200.)),
+        sampling_reach,
+        liquid_glass_shader(),
+        uniforms,
+        window,
+    );
+}
+
 /// Paints glass with a localized bulge and a secondary contour wave.
 /// Bounds describe the undeformed surface; painting extends beyond them without
 /// changing layout or hit regions. Ancestor clipping still applies.
@@ -456,21 +537,29 @@ pub(super) fn paint_glass_shader(
             ],
         );
     let merged = uniforms.slots()[12];
-    let merge_padding = if merged[2] > 0. {
-        let x = merged[0].abs() + merged[2] - bounds.size.width.as_f32() * scale * 0.5;
-        let y = merged[1].abs() + merged[2] - bounds.size.height.as_f32() * scale * 0.5;
-        px((x.max(y).max(0.) + merged[3] * 0.25) / scale)
-    } else {
-        px(0.)
-    };
-    let paint_bounds = bounds.dilate(padding + merge_padding);
+    let pane = uniforms.slots()[11];
+    let mut capture = bounds;
+    if merged[2] > 0. || (pane[1] > 0. && pane[2] > 0.) {
+        let half_size = if pane[1] > 0. && pane[2] > 0. {
+            gpui::size(px(pane[1] * 0.5 / scale), px(pane[2] * 0.5 / scale))
+        } else {
+            gpui::size(px(merged[2] / scale), px(merged[2] / scale))
+        };
+        let other_center = center + point(px(merged[0] / scale), px(merged[1] / scale));
+        let other = Bounds::new(
+            other_center - point(half_size.width, half_size.height),
+            gpui::size(half_size.width * 2., half_size.height * 2.),
+        );
+        capture = capture.union(&other).dilate(px(merged[3] * 0.25 / scale));
+    }
+    let paint_bounds = capture.dilate(padding);
     let shadow = uniforms.slots()[13];
     if shadow[0] > 0. && shadow[1] > 0. {
         let shadow_padding =
             px((shadow[0] * 1.5 + shadow[2].abs().max(shadow[3].abs()) * 1.6) / scale);
         window.paint_backdrop_effect(
             PaintBackdropEffect::new(
-                bounds.dilate(bulge.abs() + ripple.abs() + merge_padding + shadow_padding),
+                capture.dilate(bulge.abs() + ripple.abs() + shadow_padding),
                 px(0.),
                 liquid_glass_shadow_shader(),
             )
@@ -499,7 +588,7 @@ pub fn liquid_glass_shader() -> BackdropShader {
         include_str!("shaders/liquid_glass.wgsl"),
         "\n",
         "fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> { return liquid_glass_material(input, params); }"
-    )).with_gaussian_blur()
+    )).with_mipmapped_backdrop()
 }
 
 #[cfg(test)]
@@ -513,9 +602,9 @@ mod tests {
             .thickness(px(12.))
             .dispersion(0.03);
         let uniforms = appearance.uniforms(Corners::all(px(3.)), 2.);
-        assert_eq!(uniforms.slots()[OPTICS_SLOT], [1., 1., 10., 24.]);
+        assert_eq!(uniforms.slots()[OPTICS_SLOT], [2.2, 1., 10., 24.]);
         assert_eq!(uniforms.slots()[CORNERS_SLOT], [6.; 4]);
-        assert_eq!(uniforms.slots()[SURFACE_SLOT], [0., 0., 0.03, 0.16]);
+        assert_eq!(uniforms.slots()[SURFACE_SLOT], [0., 0., 0.03, 0.35 / 2.2]);
         assert_eq!(uniforms.slots()[8][0], appearance.optics.rim_strength);
     }
 

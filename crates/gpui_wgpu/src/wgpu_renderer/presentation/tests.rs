@@ -116,6 +116,7 @@ fn render(renderer: &mut WgpuRenderer, scene: &Scene, copyable: bool) -> anyhow:
         config.width,
         config.height,
         usage,
+        1,
     );
     renderer.ensure_backdrop_effect_pipelines(scene);
     let mut encoder = device.create_command_encoder(&Default::default());

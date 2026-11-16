@@ -1,10 +1,8 @@
 // Lens shading adapted from bilalgursen/liquid-glass.
 // Copyright (c) 2026 Bilal Abdullah Gürşen. MIT: LICENSE-bilalgursen-liquid-glass.
 fn glass_optical_sample(input: BackdropInput, offset: vec2<f32>, blur: f32) -> vec4<f32> {
-    let raw = sample_raw_backdrop(input, offset);
-    let blurred = sample_blurred_backdrop(input, offset);
-    return mix(vec4<f32>(backdrop_to_srgb(raw.rgb), raw.a),
-        vec4<f32>(backdrop_to_srgb(blurred.rgb), blurred.a), blur);
+    let sampled = sample_backdrop_lod(input, offset, blur);
+    return vec4<f32>(backdrop_to_srgb(sampled.rgb), sampled.a);
 }
 
 fn glass_optical_layer(base: vec4<f32>, color: vec3<f32>, weight: f32) -> vec4<f32> {
@@ -37,16 +35,23 @@ fn liquid_glass_material(input: BackdropInput, params: BackdropParams) -> vec4<f
     let ellipticity = max(params.slots[6].z - 1.0, 0.0);
     let roundness = max(params.slots[11].x, 2.0);
     let merged = params.slots[12];
-    let distance = glass_material_contour(p, shape_size, radii, deformation, ellipticity, roundness, merged);
+    let distance = glass_material_contour(p, shape_size, radii, deformation, ellipticity, roundness, merged, params.slots[11].yzw);
     if (distance >= 0.5) { return vec4<f32>(0.0); }
 
-    // Limit rectangular bevels to their corners to avoid diagonal shading seams.
-    let corner = select(select(radii.w, radii.x, p.y < 0.0),
-        select(radii.z, radii.y, p.y < 0.0), p.x >= 0.0);
-    let bevel = max(min(optics.w, max(corner * 1.2, scale)), 0.001);
+    var shading_p = p;
+    var shading_size = shape_size;
+    let merged_pane = params.slots[11].yzw;
+    if (all(merged_pane.xy > vec2<f32>(0.0))) {
+        let primary = glass_contour(p, shape_size, radii, deformation, ellipticity);
+        let secondary = glass_distance(p - merged.xy, merged_pane.xy, vec4<f32>(merged_pane.z));
+        let weight = clamp(0.5 + 0.5 * (primary - secondary) / max(merged.w, 0.001), 0.0, 1.0);
+        shading_p = p - merged.xy * weight;
+        shading_size = mix(shape_size, merged_pane.xy, weight);
+    }
+    let bevel = max(optics.w, 0.001);
     let eps = 1.25 * scale;
-    let dx = glass_material_contour(p + vec2<f32>(eps, 0.0), shape_size, radii, deformation, ellipticity, roundness, merged);
-    let dy = glass_material_contour(p + vec2<f32>(0.0, eps), shape_size, radii, deformation, ellipticity, roundness, merged);
+    let dx = glass_material_contour(p + vec2<f32>(eps, 0.0), shape_size, radii, deformation, ellipticity, roundness, merged, params.slots[11].yzw);
+    let dy = glass_material_contour(p + vec2<f32>(0.0, eps), shape_size, radii, deformation, ellipticity, roundness, merged, params.slots[11].yzw);
     let gradient = vec2<f32>(dx - distance, dy - distance) / eps;
     let direction = gradient / max(length(gradient), 0.0001);
     let height = lens_height(distance, bevel);
@@ -56,17 +61,17 @@ fn liquid_glass_material(input: BackdropInput, params: BackdropParams) -> vec4<f
     let edge = select(0.0, 1.0 - smoothstep(0.0, bevel * 0.35, max(-distance, 0.0)), optics.w > 0.0);
     let clear = 1.0 - surface.x;
     let displacement = -direction * optics.z * pow(edge, 1.6) * mix(0.06, 1.0, clear);
-    let magnified = p / (1.0 + surface.y * height) - p;
-    let blur = mix(surface.w, 1.0, max(pow(edge, 1.3), surface.x));
+    let magnified = shading_p / (1.0 + surface.y * height) - shading_p;
+    let blur = select(0.0, max(mix(optics.x * surface.w, optics.x, max(pow(edge, 1.3), surface.x)) + log2(scale), 0.0), optics.y > 0.0);
     let dispersion = surface.z * 0.35 * clear;
     var color = glass_optical_sample(input, magnified + displacement, blur);
     if (dispersion > 0.0 && edge > 0.0) {
         color.r = glass_optical_sample(input, magnified + displacement * (1.0 + dispersion), blur).r;
         color.b = glass_optical_sample(input, magnified + displacement * (1.0 - dispersion), blur).b;
     }
-    let normalized = p / max(shape_size * 0.5, vec2<f32>(0.001));
+    let normalized = shading_p / max(shading_size * 0.5, vec2<f32>(0.001));
     let top = ((1.0 - smoothstep(-0.05, 0.75, normalized.y)) * (1.0 - normalized.x * 0.12)
-        * lighting.z * (0.6 + 0.02 / 0.3)) * clear;
+        * lighting.z * 0.6) * clear + 0.02;
     color = vec4<f32>(color.rgb * lens_dim(vec3<f32>(1.0) - vec3<f32>(1.0, 1.0, 0.72) * top), color.a);
     let frost_color = mix(params.slots[14].rgb, params.slots[15].rgb, pow(depth, 1.6));
     color = glass_optical_layer(color, frost_color, surface.x);
@@ -88,7 +93,7 @@ fn liquid_glass_material(input: BackdropInput, params: BackdropParams) -> vec4<f
     let fresnel = pow(clamp(1.0 - normal.z, 0.0, 1.0), 6.0);
     let rim_width = max(1.1, scale);
     let rim = 1.0 - smoothstep(0.0, rim_width * 1.6, abs(distance + rim_width * 1.8));
-    let falloff = exp(-pow(p.y / (30.0 * scale), 2.0));
+    let falloff = exp(-pow(shading_p.y / (30.0 * scale), 2.0));
     let static_rim = right * right * falloff * 0.9 + down * down * 0.2 + left * left * 0.55;
     let light = params.slots[9].xy / max(length(params.slots[9].xy), 0.0001);
     let facing = clamp(dot(direction, light), 0.0, 1.0);
@@ -101,10 +106,16 @@ fn liquid_glass_material(input: BackdropInput, params: BackdropParams) -> vec4<f
     rim_color = mix(rim_color, vec3<f32>(0.12, 0.6, 1.2), mix(left, away, lean) * 0.85);
     let edge_color = params.slots[5];
     rim_color = mix(rim_color, edge_color.rgb, clamp(edge_color.a, 0.0, 1.0));
-    let reflection = rim_color * (rim * rim_direction * lighting.x + fresnel * mix(right, facing, lean) * 0.02 * lighting.x / 0.55) * clear;
+    let reflection = rim_color * (rim * rim_direction * lighting.x * mix(0.04, 1.0, clear) + fresnel * mix(right, facing, lean) * 0.02);
     let caustic = vec3<f32>(1.0, 0.92, 0.86) * smoothstep(0.72, 0.98, depth) * down * lighting.w * clear;
     color = vec4<f32>(color.rgb + reflection + caustic, color.a);
-    let edge_coverage = pow(depth, 1.6);
+    let environment_direction = mix(-normal.y, dot(normal.xy, light), lean);
+    let environment = mix(vec3<f32>(0.32, 0.36, 0.42), vec3<f32>(0.96, 0.98, 1.0),
+        smoothstep(-0.8, 0.8, environment_direction));
+    let environment_weight = pow(clamp(1.0 - normal.z, 0.0, 1.0), 5.0)
+        * params.slots[9].w * mix(0.5, 1.0, clear);
+    color = glass_optical_layer(color, environment, environment_weight);
+    let edge_coverage = pow(edge, 1.6);
     color = glass_optical_layer(color, edge_color.rgb, clamp(edge_color.a, 0.0, 1.0) * edge_coverage);
     let coverage = 1.0 - smoothstep(-0.5, 0.5, distance);
     return vec4<f32>(backdrop_from_srgb(clamp(color.rgb, vec3<f32>(0.0), vec3<f32>(1.0))), coverage * color.a);

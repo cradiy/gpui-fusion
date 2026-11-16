@@ -444,7 +444,7 @@ impl Render for Segmented {
             .clamp(0., count.saturating_sub(1) as f32);
         let pressure = self.pressure.value.clamp(0., 1.);
         let selected = self.selected;
-        let refracting = indicator.material.is_some() && pressure > 0.;
+        let glass_content = indicator.material.is_some();
         let outline = indicator.clone();
         let region = Rc::new(Cell::new(None));
         let lens = Rc::new(Cell::new(None));
@@ -633,7 +633,7 @@ impl Render for Segmented {
                 .when(self.selected == Some(index), |div| {
                     div.aria_active_descendant()
                 })
-                .child(if refracting {
+                .child(if glass_content {
                     liquid_glass_content(content, selected_color, move |_, _| region.get())
                         .into_any_element()
                 } else {
@@ -684,7 +684,9 @@ impl Render for Segmented {
                 |_, _, _| (),
                 move |_, _, window, _| {
                     if let Some((pane, corners, glass)) = lens.get() {
-                        paint_liquid_glass(pane, corners, glass, window);
+                        window.with_subtree_effect_chain(pane, &[], pressure, |window| {
+                            paint_liquid_glass(pane, corners, glass, window);
+                        });
                     }
                     if let Some(region) = region.get() {
                         let width = length(&outline.border_width, 0.);

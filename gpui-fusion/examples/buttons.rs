@@ -72,7 +72,7 @@ fn spectrum(alpha: f32, palette: usize, border: bool) -> Gradient {
 fn glass(material: MaterialChoice, pressed: bool) -> Material {
     let (blur, frost, refraction, thickness) = match material {
         MaterialChoice::Optical => (0.5, 0., if pressed { 9. } else { 7. }, 14.),
-        MaterialChoice::Frosted => (10., 0.7, if pressed { 5. } else { 1.5 }, 12.),
+        MaterialChoice::Frosted => (10., 0.3, if pressed { 5. } else { 3. }, 12.),
         _ => (1., 0.04, if pressed { 5. } else { 1.5 }, 12.),
     };
     Material::Glass {
@@ -80,9 +80,14 @@ fn glass(material: MaterialChoice, pressed: bool) -> Material {
         refraction: px(refraction).into(),
         thickness: px(thickness).into(),
         edge_light: Token::<f32>::new("glass_edge_light").into(),
+        reflection: Token::<f32>::new("glass_reflection").into(),
         edge_color: Token::<Hsla>::new("glass_edge_color").into(),
         frost: frost.into(),
-        tint: Token::<Hsla>::new("surface").opacity(0.04),
+        tint: Token::<Hsla>::new("surface").opacity(if material == MaterialChoice::Optical {
+            0.
+        } else {
+            0.04
+        }),
         frost_center: Token::<Hsla>::new("surface").into(),
         frost_edge: Token::<Hsla>::new("muted_surface").into(),
     }
@@ -95,7 +100,15 @@ impl Gallery {
             .px(px(20.))
             .rounded(px(if self.pill { 20. } else { 8. }));
         let (accent, _) = palette_tokens(self.palette);
-        let density = if glass_enabled { 0.86 } else { 1. };
+        let density = if glass_enabled {
+            if primary || self.fill != FillChoice::Theme {
+                0.48
+            } else {
+                0.24
+            }
+        } else {
+            1.
+        };
         if glass_enabled {
             let material = self.material;
             patch = patch
@@ -522,7 +535,7 @@ fn main() {
                                 .h(px(40.))
                                 .px(px(20.))
                                 .rounded(px(20.))
-                                .bg(Token::<Hsla>::new("surface").opacity(0.68))
+                                .bg(Token::<Hsla>::new("surface").opacity(0.08))
                                 .material(glass(MaterialChoice::Optical, false))
                                 .pressed(|s| s.material(glass(MaterialChoice::Optical, true))),
                             cx,

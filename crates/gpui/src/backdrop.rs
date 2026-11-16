@@ -60,11 +60,20 @@ impl BackdropShaderId {
 ///
 /// Implementations may call `sample_raw_backdrop` and
 /// `sample_blurred_backdrop`, passing displacement in device pixels.
+/// Shaders with [`Self::with_mipmapped_backdrop`] may use `sample_backdrop_lod`
+/// with a fractional mip level for spatially varying blur.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct BackdropShader {
     id: BackdropShaderId,
     wgsl: Arc<str>,
-    gaussian_blur: bool,
+    blur: BackdropBlurMode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum BackdropBlurMode {
+    Default,
+    Gaussian,
+    Mipmapped,
 }
 
 impl BackdropShader {
@@ -76,23 +85,39 @@ impl BackdropShader {
         Self {
             id: BackdropShaderId(hasher.finish()),
             wgsl,
-            gaussian_blur: false,
+            blur: BackdropBlurMode::Default,
         }
     }
 
     /// Uses a Gaussian kernel with sigma equal to one third of the blur radius.
     pub fn with_gaussian_blur(mut self) -> Self {
-        self.gaussian_blur = true;
+        self.blur = BackdropBlurMode::Gaussian;
         let mut hasher = DefaultHasher::new();
         self.wgsl.hash(&mut hasher);
-        self.gaussian_blur.hash(&mut hasher);
+        self.blur.hash(&mut hasher);
         self.id = BackdropShaderId(hasher.finish());
         self
     }
 
     /// Whether the backdrop uses an explicit three-sigma Gaussian support.
     pub fn uses_gaussian_blur(&self) -> bool {
-        self.gaussian_blur
+        self.blur == BackdropBlurMode::Gaussian
+    }
+
+    /// Prepares a mip pyramid for `sample_backdrop_lod`. The blur radius bounds
+    /// the largest sampling footprint in device pixels after layout scaling.
+    pub fn with_mipmapped_backdrop(mut self) -> Self {
+        self.blur = BackdropBlurMode::Mipmapped;
+        let mut hasher = DefaultHasher::new();
+        self.wgsl.hash(&mut hasher);
+        self.blur.hash(&mut hasher);
+        self.id = BackdropShaderId(hasher.finish());
+        self
+    }
+
+    /// Whether the shader samples an explicit backdrop mip pyramid.
+    pub fn uses_mipmapped_backdrop(&self) -> bool {
+        self.blur == BackdropBlurMode::Mipmapped
     }
 
     /// Returns the stable identifier used by renderer pipeline caches.
@@ -111,7 +136,7 @@ impl BackdropShader {
 pub struct PaintBackdropEffect {
     /// Bounds of the affected region.
     pub bounds: Bounds<Pixels>,
-    /// Radius used to prepare the blurred backdrop input.
+    /// Gaussian support radius or maximum mip sampling footprint, according to the shader.
     pub blur_radius: Pixels,
     /// Shader used to composite the raw and blurred backdrop inputs.
     pub shader: BackdropShader,

@@ -48,6 +48,9 @@ impl MaterialTransition {
         value.blur_radius =
             self.from.blur_radius + (self.target.blur_radius - self.from.blur_radius) * t;
         value.frost = self.from.frost + (self.target.frost - self.from.frost) * t;
+        value.optics.environment_reflection = self.from.optics.environment_reflection
+            + (self.target.optics.environment_reflection - self.from.optics.environment_reflection)
+                * t;
         value
     }
 }
@@ -106,51 +109,33 @@ impl Spring {
 }
 
 pub(crate) struct GlassMotion {
-    axes: [Spring; 2],
-    target: [f32; 2],
+    scale: Spring,
+    target: f32,
     last: Instant,
 }
 impl GlassMotion {
     pub(crate) fn new(now: Instant) -> Self {
         Self {
-            axes: [
-                Spring {
-                    value: 1.,
-                    velocity: 0.,
-                },
-                Spring {
-                    value: 1.,
-                    velocity: 0.,
-                },
-            ],
-            target: [1.; 2],
+            scale: Spring {
+                value: 1.,
+                velocity: 0.,
+            },
+            target: 1.,
             last: now,
         }
     }
-    pub(crate) fn sample(
-        &mut self,
-        target: [f32; 2],
-        now: Instant,
-        animated: bool,
-    ) -> ([f32; 2], bool) {
+    pub(crate) fn sample(&mut self, target: f32, now: Instant, animated: bool) -> (f32, bool) {
         let elapsed = now.duration_since(self.last).as_secs_f32();
         self.last = now;
         if animated {
-            self.axes[0].advance(self.target[0], elapsed, 20., 0.55);
-            self.axes[1].advance(self.target[1], elapsed, 16., 0.5);
+            self.scale.advance(self.target, elapsed, 22., 0.82);
         } else {
-            for (axis, value) in self.axes.iter_mut().zip(target) {
-                axis.value = value;
-                axis.velocity = 0.;
-            }
+            self.scale.value = target;
+            self.scale.velocity = 0.;
         }
         self.target = target;
-        let active = self
-            .axes
-            .iter()
-            .zip(target)
-            .any(|(axis, target)| axis.value != target || axis.velocity != 0.);
-        ([self.axes[0].value, self.axes[1].value], active)
+        let active = self.scale.value != target || self.scale.velocity != 0.;
+        (self.scale.value, active)
     }
 }
 
@@ -162,22 +147,22 @@ mod glass_tests {
     fn elastic_surface_retargets_without_jumping_and_stops_when_released() {
         let now = Instant::now();
         let mut motion = GlassMotion::new(now);
-        let (initial, active) = motion.sample([1.04, 1.08], now, true);
-        assert_eq!(initial, [1., 1.]);
+        let (initial, active) = motion.sample(1.03, now, true);
+        assert_eq!(initial, 1.);
         assert!(active);
         let halfway = now + Duration::from_millis(90);
-        let (hover, _) = motion.sample([1.04, 1.08], halfway, true);
-        assert!(hover[0] > 1. && hover[1] > 1.);
-        let (pressed, active) = motion.sample([1.08, 1.08], halfway, true);
+        let (hover, _) = motion.sample(1.03, halfway, true);
+        assert!(hover > 1.);
+        let (pressed, active) = motion.sample(1.05, halfway, true);
         assert_eq!(hover, pressed);
         assert!(active);
-        motion.sample([1., 1.], halfway, true);
-        let (settled, active) = motion.sample([1., 1.], now + Duration::from_secs(3), true);
-        assert_eq!(settled, [1., 1.]);
+        motion.sample(1., halfway, true);
+        let (settled, active) = motion.sample(1., now + Duration::from_secs(3), true);
+        assert_eq!(settled, 1.);
         assert!(!active);
         assert_eq!(
-            motion.sample([1.08; 2], now + Duration::from_secs(3), false),
-            ([1.08; 2], false)
+            motion.sample(1.05, now + Duration::from_secs(3), false),
+            (1.05, false)
         );
     }
 }

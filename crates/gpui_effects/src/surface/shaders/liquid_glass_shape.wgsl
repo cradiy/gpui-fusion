@@ -58,14 +58,17 @@ fn glass_superellipse_distance(p: vec2<f32>, size: vec2<f32>, radii: vec4<f32>, 
 }
 
 fn glass_material_contour(p: vec2<f32>, size: vec2<f32>, radii: vec4<f32>,
-    deformation: vec4<f32>, ellipticity: f32, roundness: f32, merged_circle: vec4<f32>) -> f32 {
+    deformation: vec4<f32>, ellipticity: f32, roundness: f32, merged_circle: vec4<f32>, merged_pane: vec3<f32>) -> f32 {
     var distance = glass_contour(p, size, radii, deformation, ellipticity);
     if (roundness > 2.0) {
         distance += (glass_superellipse_distance(p, size, radii, roundness)
             - glass_distance(p, size, radii)) * (1.0 - clamp(ellipticity, 0.0, 1.0));
     }
-    if (merged_circle.z > 0.0) {
-        let circle = length(p - merged_circle.xy) - merged_circle.z;
+    if (merged_circle.z > 0.0 || all(merged_pane.xy > vec2<f32>(0.0))) {
+        var circle = length(p - merged_circle.xy) - merged_circle.z;
+        if (all(merged_pane.xy > vec2<f32>(0.0))) {
+            circle = glass_distance(p - merged_circle.xy, merged_pane.xy, vec4<f32>(merged_pane.z));
+        }
         let k = merged_circle.w;
         if (k > 0.0) {
             let h = clamp(0.5 + 0.5 * (circle - distance) / k, 0.0, 1.0);

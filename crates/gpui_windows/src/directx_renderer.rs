@@ -151,6 +151,7 @@ struct DirectXBackdropTexture {
     texture: ID3D11Texture2D,
     view: Option<ID3D11ShaderResourceView>,
     render_target_view: Option<ID3D11RenderTargetView>,
+    mip_levels: u32,
 }
 
 struct DirectComposition {
@@ -398,7 +399,7 @@ impl DirectXRenderer {
             return Ok(());
         }
         if !scene.backdrop_blurs.is_empty() {
-            self.ensure_backdrop_resources()?;
+            self.ensure_backdrop_resources(scene)?;
         }
         self.pre_draw(&match background_appearance {
             WindowBackgroundAppearance::Opaque => [1.0f32; 4],
@@ -685,18 +686,35 @@ impl DirectXRenderer {
         Ok(())
     }
 
-    fn ensure_backdrop_resources(&mut self) -> Result<()> {
+    fn ensure_backdrop_resources(&mut self, scene: &Scene) -> Result<()> {
+        let mip_levels = scene
+            .backdrop_blurs
+            .iter()
+            .filter(|backdrop| {
+                backdrop
+                    .shader
+                    .as_ref()
+                    .is_some_and(|shader| shader.uses_mipmapped_backdrop())
+            })
+            .map(|backdrop| 1 + backdrop.blur_radius.0.max(1.).log2().ceil() as u32)
+            .max()
+            .unwrap_or(1)
+            .min(1 + self.width.max(self.height).max(1).ilog2());
         let resources = self.resources.as_mut().context("resources missing")?;
-        if resources.backdrop_source.is_some() {
+        if resources
+            .backdrop_source
+            .as_ref()
+            .is_some_and(|source| source.mip_levels >= mip_levels)
+        {
             return Ok(());
         }
 
         let device = &self.devices.as_ref().context("devices missing")?.device;
-        let source = create_backdrop_texture(device, self.width, self.height, false)?;
+        let source = create_backdrop_texture(device, self.width, self.height, false, mip_levels)?;
         let blur_width = self.width.div_ceil(2);
         let blur_height = self.height.div_ceil(2);
-        let horizontal = create_backdrop_texture(device, blur_width, blur_height, true)?;
-        let result = create_backdrop_texture(device, blur_width, blur_height, true)?;
+        let horizontal = create_backdrop_texture(device, blur_width, blur_height, true, 1)?;
+        let result = create_backdrop_texture(device, blur_width, blur_height, true, 1)?;
         resources.backdrop_source = Some(source);
         resources.backdrop_horizontal = Some(horizontal);
         resources.backdrop_result = Some(result);
@@ -802,73 +820,92 @@ impl DirectXRenderer {
         let sampler = slice::from_ref(&self.globals.sampler);
 
         for backdrop in backdrops {
+            let mipmapped = backdrop
+                .shader
+                .as_ref()
+                .is_some_and(|shader| shader.uses_mipmapped_backdrop());
             unsafe {
                 unbind_backdrop_shader_resources(&device_context);
                 device_context.OMSetRenderTargets(None, None);
-                device_context.CopyResource(&source_texture, &render_target);
-                device_context
-                    .OMSetRenderTargets(Some(slice::from_ref(&horizontal_render_target)), None);
-                device_context.ClearRenderTargetView(
-                    horizontal_render_target
-                        .as_ref()
-                        .context("horizontal backdrop render target missing")?,
-                    &[0.0; 4],
+                device_context.CopySubresourceRegion(
+                    &source_texture,
+                    0,
+                    0,
+                    0,
+                    0,
+                    &render_target,
+                    0,
+                    None,
+                );
+                if mipmapped {
+                    device_context.GenerateMips(source_view.as_ref());
+                }
+            }
+            if !mipmapped {
+                unsafe {
+                    device_context
+                        .OMSetRenderTargets(Some(slice::from_ref(&horizontal_render_target)), None);
+                    device_context.ClearRenderTargetView(
+                        horizontal_render_target
+                            .as_ref()
+                            .context("horizontal backdrop render target missing")?,
+                        &[0.0; 4],
+                    );
+                }
+
+                let horizontal = BackdropInstance::blur(
+                    viewport_size,
+                    blur_size,
+                    backdrop.blur_radius.0.min(64.0),
+                    [1.0, 0.0],
+                );
+                self.backdrop_blur_pipeline.update_buffer(
+                    &device,
+                    &device_context,
+                    slice::from_ref(&horizontal),
+                )?;
+                self.backdrop_blur_pipeline.draw(
+                    &device_context,
+                    slice::from_ref(&blur_viewport),
+                    globals,
+                    slice::from_ref(&source_view),
+                    None,
+                    sampler,
+                    1,
+                );
+
+                unsafe {
+                    unbind_backdrop_shader_resources(&device_context);
+                    device_context
+                        .OMSetRenderTargets(Some(slice::from_ref(&result_render_target)), None);
+                    device_context.ClearRenderTargetView(
+                        result_render_target
+                            .as_ref()
+                            .context("backdrop result render target missing")?,
+                        &[0.0; 4],
+                    );
+                }
+                let vertical = BackdropInstance::blur(
+                    viewport_size,
+                    blur_size,
+                    backdrop.blur_radius.0.min(64.0),
+                    [0.0, 1.0],
+                );
+                self.backdrop_blur_pipeline.update_buffer(
+                    &device,
+                    &device_context,
+                    slice::from_ref(&vertical),
+                )?;
+                self.backdrop_blur_pipeline.draw(
+                    &device_context,
+                    slice::from_ref(&blur_viewport),
+                    globals,
+                    slice::from_ref(&horizontal_view),
+                    None,
+                    sampler,
+                    1,
                 );
             }
-
-            let horizontal = BackdropInstance::blur(
-                viewport_size,
-                blur_size,
-                backdrop.blur_radius.0.min(64.0),
-                [1.0, 0.0],
-            );
-            self.backdrop_blur_pipeline.update_buffer(
-                &device,
-                &device_context,
-                slice::from_ref(&horizontal),
-            )?;
-            self.backdrop_blur_pipeline.draw(
-                &device_context,
-                slice::from_ref(&blur_viewport),
-                globals,
-                slice::from_ref(&source_view),
-                None,
-                sampler,
-                1,
-            );
-
-            unsafe {
-                unbind_backdrop_shader_resources(&device_context);
-                device_context
-                    .OMSetRenderTargets(Some(slice::from_ref(&result_render_target)), None);
-                device_context.ClearRenderTargetView(
-                    result_render_target
-                        .as_ref()
-                        .context("backdrop result render target missing")?,
-                    &[0.0; 4],
-                );
-            }
-            let vertical = BackdropInstance::blur(
-                viewport_size,
-                blur_size,
-                backdrop.blur_radius.0.min(64.0),
-                [0.0, 1.0],
-            );
-            self.backdrop_blur_pipeline.update_buffer(
-                &device,
-                &device_context,
-                slice::from_ref(&vertical),
-            )?;
-            self.backdrop_blur_pipeline.draw(
-                &device_context,
-                slice::from_ref(&blur_viewport),
-                globals,
-                slice::from_ref(&horizontal_view),
-                None,
-                sampler,
-                1,
-            );
-
             unsafe {
                 unbind_backdrop_shader_resources(&device_context);
                 device_context.OMSetRenderTargets(Some(slice::from_ref(&render_target_view)), None);
@@ -888,7 +925,11 @@ impl DirectXRenderer {
                 slice::from_ref(&viewport),
                 globals,
                 slice::from_ref(&source_view),
-                Some(slice::from_ref(&result_view)),
+                Some(slice::from_ref(if mipmapped {
+                    &source_view
+                } else {
+                    &result_view
+                })),
                 sampler,
                 1,
             );
@@ -2405,9 +2446,10 @@ fn create_backdrop_texture(
     width: u32,
     height: u32,
     render_target: bool,
+    mip_levels: u32,
 ) -> Result<DirectXBackdropTexture> {
     let bind_flags = D3D11_BIND_SHADER_RESOURCE.0
-        | if render_target {
+        | if render_target || mip_levels > 1 {
             D3D11_BIND_RENDER_TARGET.0
         } else {
             0
@@ -2415,7 +2457,7 @@ fn create_backdrop_texture(
     let desc = D3D11_TEXTURE2D_DESC {
         Width: width,
         Height: height,
-        MipLevels: 1,
+        MipLevels: mip_levels,
         ArraySize: 1,
         Format: RENDER_TARGET_FORMAT,
         SampleDesc: DXGI_SAMPLE_DESC {
@@ -2425,7 +2467,11 @@ fn create_backdrop_texture(
         Usage: D3D11_USAGE_DEFAULT,
         BindFlags: bind_flags as u32,
         CPUAccessFlags: 0,
-        MiscFlags: 0,
+        MiscFlags: if mip_levels > 1 {
+            D3D11_RESOURCE_MISC_GENERATE_MIPS.0 as u32
+        } else {
+            0
+        },
     };
     let mut texture = None;
     unsafe { device.CreateTexture2D(&desc, None, Some(&mut texture))? };
@@ -2443,6 +2489,7 @@ fn create_backdrop_texture(
         texture,
         view,
         render_target_view,
+        mip_levels,
     })
 }
 

@@ -3,7 +3,7 @@ use crate::style::{ComputedStyle, Resolved};
 use gpui::{prelude::*, *};
 use gpui_effects::{LiquidGlassPane, paint_liquid_glass_union};
 
-pub(super) struct GlassMenu {
+pub(crate) struct GlassMenu {
     pub content: AnyElement,
     pub trigger_content: AnyElement,
     pub anchor: Bounds<Pixels>,
@@ -15,7 +15,7 @@ pub(super) struct GlassMenu {
     pub style: ComputedStyle,
 }
 
-pub(super) struct GlassFrame {
+pub(crate) struct GlassFrame {
     panes: [LiquidGlassPane; 2],
     smoothness: Pixels,
     trigger: AnyElement,

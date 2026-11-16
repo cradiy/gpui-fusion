@@ -591,3 +591,42 @@ disables transitions. Settled controls do not request animation frames.
 
 Run `cargo run -p gpui-fusion --example radios` for theme and material switching,
 vertical and horizontal groups, disabled options, and custom indicator styling.
+
+## Select fields
+
+`Select::new(label, options, window, cx)` creates an initially unselected field.
+`SelectOption::new(value, label)` supplies a unique, nonempty value and a nonempty
+label; `icon`, `keywords`, and `disabled` configure individual options.
+`placeholder` sets the empty field text. `clearable(true)` adds an independent
+clear button. `on_change` receives `Some(value)` on user selection and `None` on
+clearing; choosing the current value does not emit another change.
+`set_selected` and `set_options` update state without invoking that callback.
+Option replacement validates before mutation and preserves an enabled selected
+value that still exists.
+
+`searchable(true)` enables a persistent search editor, created on first open.
+Search matches labels and keywords without case sensitivity. IME pre-edit does
+not filter the list, and composition confirmation does not select an option.
+`search_placeholder` and `empty_text` configure the search and empty-result text.
+Opening resets the query and reveals the selected option. Arrow keys move through
+enabled results; Enter accepts, Escape dismisses, and Tab closes before advancing
+focus. Home and End navigate the list when the search editor is not focused;
+in the editor they retain their text-editing behavior. Outside clicks and focus
+leaving the control dismiss the panel without stealing focus.
+
+The `select` recipe and Fusion `Styled` configure the field, with
+`SelectPart::Panel`, `Item`, `Icon`, `Placeholder`, `Empty`, and `Clear` for parts.
+Panel width defaults to the field width; panel height is a maximum. All item
+states must use the same height because the list renders only visible rows.
+Style resolution is cached independently of the option count. After closing
+motion settles, the popup and virtual rows are absent from the rendered tree.
+
+The field and popup share the field's resolved material and glass fill.
+`material_mode` fixes the material and `set_material_mode(None, cx)` resumes
+following the injected theme. Glass opening and closing use the shared dropdown
+fusion animation. `placement` uses `DropdownPlacement` for side, alignment, gap,
+and offset, with viewport fitting. `transition_duration` defaults to 600 ms;
+zero disables the transition. Theme changes preserve selection, query, and focus.
+
+Run `cargo run -p gpui-fusion --example selects` for ordinary and searchable
+fields, fixed materials, disabled options, and a large virtual list.

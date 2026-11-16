@@ -182,7 +182,7 @@ pub(super) fn paint_glass_surface(
     ));
 }
 
-pub(super) struct PlacedMenu {
+pub(crate) struct PlacedMenu {
     pub content: AnyElement,
     pub settled_trigger: AnyElement,
     pub anchor: Bounds<Pixels>,

@@ -2,12 +2,12 @@ use crate::components::motion::Spring;
 use std::time::{Duration, Instant};
 
 /// Interpolates a motion channel with continuous velocity and acceleration.
-pub(super) fn phase(value: f32, start: f32, end: f32) -> f32 {
+pub(crate) fn phase(value: f32, start: f32, end: f32) -> f32 {
     let t = ((value - start) / (end - start)).clamp(0., 1.);
     t * t * t * (t * (t * 6. - 15.) + 10.)
 }
 
-pub(super) struct MenuMotion {
+pub(crate) struct MenuMotion {
     spring: Spring,
     target: f32,
     last: Instant,

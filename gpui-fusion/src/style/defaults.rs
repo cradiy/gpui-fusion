@@ -516,11 +516,111 @@ pub fn default_styles() -> crate::style::ComponentStyles {
         glass: StylePatch::default(),
         variants: BTreeMap::new(),
     };
+    let select = Recipe {
+        parts: BTreeSet::from([
+            "panel".into(),
+            "item".into(),
+            "icon".into(),
+            "placeholder".into(),
+            "empty".into(),
+            "clear".into(),
+        ]),
+        base: StylePatch::default()
+            .w(px(240.))
+            .h(length("control_height"))
+            .px(length("spacing_inline"))
+            .rounded(length("radius_control"))
+            .bg(color("surface"))
+            .border(px(1.))
+            .border_color(color("edge"))
+            .text_color(color("foreground"))
+            .text_size(length("font_body"))
+            .hover(|s| s.border_color(color("primary_hover")))
+            .focus_visible(|s| s.border_color(color("focus")))
+            .state(State::Disabled, |s| {
+                s.bg(color("surface_disabled"))
+                    .border_color(color("edge"))
+                    .text_color(color("foreground_disabled"))
+            })
+            .part(crate::style::PartName("panel".into()), |s| {
+                s.h(px(320.))
+                    .p(px(6.))
+                    .rounded(px(16.))
+                    .bg(color("surface_raised"))
+                    .border(px(1.))
+                    .border_color(color("edge_subtle"))
+                    .text_color(color("foreground"))
+                    .text_size(length("font_body"))
+            })
+            .part(crate::style::PartName("item".into()), |s| {
+                s.h(px(36.))
+                    .px(px(10.))
+                    .gap(px(8.))
+                    .rounded(px(6.))
+                    .text_color(color("foreground"))
+                    .state(State::Selected, |s| s.text_color(color("primary")))
+                    .hover(|s| s.bg(color("fill_hover")))
+                    .state(State::Disabled, |s| {
+                        s.text_color(color("foreground_disabled"))
+                    })
+            })
+            .part(crate::style::PartName("icon".into()), |s| {
+                s.text_color(color("foreground_muted"))
+                    .state(State::Disabled, |s| {
+                        s.text_color(color("foreground_disabled"))
+                    })
+            })
+            .part(crate::style::PartName("placeholder".into()), |s| {
+                s.text_color(color("foreground_muted"))
+                    .state(State::Disabled, |s| {
+                        s.text_color(color("foreground_disabled"))
+                    })
+            })
+            .part(crate::style::PartName("empty".into()), |s| {
+                s.px(px(10.)).text_color(color("foreground_muted"))
+            })
+            .part(crate::style::PartName("clear".into()), |s| {
+                s.w(px(20.))
+                    .h(px(20.))
+                    .rounded(px(6.))
+                    .text_color(color("foreground_muted"))
+                    .focus_visible(|s| s.border(px(1.)).border_color(color("focus")))
+                    .state(State::Disabled, |s| {
+                        s.text_color(color("foreground_disabled"))
+                    })
+            }),
+        glass: StylePatch::default()
+            .rounded(px(16.))
+            .border_color(gpui::transparent_black())
+            .bg(color("surface").opacity(0.3))
+            .material(Material::Glass {
+                blur: length("glass_blur").scale(24.),
+                refraction: length("glass_refraction").scale(2.),
+                thickness: length("glass_thickness").scale(1.75),
+                edge_light: Token::<f32>::new("glass_edge_light").into(),
+                reflection: Token::<f32>::new("glass_reflection").into(),
+                edge_color: color("glass_edge_color").into(),
+                frost: Token::<f32>::new("glass_frost").scale(0.55),
+                tint: gpui::transparent_black().into(),
+                transmission: Token::<f32>::new("glass_transmission").into(),
+                frost_center: color("surface_raised").into(),
+                frost_edge: color("surface").into(),
+            })
+            .hover(|s| s.border_color(gpui::transparent_black()))
+            .focus_visible(|s| s.glass_edge_color(color("focus").opacity(0.5)))
+            .state(State::Disabled, |s| {
+                s.material(Material::Plain)
+                    .bg(color("surface_disabled"))
+                    .border_color(color("edge"))
+            }),
+        variants: BTreeMap::new(),
+    };
     crate::style::ComponentStyles {
         recipes: BTreeMap::from([
             ("button".into(), button),
             ("checkbox".into(), checkbox),
             ("radio".into(), radio),
+            ("select".into(), select),
             ("switch".into(), switch),
             ("slider".into(), slider),
             ("segmented".into(), segmented),

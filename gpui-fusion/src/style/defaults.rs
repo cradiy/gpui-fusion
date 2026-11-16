@@ -648,6 +648,47 @@ pub fn default_styles() -> crate::style::ComponentStyles {
             }),
         variants: BTreeMap::new(),
     };
+    let mut progress_variants = BTreeMap::new();
+    for name in ["success", "warning", "error"] {
+        progress_variants.insert(
+            name.into(),
+            StylePatch::default()
+                .part(crate::style::PartName("fill".into()), |s| s.bg(color(name))),
+        );
+    }
+    let progress = Recipe {
+        parts: BTreeSet::from(["track".into(), "fill".into(), "label".into()]),
+        base: StylePatch::default()
+            .gap(px(10.))
+            .text_color(color("foreground"))
+            .text_size(px(12.))
+            .part(crate::style::PartName("track".into()), |s| {
+                s.h(px(6.)).bg(color("fill_hover"))
+            })
+            .part(crate::style::PartName("fill".into()), |s| {
+                s.bg(color("primary"))
+            })
+            .part(crate::style::PartName("label".into()), |s| {
+                s.text_color(color("foreground_secondary"))
+            }),
+        glass: StylePatch::default().part(crate::style::PartName("track".into()), |s| {
+            s.bg(color("fill_hover").opacity(0.65))
+                .material(Material::Glass {
+                    blur: length("glass_blur").into(),
+                    refraction: length("glass_refraction").scale(0.18),
+                    thickness: length("glass_thickness").scale(0.16),
+                    edge_light: Token::<f32>::new("glass_edge_light").scale(0.7),
+                    reflection: Token::<f32>::new("glass_reflection").scale(0.35),
+                    edge_color: color("glass_edge_color").into(),
+                    frost: Token::<f32>::new("glass_frost").scale(0.03),
+                    tint: color("surface").opacity(0.01),
+                    transmission: Token::<f32>::new("glass_transmission").into(),
+                    frost_center: color("surface_raised").into(),
+                    frost_edge: color("surface").into(),
+                })
+        }),
+        variants: progress_variants,
+    };
     crate::style::ComponentStyles {
         recipes: BTreeMap::from([
             ("button".into(), button),
@@ -655,6 +696,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
             ("radio".into(), radio),
             ("select".into(), select),
             ("tooltip".into(), tooltip),
+            ("progress".into(), progress),
             ("switch".into(), switch),
             ("slider".into(), slider),
             ("segmented".into(), segmented),

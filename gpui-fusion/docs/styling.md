@@ -660,3 +660,33 @@ update visible hints without replacing or refocusing the wrapped control.
 
 Run `cargo run -p gpui-fusion --example tooltips` for placement, shortcut labels,
 disabled controls, and plain/glass material switching.
+
+## Progress indicators
+
+`Progress::new(label, value, cx)` creates a read-only indicator. `Some(value)`
+represents a fraction in `0..=1`; `None` represents indeterminate work. Finite
+values outside that range are clamped, and non-finite values are rejected.
+`set_value` validates before mutation. The label names the indicator for
+accessibility; `show_value(true)` displays its percentage when determinate.
+
+`shape(ProgressShape::Ring)` selects a ring; the default is `Bar`. The default
+sizes are 56 by 56 and 240 by 24 logical pixels respectively. Fusion `Styled`
+sets the outer dimensions, spacing, and typography. `ProgressPart::Track`
+configures the track color, bar corner radius, material, and thickness through
+`h`; `Fill` configures the progress color or gradient, and `Label` configures
+percentage typography. The `progress` recipe includes `success`, `warning`, and
+`error` variants. Variants do not change the numeric value.
+
+Material follows the injected theme unless fixed with `material_mode`.
+`set_material_mode(None, cx)` resumes following it. Glass bars and rings refract the track and progress fill together. Ring glass
+follows the hollow track contour and leaves the center untouched. Switching material preserves
+dimensions and progress.
+
+`animated(false)` and `set_animated` stop indeterminate motion without changing
+its meaning or assigning a numeric value. Determinate indicators do not request
+animation frames. Indeterminate indicators request frames only when their
+canvas intersects the current content mask. Ring geometry and resolved styles
+are cached across redraws.
+
+Run `cargo run -p gpui-fusion --example progress` for bars, rings, status colors,
+value updates, and plain/glass material switching.

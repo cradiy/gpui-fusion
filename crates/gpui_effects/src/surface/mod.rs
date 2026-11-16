@@ -27,7 +27,7 @@ pub use liquid_glass::{
     LiquidGlass, LiquidGlassDeformation, LiquidGlassMerge, LiquidGlassOptics, LiquidGlassPane,
     LiquidGlassShadow, LiquidGlassShape, LiquidGlassStyle, liquid_glass_shader,
     liquid_glass_shadow_shader, paint_deformed_liquid_glass, paint_liquid_glass,
-    paint_liquid_glass_union,
+    paint_liquid_glass_ring, paint_liquid_glass_union,
 };
 pub use liquid_glass_content::{
     LiquidGlassRegion, liquid_glass_content, liquid_glass_content_shader,

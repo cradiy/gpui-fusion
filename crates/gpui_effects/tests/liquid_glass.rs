@@ -643,3 +643,88 @@ fn tinted_glass_preserves_color_and_transmits_backdrop_tones() -> anyhow::Result
     );
     Ok(())
 }
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn ring_refraction_preserves_the_hole_and_outer_backdrop() -> anyhow::Result<()> {
+    use gpui::{Corners, Quad, px, rgb};
+    use gpui_effects::LiquidGlassStyle;
+
+    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(96), DevicePixels(96)))?;
+    for scale in [1., 1.5, 2.] {
+        let side = (96. * scale) as i32;
+        renderer.resize(size(DevicePixels(side), DevicePixels(side)));
+        let viewport = bounds(0., 0., side as f32, side as f32);
+        let backdrop = || {
+            let mut scene = Scene::default();
+            for column in 0..24 {
+                scene.insert_primitive(Quad {
+                    bounds: bounds(column as f32 * 4. * scale, 0., 4. * scale, 96. * scale),
+                    content_mask: ContentMask { bounds: viewport },
+                    background: rgb(if column % 2 == 0 { 0x30485d } else { 0xb7d2e8 }).into(),
+                    ..Default::default()
+                });
+            }
+            scene
+        };
+        let mut baseline = backdrop();
+        baseline.finish();
+        let expected = renderer.render_rgba(&baseline)?;
+        let style = LiquidGlassStyle::clear()
+            .thickness(px(5.))
+            .refraction(px(4.));
+        let mut scene = backdrop();
+        scene.insert_primitive(BackdropBlur {
+            order: 0,
+            bounds: viewport,
+            content_mask: ContentMask { bounds: viewport },
+            corner_radii: Corners::default(),
+            blur_radius: P(0.),
+            opacity: 1.,
+            shader: Some(liquid_glass_shader()),
+            uniforms: style
+                .ring_uniforms(px(8.), scale)
+                .with_slot(3, [0., 0., 0., 48. * scale])
+                .with_slot(6, [64. * scale, 64. * scale, 1., 48. * scale]),
+            time: 0.,
+            pointer: point(0., 0.),
+            pointer_active: false,
+        });
+        scene.finish();
+        let actual = renderer.render_rgba(&scene)?;
+        let optics = scene.backdrop_blurs[0].uniforms.slots()[0];
+        scene.backdrop_blurs[0].uniforms = scene.backdrop_blurs[0]
+            .uniforms
+            .with_slot(0, [optics[0], optics[1], 0., optics[3]]);
+        let unwarped = renderer.render_rgba(&scene)?;
+        let mut changed_band_pixels = 0;
+        for y in 0..side as usize {
+            for x in 0..side as usize {
+                let radius = ((x as f32 + 0.5 - 48. * scale).powi(2)
+                    + (y as f32 + 0.5 - 48. * scale).powi(2))
+                .sqrt()
+                    / scale;
+                let offset = (y * side as usize + x) * 4;
+                let difference = (0..3)
+                    .map(|channel| actual[offset + channel].abs_diff(expected[offset + channel]))
+                    .max()
+                    .unwrap();
+                if radius < 23. || radius > 33. {
+                    assert!(
+                        difference <= 1,
+                        "ring modified backdrop outside its band at {x},{y}, scale {scale}"
+                    );
+                } else if (0..3).any(|channel| {
+                    actual[offset + channel].abs_diff(unwarped[offset + channel]) > 8
+                }) {
+                    changed_band_pixels += 1;
+                }
+            }
+        }
+        assert!(
+            changed_band_pixels > 80,
+            "ring must visibly refract its band at scale {scale}"
+        );
+    }
+    Ok(())
+}

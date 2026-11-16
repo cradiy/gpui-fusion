@@ -35,6 +35,17 @@ fn lens_dim(value: vec3<f32>) -> vec3<f32> {
     return pow(clamp(value, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(1.0 / 2.2));
 }
 
+fn glass_lens_contour(p: vec2<f32>, size: vec2<f32>, radii: vec4<f32>,
+    deformation: vec4<f32>, ellipticity: f32, roundness: f32,
+    merged: vec4<f32>, pane: vec3<f32>, band_width: f32) -> f32 {
+    if (band_width > 0.0) {
+        let radius = min(size.x, size.y) * 0.5;
+        let width = min(band_width, radius);
+        return abs(length(p) - (radius - width * 0.5)) - width * 0.5;
+    }
+    return glass_material_contour(p, size, radii, deformation, ellipticity, roundness, merged, pane);
+}
+
 fn liquid_glass_material(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
     let optics = params.slots[0];
     let tint = params.slots[1];
@@ -50,7 +61,7 @@ fn liquid_glass_material(input: BackdropInput, params: BackdropParams) -> vec4<f
     let ellipticity = max(params.slots[6].z - 1.0, 0.0);
     let roundness = max(params.slots[11].x, 2.0);
     let merged = params.slots[12];
-    let distance = glass_material_contour(p, shape_size, radii, deformation, ellipticity, roundness, merged, params.slots[11].yzw);
+    let distance = glass_lens_contour(p, shape_size, radii, deformation, ellipticity, roundness, merged, params.slots[11].yzw, params.slots[10].y);
     if (distance >= 0.5) { return vec4<f32>(0.0); }
 
     var shading_p = p;
@@ -65,8 +76,8 @@ fn liquid_glass_material(input: BackdropInput, params: BackdropParams) -> vec4<f
     }
     let bevel = max(optics.w, 0.001);
     let eps = 1.25 * scale;
-    let dx = glass_material_contour(p + vec2<f32>(eps, 0.0), shape_size, radii, deformation, ellipticity, roundness, merged, params.slots[11].yzw);
-    let dy = glass_material_contour(p + vec2<f32>(0.0, eps), shape_size, radii, deformation, ellipticity, roundness, merged, params.slots[11].yzw);
+    let dx = glass_lens_contour(p + vec2<f32>(eps, 0.0), shape_size, radii, deformation, ellipticity, roundness, merged, params.slots[11].yzw, params.slots[10].y);
+    let dy = glass_lens_contour(p + vec2<f32>(0.0, eps), shape_size, radii, deformation, ellipticity, roundness, merged, params.slots[11].yzw, params.slots[10].y);
     let gradient = vec2<f32>(dx - distance, dy - distance) / eps;
     let direction = gradient / max(length(gradient), 0.0001);
     let height = lens_height(distance, bevel);

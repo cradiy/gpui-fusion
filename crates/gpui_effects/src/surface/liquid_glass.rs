@@ -209,6 +209,20 @@ impl LiquidGlassStyle {
         }
     }
 
+    /// Packs a hollow circular lens with the given band width in logical pixels.
+    /// The shader uses the smaller backdrop dimension as the outer diameter.
+    pub fn ring_uniforms(self, width: Pixels, scale: f32) -> EffectUniforms {
+        self.uniforms(Corners::default(), scale).with_slot(
+            10,
+            [
+                self.transmission.clamp(0., 1.),
+                width.as_f32().max(0.) * scale,
+                0.,
+                scale,
+            ],
+        )
+    }
+
     /// Packs material parameters in device pixels for backdrop rendering.
     pub fn uniforms(self, corners: Corners<Pixels>, scale: f32) -> EffectUniforms {
         let tint: Rgba = self.tint.into();
@@ -391,6 +405,36 @@ pub fn paint_liquid_glass(
         corners,
         appearance,
         LiquidGlassDeformation::default(),
+        window,
+    );
+}
+
+/// Paints a hollow circular lens inside `bounds`, with no center fill or drop shadow.
+/// The outer diameter is the smaller bound dimension; width extends inward.
+pub fn paint_liquid_glass_ring(
+    bounds: Bounds<Pixels>,
+    width: Pixels,
+    mut appearance: LiquidGlassStyle,
+    window: &mut Window,
+) {
+    let diameter = bounds.size.width.min(bounds.size.height);
+    if diameter <= px(0.) || width <= px(0.) {
+        return;
+    }
+    let bounds = Bounds::new(
+        bounds.center() - point(diameter * 0.5, diameter * 0.5),
+        gpui::size(diameter, diameter),
+    );
+    appearance.shadow.strength = 0.;
+    appearance.optics.magnification = 0.;
+    appearance.shape.merge = None;
+    paint_glass_shader(
+        bounds,
+        LiquidGlassDeformation::default(),
+        appearance.blur_radius.clamp(px(0.), px(200.)),
+        appearance.refraction.max(px(0.)) * (1. + appearance.dispersion.clamp(0., 1.) * 0.35),
+        liquid_glass_shader(),
+        appearance.ring_uniforms(width.min(diameter * 0.5), window.raster_scale_factor()),
         window,
     );
 }

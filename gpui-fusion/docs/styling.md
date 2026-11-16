@@ -566,3 +566,28 @@ and closes when its anchor is no longer visible.
 
 Run `cargo run -p gpui-fusion --example dropdown` to try theme and material
 switching, animated labels, and command activation.
+
+## Radio groups
+
+`RadioGroup::new(label, options, window, cx)` creates mutually exclusive choices.
+`RadioOption::new(value, label).disabled(true)` excludes an option from activation
+and keyboard navigation. Values must be unique and nonempty, and labels must not
+be empty. The first enabled option is selected initially; empty or fully disabled
+groups have no selection. `set_selected` selects an enabled value without invoking
+`on_change` or moving focus. Activating the current value does not emit a change.
+
+Only the circular indicator accepts pointer activation. Arrow keys select and
+focus enabled options, wrapping at either end; Home and End select the first and
+last enabled options. The selected indicator is the group's only tab stop;
+application-level Tab navigation uses `Window::focus_next` and `focus_prev`.
+`horizontal(true)` lays options out in a row; the default is a column.
+
+The `radio` recipe follows the injected theme's colors and material. `material_mode`
+fixes the material, and `set_material_mode(None, cx)` resumes theme following.
+`RadioPart::Item`, `Indicator`, `Dot`, and `Label` support Fusion `Styled` overrides.
+Use `Indicator` background and `Dot` background to color them independently.
+Selection and press springs preserve motion when interrupted; `animated(false)`
+disables transitions. Settled controls do not request animation frames.
+
+Run `cargo run -p gpui-fusion --example radios` for theme and material switching,
+vertical and horizontal groups, disabled options, and custom indicator styling.

@@ -648,6 +648,67 @@ pub fn default_styles() -> crate::style::ComponentStyles {
             }),
         variants: BTreeMap::new(),
     };
+    let toast = Recipe {
+        parts: BTreeSet::from([
+            "message".into(),
+            "description".into(),
+            "icon".into(),
+            "close".into(),
+        ]),
+        base: StylePatch::default()
+            .w(px(360.))
+            .p(px(16.))
+            .rounded(px(16.))
+            .bg(color("surface_raised"))
+            .border(px(1.))
+            .border_color(color("edge_subtle"))
+            .text_color(color("foreground"))
+            .text_size(length("font_body"))
+            .part(crate::style::PartName("description".into()), |s| {
+                s.text_color(color("foreground_secondary"))
+                    .text_size(px(12.))
+            })
+            .part(crate::style::PartName("close".into()), |s| {
+                s.text_color(color("foreground_secondary"))
+                    .border_color(color("focus"))
+            })
+            .part(crate::style::PartName("icon".into()), |s| {
+                s.text_color(color("info"))
+            }),
+        glass: StylePatch::default()
+            .bg(color("surface_raised").opacity(0.6))
+            .border_color(gpui::transparent_black())
+            .material(Material::Glass {
+                blur: length("glass_blur").scale(12.),
+                refraction: length("glass_refraction").scale(0.8),
+                thickness: length("glass_thickness").scale(0.65),
+                edge_light: Token::<f32>::new("glass_edge_light").scale(0.5),
+                reflection: Token::<f32>::new("glass_reflection").scale(0.4),
+                edge_color: color("glass_edge_color").into(),
+                frost: Token::<f32>::new("glass_frost").scale(0.25),
+                tint: gpui::transparent_black().into(),
+                transmission: Token::<f32>::new("glass_transmission").into(),
+                frost_center: color("surface_raised").into(),
+                frost_edge: color("surface").into(),
+            }),
+        variants: [
+            ("info", "info"),
+            ("success", "success"),
+            ("warning", "warning"),
+            ("error", "error"),
+            ("loading", "primary"),
+        ]
+        .into_iter()
+        .map(|(name, tone)| {
+            (
+                name.into(),
+                StylePatch::default().part(crate::style::PartName("icon".into()), |s| {
+                    s.text_color(color(tone))
+                }),
+            )
+        })
+        .collect(),
+    };
     let mut badge_variants = BTreeMap::new();
     for (name, foreground) in [
         ("success", "on_success"),
@@ -859,6 +920,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
             ("tabs".into(), tabs),
             ("accordion".into(), accordion),
             ("badge".into(), badge),
+            ("toast".into(), toast),
             ("switch".into(), switch),
             ("slider".into(), slider),
             ("segmented".into(), segmented),

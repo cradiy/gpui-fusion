@@ -791,3 +791,44 @@ when placing it in a clipped container.
 
 Run `cargo run -p gpui-fusion --example badges` for counts, status labels, dots,
 attached badges, drag dismissal, reset, and theme/material switching.
+
+## Toast
+
+Mount an entity created with `ToastHost::new(window, cx)` once in a window's root
+view. The host paints a window-space overlay and does not reserve layout space or
+block input outside the notification cards. Each window owns its own host.
+
+`show(Toast::new(message), window, cx)` returns a `ToastId`. `description` adds
+secondary text, and `kind` selects `Info`, `Success`, `Warning`, `Error`, or
+`Loading`. Regular notifications expire after four seconds. Loading notifications
+persist until updated or dismissed; `timeout(Some(duration))` or `timeout(None)`
+overrides that behavior. Set the timeout after the kind when configuring both.
+
+`update_toast(id, toast, window, cx)` replaces the content in place and restarts its
+timeout. An update during exit reverses the transition from its current position.
+`dismiss` closes one notification; `clear` closes visible notifications and removes
+queued ones. Updates and dismissal return false for unknown identifiers.
+
+The host displays up to three notifications. `max_visible` configures this limit;
+additional notifications wait in insertion order, with their timeout starting
+only when displayed. Hovering a card, focusing its close button, or deactivating
+the window pauses its remaining time. The close button supports Enter, Space,
+and Escape. Closing a keyboard-focused notification restores the focus captured
+when it was shown; showing a notification never takes focus.
+
+`placement` and `set_placement` support top/bottom placement with left, center, or
+right alignment. `margin` controls the viewport inset. Cards wrap long messages
+and constrain their width and height to the available viewport. Entries slide and
+fade; surviving cards animate to their new positions. `transition_duration`
+defaults to 320 ms. `animated(false)` and system reduced motion disable animation.
+The host uses one expiration timer; settled non-loading notifications do not
+request animation frames.
+
+The `toast` recipe and `ToastPart::{Message, Description, Icon, Close}` use Fusion
+`Styled`. Theme colors and material are followed automatically; `material_mode`
+fixes material locally and `set_material_mode(None, cx)` resumes following it.
+Scopes and instance style overrides use the shared theme model. Theme changes
+preserve messages, identifiers, and remaining time.
+
+Run `cargo run -p gpui-fusion --example toasts` for message types, queued delivery,
+loading-to-success updates, placement, and theme/material switching.

@@ -751,6 +751,26 @@ pub fn default_styles() -> crate::style::ComponentStyles {
             }),
         variants: BTreeMap::new(),
     };
+    let popover = Recipe {
+        parts: ["title", "body", "footer"]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        base: StylePatch::default()
+            .w(px(320.))
+            .p(px(18.))
+            .rounded(px(20.))
+            .bg(color("surface_raised"))
+            .text_color(color("foreground"))
+            .text_size(length("font_body"))
+            .border(px(1.))
+            .border_color(color("edge_subtle"))
+            .part(crate::style::PartName("title".into()), |s| {
+                s.text_size(px(16.))
+            }),
+        glass: dialog.glass.clone(),
+        variants: BTreeMap::new(),
+    };
     let mut badge_variants = BTreeMap::new();
     for (name, foreground) in [
         ("success", "on_success"),
@@ -964,6 +984,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
             ("badge".into(), badge),
             ("toast".into(), toast),
             ("dialog".into(), dialog),
+            ("popover".into(), popover),
             ("switch".into(), switch),
             ("slider".into(), slider),
             ("segmented".into(), segmented),

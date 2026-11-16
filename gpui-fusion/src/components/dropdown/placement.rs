@@ -60,7 +60,7 @@ impl DropdownPlacement {
         self.resolve(anchor, size, viewport).0
     }
 
-    pub(super) fn resolve(
+    pub(crate) fn resolve(
         self,
         anchor: Bounds<Pixels>,
         size: Size<Pixels>,

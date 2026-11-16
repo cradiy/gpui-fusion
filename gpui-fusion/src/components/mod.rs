@@ -5,6 +5,7 @@ pub mod checkbox;
 pub mod dialog;
 pub mod dropdown;
 pub mod input;
+pub mod popover;
 pub mod progress;
 pub mod radio;
 pub mod segmented;

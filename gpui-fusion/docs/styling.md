@@ -870,3 +870,46 @@ reduced motion disable transitions. Settled dialogs do not request animation fra
 
 Run `cargo run -p gpui-fusion --example dialogs` for an editable form, confirmation,
 long scrolling content, and theme/material switching.
+
+## Popover
+
+`Popover::new(label, content, window, cx)` owns a persistent button and an
+interactive floating panel. Mount its entity where the button belongs. The
+content callback can return existing input and selection views; `title` and
+`footer` add optional heading and action areas. `trigger()` exposes the button
+for independent styling. Keep its activation callback intact to retain toggling.
+
+`open` and `close` control visibility. `is_open` excludes the closing transition,
+while `is_visible` includes it. `PopoverEvent::Opened` is emitted when opening or
+reversing a close; `Closed(reason)` is emitted when dismissal completes. Disabling
+the popover closes it and disables the trigger.
+
+`PopoverPlacement::new(PopoverSide::...)` supports four sides. `align` selects
+start, center, or end alignment; `gap` and `offset` use logical pixels. The panel
+flips to the opposite side when it fits better, then shifts inside
+`viewport_margin` (12 pixels by default). Width and height are bounded by the
+viewport, and long body content scrolls. Placement follows the trigger during
+scrolling and layout changes. Fully clipped rendered anchors dismiss the panel;
+call `close` before removing or hiding the component's subtree.
+
+The panel focuses `initial_focus`, or its first focusable descendant. Tab cycles
+inside it; Escape closes and returns focus to the trigger. Enter remains owned
+by the focused control, and Fusion inputs protect active IME composition. Moving
+focus outside closes without stealing the new focus. Pointer dismissal passes
+the click through to the underlying control and respects nested selection menus.
+`close_on_escape` and `close_on_outside` configure those dismissal paths;
+disabling outside-pointer dismissal does not disable focus-loss dismissal.
+
+The `popover` recipe and `PopoverPart::{Title, Body, Footer}` use Fusion `Styled`.
+Theme colors and material are followed automatically. `set_material_mode`
+configures both the panel and its trigger; `None` resumes following the theme.
+Instance overrides, variants, and scopes configure the panel. Invalid styles
+prevent opening or close an active panel; `style_error` exposes the error.
+
+The panel slides from its resolved anchor side and fades over 280 ms.
+`transition_duration` configures the full duration. Reversal starts at the
+displayed position; settled panels do not request animation frames.
+`animated(false)` and system reduced motion disable transitions.
+
+Run `cargo run -p gpui-fusion --example popovers` for an export form with a nested
+selector, switches, long content, edge placement, and theme/material switching.

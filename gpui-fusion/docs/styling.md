@@ -690,3 +690,35 @@ are cached across redraws.
 
 Run `cargo run -p gpui-fusion --example progress` for bars, rings, status colors,
 value updates, and plain/glass material switching.
+
+## Tabs
+
+`Tabs::new(label, tabs, window, cx)` creates horizontal page navigation.
+`Tab::new(value, label)` defines a unique, nonempty value and visible label;
+`icon`, `disabled`, and `panel` configure each tab. The first enabled tab is
+selected. A panel accepts a retained view entity; inactive panels remain alive
+but are not rendered. Tabs without panels can drive external content through
+`on_change`.
+
+Left and Right wrap through enabled tabs; Home and End jump to the endpoints.
+Activation follows keyboard focus by default. `manual_activation(true)` keeps
+selection unchanged until Enter or Space. Only one enabled tab participates in
+Tab navigation, and the page panel is a separate focus stop. Overflowing tab
+bars scroll horizontally and reveal the tab selected by keyboard or API.
+
+`set_selected` validates the value without invoking `on_change` or moving
+focus. User activation invokes the callback only when selection changes.
+Theme and material changes preserve selection and retained panel state.
+`transition_duration` sets the shared indicator movement duration (320 ms by
+default). Position and width interpolate together and retarget from the displayed
+bounds. `animated(false)` and the system reduced-motion preference disable
+interpolation; settled controls do not request animation frames.
+
+Fusion `Styled` configures the root and `TabsPart::{List, Tab, Indicator, Icon,
+Panel}`. The `tabs` recipe uses an underline for plain material and a glass
+surface behind the selected label for glass material. `material_mode` fixes
+the material; `set_material_mode(None, cx)` resumes following the global theme.
+Scopes, variants, and part overrides use the shared style model.
+
+Run `cargo run -p gpui-fusion --example tabs` for retained panels, disabled tabs,
+manual activation, overflow, and theme/material switching.

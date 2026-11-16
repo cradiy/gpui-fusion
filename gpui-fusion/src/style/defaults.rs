@@ -648,6 +648,65 @@ pub fn default_styles() -> crate::style::ComponentStyles {
             }),
         variants: BTreeMap::new(),
     };
+    let tabs = Recipe {
+        parts: BTreeSet::from([
+            "list".into(),
+            "tab".into(),
+            "indicator".into(),
+            "icon".into(),
+            "panel".into(),
+        ]),
+        base: StylePatch::default()
+            .gap(px(12.))
+            .part(crate::style::PartName("list".into()), |s| s.gap(px(4.)))
+            .part(crate::style::PartName("tab".into()), |s| {
+                s.h(px(40.))
+                    .px(px(16.))
+                    .gap(px(8.))
+                    .rounded(px(10.))
+                    .border(px(1.))
+                    .border_color(gpui::transparent_black())
+                    .text_size(length("font_body"))
+                    .text_color(color("foreground_secondary"))
+                    .hover(|s| s.bg(color("fill_hover")))
+                    .state(State::Selected, |s| s.text_color(color("primary")))
+                    .focus_visible(|s| s.border_color(color("focus")))
+                    .state(State::Disabled, |s| {
+                        s.text_color(color("foreground_disabled"))
+                    })
+            })
+            .part(crate::style::PartName("indicator".into()), |s| {
+                s.h(px(2.)).rounded(px(1.)).bg(color("primary"))
+            })
+            .part(crate::style::PartName("panel".into()), |s| {
+                s.p(px(16.))
+                    .rounded(length("radius_control"))
+                    .bg(color("surface"))
+            }),
+        glass: StylePatch::default()
+            .part(crate::style::PartName("tab".into()), |s| {
+                s.state(State::Selected, |s| {
+                    s.bg(color("surface").opacity(0.22))
+                        .material(Material::Glass {
+                            blur: length("glass_blur").scale(8.),
+                            refraction: length("glass_refraction").into(),
+                            thickness: length("glass_thickness").scale(0.7),
+                            edge_light: Token::<f32>::new("glass_edge_light").scale(0.65),
+                            reflection: Token::<f32>::new("glass_reflection").scale(0.6),
+                            edge_color: color("glass_edge_color").into(),
+                            frost: Token::<f32>::new("glass_frost").scale(0.25),
+                            tint: gpui::transparent_black().into(),
+                            transmission: Token::<f32>::new("glass_transmission").into(),
+                            frost_center: color("surface_raised").into(),
+                            frost_edge: color("surface").into(),
+                        })
+                })
+            })
+            .part(crate::style::PartName("indicator".into()), |s| {
+                s.bg(gpui::transparent_black())
+            }),
+        ..Recipe::default()
+    };
     let mut progress_variants = BTreeMap::new();
     for name in ["success", "warning", "error"] {
         progress_variants.insert(
@@ -697,6 +756,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
             ("select".into(), select),
             ("tooltip".into(), tooltip),
             ("progress".into(), progress),
+            ("tabs".into(), tabs),
             ("switch".into(), switch),
             ("slider".into(), slider),
             ("segmented".into(), segmented),

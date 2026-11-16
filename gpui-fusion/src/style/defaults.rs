@@ -648,6 +648,49 @@ pub fn default_styles() -> crate::style::ComponentStyles {
             }),
         variants: BTreeMap::new(),
     };
+    let mut badge_variants = BTreeMap::new();
+    for (name, foreground) in [
+        ("success", "on_success"),
+        ("warning", "on_warning"),
+        ("error", "on_error"),
+        ("info", "on_info"),
+        ("accent", "on_accent"),
+    ] {
+        badge_variants.insert(
+            name.into(),
+            StylePatch::default()
+                .bg(color(name))
+                .text_color(color(foreground)),
+        );
+    }
+    badge_variants.insert(
+        "neutral".into(),
+        StylePatch::default()
+            .bg(color("fill_hover"))
+            .text_color(color("foreground")),
+    );
+    let badge = Recipe {
+        parts: BTreeSet::from(["label".into()]),
+        base: StylePatch::default()
+            .bg(color("primary"))
+            .text_color(color("on_primary"))
+            .text_size(px(11.))
+            .rounded(px(999.)),
+        glass: StylePatch::default().material(Material::Glass {
+            blur: length("glass_blur").scale(2.),
+            refraction: length("glass_refraction").scale(0.35),
+            thickness: length("glass_thickness").scale(0.3),
+            edge_light: Token::<f32>::new("glass_edge_light").scale(0.45),
+            reflection: Token::<f32>::new("glass_reflection").scale(0.35),
+            edge_color: color("glass_edge_color").into(),
+            frost: Token::<f32>::new("glass_frost").scale(0.06),
+            tint: gpui::transparent_black().into(),
+            transmission: Token::<f32>::new("glass_transmission").into(),
+            frost_center: color("surface_raised").into(),
+            frost_edge: color("surface").into(),
+        }),
+        variants: badge_variants,
+    };
     let accordion = Recipe {
         parts: BTreeSet::from([
             "item".into(),
@@ -815,6 +858,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
             ("progress".into(), progress),
             ("tabs".into(), tabs),
             ("accordion".into(), accordion),
+            ("badge".into(), badge),
             ("switch".into(), switch),
             ("slider".into(), slider),
             ("segmented".into(), segmented),

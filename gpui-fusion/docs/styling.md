@@ -752,3 +752,42 @@ following the theme. Theme changes preserve expansion and content state.
 
 Run `cargo run -p gpui-fusion --example accordion` for single and multiple expansion,
 retained inputs, content resizing, disabled sections, and material switching.
+
+## Badge
+
+`Badge::new(label, content, cx)` displays a count, dot, or short status
+label using `BadgeContent::{Count, Dot, Text}`. The first argument is its
+accessibility label. `set_content` updates the value without rebuilding the
+entity. Counts above 99 display as `99+`; `count_limit(Some(limit))` changes the
+threshold and `count_limit(None)` shows the full count. Accessibility retains the
+full numeric value. Zero counts and empty text are hidden; `show_zero(true)` or
+`set_show_zero(true, cx)` keeps zero visible.
+
+The `badge` recipe supports `success`, `warning`, `error`, `info`, `accent`, and
+`neutral` variants. Fusion `Styled` configures the surface and `BadgePart::Label`.
+Theme colors and material are followed automatically. `material_mode` fixes the
+material locally; `set_material_mode(None, cx)` resumes following the theme.
+Badges have no focus stop. Passive badges do not capture pointer input.
+
+`dismissible(true)` enables dragging from the badge itself. Nearby releases spring
+back with an elastic tether; dragging or flicking beyond `dismiss_threshold`
+(default 72 logical pixels) fades the badge away. `on_dismiss` runs once after the
+exit finishes. The host remains in place and does not receive the drag as a click.
+`reset(window, cx)` restores the badge without changing its content or emitting a
+dismissal. Updating nonempty content does not restore a dismissed badge.
+`set_dismissible(false, window, cx)` cancels the gesture and restores the badge.
+
+Return and exit animations can be grabbed again from their displayed position.
+Cancelled pointer gestures return to the anchor. `animated(false)` or system
+reduced motion makes release transitions immediate. Settled badges do not request
+animation frames. Ancestor clipping also applies to the dragged marker and tether.
+
+`Badged::new(content, badge)` overlays a badge at the top-right corner without
+reserving extra layout space. `corner(BadgeCorner::...)` selects another corner;
+`offset(point(x, y))` sets insets from those edges. The default is -6 logical pixels
+on each axis; negative values move outward. The wrapper preserves pointer events
+for its content outside an enabled draggable badge. Ancestor clipping still applies, so leave room around the host
+when placing it in a clipped container.
+
+Run `cargo run -p gpui-fusion --example badges` for counts, status labels, dots,
+attached badges, drag dismissal, reset, and theme/material switching.

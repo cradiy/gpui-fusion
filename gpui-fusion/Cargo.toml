@@ -14,6 +14,7 @@ default = ["theme-watch"]
 theme-watch = ["dep:notify", "dep:async-channel"]
 
 [dependencies]
+scheduler.workspace = true
 gpui_icons = { workspace = true, features = ["lucide-core", "lucide-common"] }
 unicode-segmentation.workspace = true
 gpui.workspace = true

@@ -281,8 +281,8 @@ fn glass_refracts_recolored_content_beyond_its_original_bounds() -> anyhow::Resu
 
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn lens_material_matches_reference_profile() -> anyhow::Result<()> {
-    use gpui::{BackdropShader, Corners, Quad, hsla, px, rgb};
+fn untinted_lens_material_matches_reference_profile() -> anyhow::Result<()> {
+    use gpui::{BackdropShader, Corners, Quad, px, rgb};
     use gpui_effects::LiquidGlassStyle;
 
     let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(384), DevicePixels(256)))?;
@@ -314,7 +314,6 @@ fn lens_material_matches_reference_profile() -> anyhow::Result<()> {
                         radius: px(48. / scale),
                         smoothness: px(40. / scale),
                     });
-                    appearance.tint = hsla(0.58, 0.6, 0.5, 0.12);
                     let uniforms = appearance
                         .uniforms(Corners::all(px(radius / scale)), scale)
                         .with_slot(3, [0., 0., 0., 192.])
@@ -557,5 +556,90 @@ fn rounded_panes_form_and_release_a_continuous_neck() -> anyhow::Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn tinted_glass_preserves_color_and_transmits_backdrop_tones() -> anyhow::Result<()> {
+    use gpui::{Corners, Quad, px, rgb};
+    use gpui_effects::LiquidGlassStyle;
+
+    let viewport = bounds(0., 0., 128., 64.);
+    let pane = bounds(8., 8., 112., 48.);
+    let mut renderer = WgpuOffscreenRenderer::new(size(DevicePixels(128), DevicePixels(64)))?;
+    let mut material = LiquidGlassStyle::clear().thickness(px(8.));
+    material.optics.top_reflection = 0.;
+    material.optics.inner_shading = 0.;
+    material.optics.environment_reflection = 0.;
+    let render = |renderer: &mut WgpuOffscreenRenderer, material: LiquidGlassStyle| {
+        let mut scene = Scene::default();
+        for (x, color) in [(0., 0x18212a), (64., 0xf5eade)] {
+            scene.insert_primitive(Quad {
+                bounds: bounds(x, 0., 64., 64.),
+                content_mask: ContentMask { bounds: viewport },
+                background: rgb(color).into(),
+                ..Default::default()
+            });
+        }
+        scene.insert_primitive(BackdropBlur {
+            order: 1,
+            bounds: pane,
+            content_mask: ContentMask { bounds: viewport },
+            corner_radii: Corners::all(P(8.)),
+            blur_radius: P(0.),
+            opacity: 1.,
+            shader: Some(liquid_glass_shader()),
+            uniforms: material.uniforms(Corners::all(px(8.)), 1.),
+            time: 0.,
+            pointer: point(0., 0.),
+            pointer_active: false,
+        });
+        scene.finish();
+        renderer.render_rgba(&scene)
+    };
+    let pixel = |pixels: &[u8], x: usize, y: usize| {
+        let i = (y * 128 + x) * 4;
+        [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+    };
+    for tint in [0x2264c8, 0xd23f65, 0x15906b] {
+        material.tint = rgb(tint).into();
+        let fixed = render(&mut renderer, material.transmission(0.))?;
+        assert_eq!(pixel(&fixed, 32, 32), pixel(&fixed, 96, 32));
+        let transmitted = render(&mut renderer, material.transmission(1.))?;
+        let dark = pixel(&transmitted, 32, 32);
+        let light = pixel(&transmitted, 96, 32);
+        let dominant = (0..3).max_by_key(|&c| light[c]).unwrap();
+        assert!(
+            light[dominant] > dark[dominant] + 20,
+            "backdrop detail: {dark:?}, {light:?}"
+        );
+        for sample in [dark, light] {
+            assert_eq!(sample[3], 255);
+            let max = *sample[..3].iter().max().unwrap() as f32;
+            let min = *sample[..3].iter().min().unwrap() as f32;
+            assert!((max - min) / max > 0.6, "washed out body color: {sample:?}");
+            let actual: gpui::Hsla = gpui::rgb(
+                (u32::from(sample[0]) << 16) | (u32::from(sample[1]) << 8) | u32::from(sample[2]),
+            )
+            .into();
+            let expected: gpui::Hsla = rgb(tint).into();
+            let delta = (actual.h - expected.h).abs();
+            assert!(delta.min(1. - delta) < 0.025, "hue changed: {sample:?}");
+        }
+        let reflected = render(&mut renderer, {
+            let mut material = material.transmission(1.);
+            material.optics.environment_reflection = 0.55;
+            material
+        })?;
+        assert_eq!(pixel(&transmitted, 32, 32), pixel(&reflected, 32, 32));
+        assert_ne!(pixel(&transmitted, 32, 10), pixel(&reflected, 32, 10));
+    }
+    material.tint.a = 0.;
+    assert_eq!(
+        render(&mut renderer, material.transmission(0.))?,
+        render(&mut renderer, material.transmission(1.))?,
+        "transmission must not alter untinted glass"
+    );
     Ok(())
 }

@@ -35,13 +35,20 @@ foreground contrast adaptations.
 | `dispersion` | `0.12` | Relative red/blue displacement gain |
 | `frost` | `0` | Frost coverage, from clear `0` to opaque `1` |
 | `frost_center`, `frost_edge` | Light neutral colors | Frost gradient across the bevel |
-| `tint` | Transparent | Color wash over the sampled material |
+| `tint` | Transparent | Body color; alpha controls tonal coloring strength |
+| `transmission` | `0.6` | Backdrop luminance influence on body color, in `0..=1` |
 | `edge_color` | Transparent | Curved edge color; alpha controls strength without changing the flat center |
 
 Lengths use logical pixels and follow the window scale factor. The height field
 has a flat interior and a rounded bevel. Refraction is confined to the outer
 35% of the bevel, with a smooth falloff. Scale lengths to the control size;
 `refraction = 0` disables bending without removing surface lighting.
+
+Tint maps backdrop luminance to a bounded range of shades of the supplied color.
+Full tint strength preserves background tonal detail when `transmission` is
+nonzero; zero transmission gives a constant body color. Bright backgrounds do
+not mix white into the body color. Reflections, edge color, and foreground
+content are applied independently. Untinted glass bypasses the tone mapping.
 
 `optics` controls interior magnification, rim intensity, top reflection,
 inner shading, caustic strength, and directional lighting. `center_blur` selects

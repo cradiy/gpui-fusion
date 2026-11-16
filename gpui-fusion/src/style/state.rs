@@ -11,6 +11,7 @@ pub enum State {
     FocusVisible,
     Disabled,
     Selected,
+    Indeterminate,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

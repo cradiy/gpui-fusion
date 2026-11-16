@@ -18,6 +18,7 @@ pub enum Material {
         edge_color: StyleValue<Hsla>,
         frost: StyleValue<f32>,
         tint: StyleValue<Hsla>,
+        transmission: StyleValue<f32>,
         frost_center: StyleValue<Hsla>,
         frost_edge: StyleValue<Hsla>,
     },
@@ -34,6 +35,7 @@ impl Material {
             edge_color,
             frost,
             tint,
+            transmission,
             frost_center,
             frost_edge,
         } = self
@@ -52,6 +54,7 @@ impl Material {
         glass.edge_color = edge_color.resolve(cx)?;
         glass.frost = frost.resolve(cx)?;
         glass.tint = tint.resolve(cx)?;
+        glass.transmission = transmission.resolve(cx)?;
         glass.frost_center = frost_center.resolve(cx)?;
         glass.frost_edge = frost_edge.resolve(cx)?;
         if [glass.blur_radius, glass.refraction, glass.thickness]
@@ -60,6 +63,7 @@ impl Material {
             || !(0. ..=1.).contains(&glass.frost)
             || !(0. ..=1.).contains(&edge_light)
             || !(0. ..=1.).contains(&glass.optics.environment_reflection)
+            || !(0. ..=1.).contains(&glass.transmission)
         {
             return Err(StyleError::new("material", "invalid optical range"));
         }

@@ -15,6 +15,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
         edge_color: Token::<Hsla>::new("glass_edge_color").into(),
         frost: Token::<f32>::new("glass_frost").scale(0.08),
         tint: color("surface").opacity(0.08),
+        transmission: Token::<f32>::new("glass_transmission").into(),
         frost_center: color("surface").into(),
         frost_edge: color("muted_surface").into(),
     };
@@ -117,6 +118,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
                     edge_color: Token::<Hsla>::new("glass_edge_color").into(),
                     frost: Token::<f32>::new("glass_frost").into(),
                     tint: gpui::transparent_black().into(),
+                    transmission: Token::<f32>::new("glass_transmission").into(),
                     frost_center: color("surface_contrast").into(),
                     frost_edge: color("edge_contrast").into(),
                 })
@@ -160,6 +162,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
                     edge_color: Token::<Hsla>::new("glass_edge_color").into(),
                     frost: Token::<f32>::new("glass_frost").into(),
                     tint: color("surface").opacity(0.04),
+                    transmission: Token::<f32>::new("glass_transmission").into(),
                     frost_center: color("surface_contrast").into(),
                     frost_edge: color("edge_contrast").into(),
                 })
@@ -212,6 +215,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
                     edge_color: Token::<Hsla>::new("glass_edge_color").into(),
                     frost: Token::<f32>::new("glass_frost").scale(0.92),
                     tint: color("surface").opacity(0.025),
+                    transmission: Token::<f32>::new("glass_transmission").into(),
                     frost_center: color("surface_raised").into(),
                     frost_edge: color("surface").into(),
                 })
@@ -228,6 +232,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
         edge_color: Token::<Hsla>::new("glass_edge_color").into(),
         frost: Token::<f32>::new("glass_frost").scale(0.24),
         tint: color("surface").opacity(0.08),
+        transmission: Token::<f32>::new("glass_transmission").into(),
         frost_center: color("surface").into(),
         frost_edge: color("muted_surface").into(),
     };
@@ -314,6 +319,84 @@ pub fn default_styles() -> crate::style::ComponentStyles {
                 }),
         )]),
     };
+    let checkbox = Recipe {
+        parts: BTreeSet::from(["indicator".into(), "mark".into(), "label".into()]),
+        base: StylePatch::default()
+            .gap(length("spacing_compact"))
+            .py(px(4.))
+            .text_size(length("font_body"))
+            .text_color(color("foreground"))
+            .state(State::Disabled, |s| {
+                s.text_color(color("foreground_disabled"))
+            })
+            .part(crate::style::PartName("indicator".into()), |s| {
+                s.w(px(20.))
+                    .h(px(20.))
+                    .rounded(px(6.))
+                    .bg(color("surface"))
+                    .border(px(1.))
+                    .border_color(color("edge_strong"))
+                    .state(State::Selected, |s| {
+                        s.bg(color("primary")).border_color(color("primary"))
+                    })
+                    .hover(|s| s.border_color(color("primary_hover")))
+                    .state(State::Selected & State::Hovered, |s| {
+                        s.bg(color("primary_hover"))
+                    })
+                    .pressed(|s| s.border_color(color("primary_pressed")))
+                    .state(State::Selected & State::Pressed, |s| {
+                        s.bg(color("primary_pressed"))
+                    })
+                    .focus_visible(|s| s.border(px(2.)).border_color(color("focus")))
+                    .state(State::Disabled, |s| {
+                        s.bg(color("surface_disabled")).border_color(color("edge"))
+                    })
+            })
+            .part(crate::style::PartName("mark".into()), |s| {
+                s.w(px(14.))
+                    .h(px(14.))
+                    .text_color(color("on_primary"))
+                    .state(State::Disabled, |s| {
+                        s.text_color(color("foreground_disabled"))
+                    })
+            }),
+        glass: StylePatch::default().part(crate::style::PartName("indicator".into()), |s| {
+            s.bg(color("surface").opacity(0.12))
+                .border_color(gpui::transparent_black())
+                .material(Material::Glass {
+                    blur: length("glass_blur").scale(2.),
+                    refraction: length("glass_refraction").scale(0.35),
+                    thickness: length("glass_thickness").scale(0.28),
+                    edge_light: Token::<f32>::new("glass_edge_light").scale(0.9),
+                    reflection: Token::<f32>::new("glass_reflection").into(),
+                    edge_color: Token::<Hsla>::new("glass_edge_color").into(),
+                    frost: Token::<f32>::new("glass_frost").scale(0.1),
+                    tint: gpui::transparent_black().into(),
+                    transmission: Token::<f32>::new("glass_transmission").into(),
+                    frost_center: color("surface_raised").into(),
+                    frost_edge: color("surface").into(),
+                })
+                .state(State::Selected, |s| {
+                    s.bg(color("primary"))
+                        .border_color(gpui::transparent_black())
+                })
+                .hover(|s| s.border_color(gpui::transparent_black()))
+                .state(State::Selected & State::Hovered, |s| {
+                    s.bg(color("primary_hover"))
+                })
+                .pressed(|s| s.border_color(gpui::transparent_black()))
+                .state(State::Selected & State::Pressed, |s| {
+                    s.bg(color("primary_pressed"))
+                })
+                .focus_visible(|s| s.border_color(color("focus")))
+                .state(State::Disabled, |s| {
+                    s.material(Material::Plain)
+                        .bg(color("surface_disabled"))
+                        .border_color(color("edge"))
+                })
+        }),
+        variants: BTreeMap::new(),
+    };
     let dropdown = Recipe {
         parts: BTreeSet::from(["item".into(), "icon".into(), "separator".into()]),
         base: StylePatch::default()
@@ -352,6 +435,7 @@ pub fn default_styles() -> crate::style::ComponentStyles {
     crate::style::ComponentStyles {
         recipes: BTreeMap::from([
             ("button".into(), button),
+            ("checkbox".into(), checkbox),
             ("switch".into(), switch),
             ("slider".into(), slider),
             ("segmented".into(), segmented),

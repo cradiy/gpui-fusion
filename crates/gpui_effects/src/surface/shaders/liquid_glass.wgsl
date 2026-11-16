@@ -11,6 +11,21 @@ fn glass_optical_layer(base: vec4<f32>, color: vec3<f32>, weight: f32) -> vec4<f
     return vec4<f32>(premultiplied / max(alpha, 0.00001), alpha);
 }
 
+fn glass_body_color(base: vec4<f32>, tint: vec4<f32>, transmission: f32) -> vec4<f32> {
+    if (tint.a <= 0.0) { return base; }
+    if (transmission <= 0.0) { return glass_optical_layer(base, tint.rgb, clamp(tint.a, 0.0, 1.0)); }
+    let background = clamp(base.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    let linear_background = vec3<f32>(backdrop_from_srgb_channel(background.r),
+        backdrop_from_srgb_channel(background.g), backdrop_from_srgb_channel(background.b));
+    let luminance = dot(linear_background, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let tone = mix(1.0, 0.35 + 0.65 * sqrt(max(luminance, 0.0)), transmission);
+    let linear_tint = vec3<f32>(backdrop_from_srgb_channel(tint.r),
+        backdrop_from_srgb_channel(tint.g), backdrop_from_srgb_channel(tint.b)) * tone;
+    let colored = vec3<f32>(backdrop_to_srgb_channel(linear_tint.r),
+        backdrop_to_srgb_channel(linear_tint.g), backdrop_to_srgb_channel(linear_tint.b));
+    return glass_optical_layer(base, colored, clamp(tint.a, 0.0, 1.0));
+}
+
 fn lens_height(distance: f32, bevel: f32) -> f32 {
     let t = pow(clamp(-distance / bevel, 0.0, 1.0), 1.0 / 1.4);
     return sqrt(max(1.0 - (1.0 - t) * (1.0 - t), 0.0));
@@ -75,7 +90,7 @@ fn liquid_glass_material(input: BackdropInput, params: BackdropParams) -> vec4<f
     color = vec4<f32>(color.rgb * lens_dim(vec3<f32>(1.0) - vec3<f32>(1.0, 1.0, 0.72) * top), color.a);
     let frost_color = mix(params.slots[14].rgb, params.slots[15].rgb, pow(depth, 1.6));
     color = glass_optical_layer(color, frost_color, surface.x);
-    color = glass_optical_layer(color, tint.rgb, clamp(tint.a, 0.0, 1.0));
+    color = glass_body_color(color, tint, clamp(params.slots[10].x, 0.0, 1.0));
 
     let up = clamp(-direction.y, 0.0, 1.0);
     let right = clamp(direction.x, 0.0, 1.0);

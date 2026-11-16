@@ -181,7 +181,7 @@ impl Element for GlassMenu {
     ) {
         if let Some(mut material) = self.style.material {
             if let Resolved::Value(color) = self.style.background {
-                material.tint = material.tint.blend(color);
+                material.tint = color.composite_over(material.tint);
             }
             paint_liquid_glass_union(state.panes, state.smoothness, material, window);
         }

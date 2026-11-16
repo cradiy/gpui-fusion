@@ -563,7 +563,7 @@ impl Render for Button {
                     }
                     glass.optics.directional_light = light_amount;
                     if glass_fill.is_none() {
-                        glass.tint = glass.tint.blend(glass_tint);
+                        glass.tint = glass_tint.composite_over(glass.tint);
                     }
                     gpui_effects::paint_liquid_glass(lens, corners, glass, window);
                     let mut overlay = gpui::quad(

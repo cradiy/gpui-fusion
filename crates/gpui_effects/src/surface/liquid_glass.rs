@@ -146,8 +146,11 @@ pub struct LiquidGlassStyle {
     pub thickness: Pixels,
     /// Relative RGB separation at refracted edges in `0..=1`; zero disables it.
     pub dispersion: f32,
-    /// Background color wash.
+    /// Body color; alpha controls the strength of tonal coloring, not surface opacity.
     pub tint: Hsla,
+    /// Backdrop luminance influence on the body color, in `0..=1`.
+    /// Zero keeps a constant body color; one gives the largest tonal variation.
+    pub transmission: f32,
     /// Edge color wash; alpha controls strength without tinting the flat center.
     pub edge_color: Hsla,
     /// Opaque frost blended over the lens, in `0..=1`.
@@ -172,6 +175,7 @@ impl LiquidGlassStyle {
             thickness: px(62.),
             dispersion: 0.12,
             tint: hsla(0., 0., 1., 0.),
+            transmission: 0.6,
             edge_color: hsla(0., 0., 1., 0.),
             frost: 0.,
             frost_center: gpui::rgb(0xf9fafc).into(),
@@ -259,7 +263,7 @@ impl LiquidGlassStyle {
                     self.optics.environment_reflection.clamp(0., 1.),
                 ],
             )
-            .with_slot(10, [0., 0., 0., scale])
+            .with_slot(10, [self.transmission.clamp(0., 1.), 0., 0., scale])
             .with_slot(
                 14,
                 [

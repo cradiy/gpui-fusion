@@ -583,3 +583,40 @@ fn glass_edge_color_cascades_without_replacing_body_material() {
         }
     }
 }
+
+#[test]
+fn glass_transmission_loads_from_theme_and_rejects_invalid_ranges() {
+    use gpui_fusion::{default_styles, default_theme, style::MaterialMode};
+    let mut theme = default_theme();
+    let styles = default_styles();
+    for transmission in [0., 0.35, 1., -0.1, 1.1] {
+        theme.style_sets.get_mut("neutral").unwrap().tokens.insert(
+            "glass_transmission".into(),
+            TokenDefinition::Number(ModeValues::constant(transmission)),
+        );
+        let loaded = Theme::from_json(&serde_json::to_string(&theme).unwrap()).unwrap();
+        let context = ResolveContext::new(&loaded, "light", "neutral").unwrap();
+        for (name, part) in [
+            ("checkbox", Some("indicator")),
+            ("button", None),
+            ("input", None),
+        ] {
+            let result = styles.recipe(name).unwrap().resolve(
+                None,
+                MaterialMode::Glass,
+                &StylePatch::default(),
+                &context,
+                &State::Selected.into(),
+                part,
+            );
+            if (0. ..=1.).contains(&transmission) {
+                assert_eq!(result.unwrap().material.unwrap().transmission, transmission);
+            } else {
+                assert!(
+                    result.is_err(),
+                    "out-of-range transmission must be rejected"
+                );
+            }
+        }
+    }
+}

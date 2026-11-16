@@ -48,6 +48,8 @@ impl MaterialTransition {
         value.blur_radius =
             self.from.blur_radius + (self.target.blur_radius - self.from.blur_radius) * t;
         value.frost = self.from.frost + (self.target.frost - self.from.frost) * t;
+        value.transmission =
+            self.from.transmission + (self.target.transmission - self.from.transmission) * t;
         value.optics.environment_reflection = self.from.optics.environment_reflection
             + (self.target.optics.environment_reflection - self.from.optics.environment_reflection)
                 * t;

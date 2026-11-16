@@ -88,6 +88,7 @@ fn glass(material: MaterialChoice, pressed: bool) -> Material {
         } else {
             0.04
         }),
+        transmission: Token::<f32>::new("glass_transmission").into(),
         frost_center: Token::<Hsla>::new("surface").into(),
         frost_edge: Token::<Hsla>::new("muted_surface").into(),
     }

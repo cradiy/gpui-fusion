@@ -140,6 +140,10 @@ pub fn default_theme() -> Theme {
         TokenDefinition::Number(ModeValues::constant(0.55)),
     );
     tokens.insert(
+        "glass_transmission".into(),
+        TokenDefinition::Number(ModeValues::constant(0.6)),
+    );
+    tokens.insert(
         "glass_frost".into(),
         TokenDefinition::Number(ModeValues::constant(1.)),
     );

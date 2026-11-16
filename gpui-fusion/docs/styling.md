@@ -4,7 +4,7 @@ Import `gpui_fusion::prelude::Styled` for Fusion's symbolic style builders.
 Components implement this trait by exposing their `StylePatch` and a typed
 `Part` identifier. GPUI's `Styled` is used only by the final style adapter.
 
-Controls are grouped under `gpui_fusion::components::{button, switch, slider, segmented}`.
+Controls are grouped under `gpui_fusion::components`.
 Theme models live in `gpui_fusion::theme`; its `catalog`, `runtime`, and `session`
 modules provide directory discovery, application injection, and synchronization.
 Symbolic values and component recipes live in `gpui_fusion::style`.
@@ -122,13 +122,21 @@ the whole component's opacity.
 `Theme.material` selects `MaterialMode::Plain` or `MaterialMode::Glass` globally.
 The component recipe supplies geometry and its glass adaptation. Generic tokens
 such as `glass_blur`, `glass_refraction`, `glass_thickness`, `glass_reflection`,
-`glass_edge_light`, `glass_edge_color`, and `glass_frost`
+`glass_edge_light`, `glass_edge_color`, `glass_transmission`, and `glass_frost`
 control material parameters through the same theme file. Components
 follow the theme by default. `.material_mode(mode)` fixes a component's material;
 `set_material_mode(None, cx)` resumes following. Fixed controls unsubscribe from
 material changes while continuing to receive color, metric, and typography
 updates. Instance `Styled` patches remain the final override, including explicit
 material parameters.
+
+Glass `tint` colors the refracted backdrop by mapping its luminance into shades
+of the supplied color. Its alpha controls coloring strength. `transmission`
+controls the amount of background luminance variation in that color, from zero
+for a constant body color to one for the largest variation. Full coloring keeps
+background detail when transmission is nonzero. Surface reflections and edge
+color are applied separately. The default recipes bind transmission to
+`glass_transmission`; both values use the range `0..=1`.
 
 `ThemeConfig` combines the theme, active color mode, and selected style set in one
 JSON document. `ThemeRuntime::install_file(path, cx)` installs it;
@@ -382,6 +390,26 @@ request animation frames; theme resolution is cached independently of the value.
 
 Run `cargo run -p gpui-fusion --example sliders` to compare standard and glass
 controls with continuous or stepped interaction and light/dark themes.
+
+## Checkboxes
+
+`Checkbox::new(label, state, window, cx)` accepts a boolean or `CheckboxState`:
+`Unchecked`, `Checked`, or `Mixed`. Clicking the indicator, pressing
+Space or Enter, and accessibility activation toggle the value. Mixed becomes
+checked on activation. `set_state` updates the value without emitting `on_change`.
+Disabled controls retain their state and use neutral colors instead of fading
+the entire control. The text label does not activate the checkbox. `label_visible(false)` keeps the accessible name.
+
+`CheckboxPart::Indicator`, `Mark`, and `Label` use Fusion `Styled`. The indicator
+owns size, shape, fill, border, and glass material; the mark owns icon size and
+color. `State::Selected` applies to checked and mixed values;
+`State::Indeterminate` applies only to mixed values. Material follows the theme
+unless fixed with `material_mode`; `set_material_mode(None, cx)` resumes following.
+Selection and press transitions preserve layout and stop requesting frames when
+settled. `animated(false)` applies changes immediately.
+
+Run `cargo run -p gpui-fusion --example checkboxes` for state, material, and theme
+switching with independent part styling.
 
 ## Segmented controls
 
